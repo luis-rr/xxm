@@ -4,8 +4,6 @@ import jax
 import jax.numpy as jnp
 import jax.scipy as jsp
 
-from xxm.hmm.core import Posterior
-
 
 def _kmeans(
     observations: jax.Array,
@@ -71,13 +69,12 @@ class PoissonEmissions(typing.NamedTuple):
     def m_step(
         self,
         observations: jax.Array,
-        posterior: 'Posterior',
+        state_marginals: jax.Array,  # (T, K)
     ) -> 'PoissonEmissions':
-        gamma = posterior.state_marginals  # (T, K)
 
-        state_counts = gamma.sum(axis=0)  # (K,)
+        state_counts = state_marginals.sum(axis=0)  # (K,)
 
-        rates = gamma.T @ observations / state_counts[:, None]
+        rates = state_marginals.T @ observations / state_counts[:, None]
 
         return PoissonEmissions(rates=rates)
 
@@ -154,19 +151,18 @@ class GaussianEmissions(typing.NamedTuple):
     def m_step(
         self,
         observations: jax.Array,
-        posterior: 'Posterior',
+        state_marginals: jax.Array,  # (T, K)
     ) -> 'GaussianEmissions':
-        gamma = posterior.state_marginals  # (T, K)
-        state_counts = gamma.sum(axis=0)  # (K,)
+        state_counts = state_marginals.sum(axis=0)  # (K,)
 
-        means = gamma.T @ observations / state_counts[:, None]  # (K, N)
+        means = state_marginals.T @ observations / state_counts[:, None]  # (K, N)
 
         residuals = observations[:, None, :] - means[None, :, :]  # (T,K,N)
 
         covariances = (
             jnp.einsum(
                 'tk,tki,tkj->kij',
-                gamma,
+                state_marginals,
                 residuals,
                 residuals,
             )

@@ -2,27 +2,34 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from xxm.discrete_chain import DiscreteChainMarginals
+from xxm.hmm.core import Model
 from xxm.hmm.emissions import GaussianEmissions, PoissonEmissions
-from xxm.hmm.inference import Model, Posterior
 from xxm.hmm.learning import (
     em_step,
     m_step_initial_probs,
     m_step_transition_probs,
 )
 
+jax.config.update('jax_enable_x64', True)
+
+RTOL = 1e-7
+ATOL = 1e-6
+
 
 def make_posterior(
     state_marginals: jnp.ndarray,
     pair_marginals: jnp.ndarray,
-) -> Posterior:
+) -> DiscreteChainMarginals:
     T, K = state_marginals.shape
 
-    return Posterior(
-        forward_probs=jnp.zeros((T, K)),
-        backward_probs=jnp.zeros((T, K)),
-        log_scaling_factors=jnp.zeros(T),
+    return DiscreteChainMarginals(
+        # forward_probs=jnp.zeros((T, K)),
+        # backward_probs=jnp.zeros((T, K)),
+        # log_scaling_factors=jnp.zeros(T),
         state_marginals=state_marginals,
         pair_marginals=pair_marginals,
+        log_normalizer=jnp.log(jnp.sum(state_marginals[0])),
     )
 
 
@@ -139,7 +146,7 @@ def test_poisson_m_step():
         rates=jnp.ones((2, 1)),
     )
 
-    result = emissions.m_step(observations, posterior)
+    result = emissions.m_step(observations, posterior.state_marginals)
 
     expected = np.array(
         [
@@ -213,7 +220,7 @@ def test_gaussian_m_step():
         covariances=jnp.ones((2, 1, 1)),
     )
 
-    result = emissions.m_step(observations, posterior)
+    result = emissions.m_step(observations, posterior.state_marginals)
 
     expected_means = np.array(
         [

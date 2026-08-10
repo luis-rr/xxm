@@ -7,6 +7,9 @@ import typing
 import jax
 import jax.numpy as jnp
 
+from ..discrete_chain import DiscreteChain
+from ..discrete_chain import DiscreteChainMarginals as Posterior
+
 
 class Emissions(typing.Protocol):
     def log_likelihoods(self, observations: jax.Array) -> jax.Array: ...
@@ -22,7 +25,7 @@ class Emissions(typing.Protocol):
     def m_step(
         self,
         observations: jax.Array,
-        posterior: Posterior,
+        state_marginals: jax.Array,
     ) -> typing.Self: ...
 
     def sample(
@@ -141,36 +144,26 @@ class Model(typing.NamedTuple):
 
         return states, observations
 
+    def _to_chain(self, observations: jax.Array) -> DiscreteChain:
+        state_log_potentials = self.emissions.log_likelihoods(observations)
 
-class Posterior(typing.NamedTuple):
-    r"""Container for forward-backward inference outputs.
+        num_time_steps = observations.shape[0]
 
-    * ``forward_probs[t]`` is the filtered state distribution
-    :math:`p(z_t \mid y_{0:t})`.
+        transition_probs = jnp.broadcast_to(
+            self.transition_probs,
+            (
+                num_time_steps - 1,
+                self.num_states,
+                self.num_states,
+            ),
+        )
 
-    * ``backward_probs[t]`` is the scaled backward message used with
-    ``forward_probs[t]`` to compute the smoothed posterior.
+        return DiscreteChain(
+            initial_probs=self.initial_probs,
+            transition_probs=transition_probs,
+            state_log_potentials=state_log_potentials,
+        )
 
-    * ``log_scaling_factors[t]`` is the predictive log likelihood
-    :math:`\log p(y_t \mid y_{0:t-1})`.
-
-    * ``state_posterior_probs[t]`` is the smoothed state distribution
-    :math:`p(z_t \mid y_{0:T-1})`.
-
-    * ``pair_posterior_probs[t, i, j]`` is the smoothed pair distribution
-    :math:`p(z_t=i, z_{t+1}=j \mid y_{0:T-1})`.
-
-    * ``log_marginal_likelihood`` is the log likelihood of the full
-    observation sequence,
-    :math:`\log p(y_{0:T-1}) = \sum_t \log p(y_t \mid y_{0:t-1})`.
-    """
-
-    forward_probs: jax.Array
-    backward_probs: jax.Array
-    log_scaling_factors: jax.Array
-
-    state_marginals: jax.Array
-    pair_marginals: jax.Array
-
-    def log_likelihood(self) -> jax.Array:
-        return self.log_scaling_factors.sum()
+    def inference(self, observations: jax.Array) -> Posterior:
+        chain = self._to_chain(observations)
+        return chain.forward_backward()

@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import jax
-from jax import numpy as jnp
 
 from .core import Model, Posterior
-from .inference import forward_backward
 
 
 def m_step_initial_probs(
@@ -44,35 +42,21 @@ def m_step_transition_probs(
     return expected_transitions / expected_transitions.sum(axis=-1, keepdims=True)
 
 
-def e_step(
-    model: Model,
-    observations: jax.Array,
-) -> Posterior:
-
-    emission_log_likelihoods = model.emissions.log_likelihoods(observations)
-
-    return forward_backward(model, emission_log_likelihoods)
-
-
-def m_step(
-    model: Model,
-    observations: jax.Array,
-    posterior: Posterior,
-) -> Model:
-
-    return Model(
-        initial_probs=m_step_initial_probs(posterior),
-        transition_probs=m_step_transition_probs(posterior),
-        emissions=model.emissions.m_step(observations, posterior),
-    )
-
-
 def em_step(
     model: Model,
     observations: jax.Array,
 ) -> tuple[Model, Posterior]:
-    posterior = e_step(model, observations)
-    new_params = m_step(model, observations, posterior)
+
+    # e step
+    posterior = model.inference(observations)
+
+    # m step
+    new_params = Model(
+        initial_probs=m_step_initial_probs(posterior),
+        transition_probs=m_step_transition_probs(posterior),
+        emissions=model.emissions.m_step(observations, posterior.state_marginals),
+    )
+
     return new_params, posterior
 
 
@@ -84,7 +68,7 @@ def fit_em(
 
     def step(model, _):
         new_model, posterior = em_step(model, observations)
-        return new_model, posterior.log_likelihood()
+        return new_model, posterior.log_normalizer
 
     model, log_likelihoods = jax.lax.scan(
         step,
