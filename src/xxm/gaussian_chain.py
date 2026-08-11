@@ -403,8 +403,14 @@ class _GaussianChainFactorization(typing.NamedTuple):
     effective_information_vectors: jax.Array
 
 
+class GaussianChainMoments(typing.NamedTuple):
+    means: jax.Array
+    second_moments: jax.Array
+    cross_second_moments: jax.Array
+
+
 class GaussianChainMarginals(typing.NamedTuple):
-    r"""Marginal moments and log normalizer of a Gaussian chain.
+    r"""Marginal central moments and log normalizer of a Gaussian chain.
 
     * ``means[t] = E[x_t]``.
     * ``covariances[t] = Cov(x_t, x_t)``.
@@ -416,6 +422,78 @@ class GaussianChainMarginals(typing.NamedTuple):
     covariances: jax.Array
     cross_covariances: jax.Array
     log_normalizer: jax.Array
+
+    def raw_second_moments(self) -> jax.Array:
+        """Return E[x_t x_t.T], shape (T, D, D)."""
+        extra = jnp.einsum(
+            'ti,tj->tij',
+            self.means,
+            self.means,
+        )
+
+        return self.covariances + extra
+
+    def raw_cross_moments(self) -> jax.Array:
+        """Return E[x_t x_{t+1}.T], shape (T - 1, D, D)."""
+        extra = jnp.einsum(
+            'ti,tj->tij',
+            self.means[:-1],
+            self.means[1:],
+        )
+
+        return self.cross_covariances + extra
+
+
+def fit_linear_gaussian(
+    inputs: jax.Array,
+    outputs: jax.Array,
+) -> tuple[jax.Array, jax.Array, jax.Array]:
+    """Fit y = A x + b + noise from paired samples."""
+    n = inputs.shape[0]
+
+    return fit_linear_gaussian_from_moments(
+        input_mean=jnp.mean(inputs, axis=0),
+        output_mean=jnp.mean(outputs, axis=0),
+        input_second_moment=inputs.T @ inputs / n,
+        output_second_moment=outputs.T @ outputs / n,
+        output_input_moment=outputs.T @ inputs / n,
+    )
+
+
+def fit_linear_gaussian_from_moments(
+    input_mean: jax.Array,
+    output_mean: jax.Array,
+    input_second_moment: jax.Array,
+    output_second_moment: jax.Array,
+    output_input_moment: jax.Array,
+) -> tuple[jax.Array, jax.Array, jax.Array]:
+    r"""Fit the linear Gaussian model
+
+        y = A x + b + \epsilon,    \epsilon ~ N(0, \Sigma),
+
+    from raw moments averaged over samples.
+
+    Parameters are E[x], E[y], E[xxᵀ], E[yyᵀ], and E[yxᵀ],
+    where the expectation includes both posterior uncertainty and
+    averaging over samples.
+
+    Returns A, b, and \Sigma.
+    """
+    covariance_xx = input_second_moment - jnp.outer(input_mean, input_mean)
+    covariance_yx = output_input_moment - jnp.outer(output_mean, input_mean)
+    covariance_yy = output_second_moment - jnp.outer(output_mean, output_mean)
+
+    matrix = jnp.linalg.solve(
+        covariance_xx,
+        covariance_yx.T,
+    ).T
+
+    bias = output_mean - matrix @ input_mean
+
+    noise_covariance = covariance_yy - covariance_yx @ matrix.T
+    noise_covariance = 0.5 * (noise_covariance + noise_covariance.T)
+
+    return matrix, bias, noise_covariance
 
 
 def _solve_from_cholesky(
