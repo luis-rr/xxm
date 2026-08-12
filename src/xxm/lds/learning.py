@@ -3,6 +3,9 @@ from __future__ import annotations
 import jax
 from jax import numpy as jnp
 
+from ..fit import Fit, FitCollection
+from ..fit import fit_many as _fit_many
+from ..fit import fit_one as _fit_one
 from ..gaussian_chain import fit_linear_gaussian_from_moments
 from .core import GaussianEmissions, Model, Posterior
 
@@ -62,7 +65,7 @@ def _m_step_emissions(
 def em_step(
     model: Model,
     observations: jax.Array,
-) -> tuple[Model, Posterior]:
+) -> tuple[Model, jax.Array]:
 
     # e step
     posterior = model.inference(observations)
@@ -72,7 +75,7 @@ def em_step(
     dynamics_matrix, dynamics_bias, dynamics_covariance = _m_step_dynamics(posterior)
     emissions = _m_step_emissions(observations, posterior)
 
-    new_params = Model(
+    new_model = Model(
         initial_mean=initial_mean,
         initial_covariance=initial_covariance,
         dynamics_matrix=dynamics_matrix,
@@ -81,27 +84,34 @@ def em_step(
         emissions=emissions,
     )
 
-    return new_params, posterior
+    return new_model, posterior.log_normalizer
 
 
 def fit_em(
     model: Model,
     observations: jax.Array,
     num_iters: int,
-) -> tuple[Model, jax.Array]:
+) -> Fit[Model]:
 
-    def step(model, _):
-        new_model, posterior = em_step(model, observations)
-        return new_model, posterior.log_normalizer
-
-    model, log_likelihoods = jax.lax.scan(
-        step,
+    return _fit_one(
         model,
-        xs=None,
-        length=num_iters,
+        observations,
+        num_iters,
+        step=em_step,
+        objective=lambda m, o: m.inference(o).log_normalizer,
     )
 
-    return model, log_likelihoods
 
+def fit_em_many(
+    models: tuple[Model, ...],
+    observations: jax.Array,
+    num_iters: int,
+) -> FitCollection[Model]:
 
-fit_em_jit = jax.jit(fit_em, static_argnames='num_iters')
+    return _fit_many(
+        models,
+        observations,
+        num_iters,
+        step=em_step,
+        objective=lambda m, o: m.inference(o).log_normalizer,
+    )

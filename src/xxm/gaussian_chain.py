@@ -490,7 +490,7 @@ def fit_linear_gaussian_from_moments(
 
     bias = output_mean - matrix @ input_mean
 
-    noise_covariance = covariance_yy - covariance_yx @ matrix.T
+    noise_covariance = covariance_yy - matrix @ covariance_yx.T
     noise_covariance = 0.5 * (noise_covariance + noise_covariance.T)
 
     return matrix, bias, noise_covariance
