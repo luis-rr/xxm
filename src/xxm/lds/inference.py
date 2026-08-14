@@ -3,11 +3,12 @@ import typing
 import jax
 from jax import numpy as jnp
 
-from ..gaussian_chain import GaussianChain
-from ..gaussian_chain import GaussianChainMarginals as Posterior
-from ..newton import NewtonSearch
+from xxm.core.gaussian.chain import GaussianChain
+from xxm.core.gaussian.chain import GaussianChainMarginals as Posterior
+from xxm.core.gaussian.emissions import LaplaceEmissionsT, QuadraticEmissionsT
+from xxm.newton import NewtonSearch
+
 from .core import Model
-from .emissions import LaplaceEmissionsT, QuadraticEmissionsT
 
 
 def inference_exact(

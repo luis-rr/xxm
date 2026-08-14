@@ -2,9 +2,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from xxm.discrete_chain import DiscreteChainMarginals
+from xxm.core.discrete.chain import DiscreteChainMarginals
+from xxm.core.discrete.emissions import GaussianEmissions, PoissonEmissions
 from xxm.hmm.core import LatentInitialModel, LatentTransitionModel, Model
-from xxm.hmm.emissions import GaussianEmissions, PoissonEmissions
 from xxm.hmm.learning import em_step
 
 jax.config.update('jax_enable_x64', True)

@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 import jax.scipy as jsp
 
-from .core import Posterior
+from xxm.hmm.core import Posterior
 
 
 class PoissonEmissions(typing.NamedTuple):

@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from xxm.gaussian_chain import (
+from xxm.core.gaussian.chain import (
     GaussianChain,
     GaussianPairPotential,
     GaussianPotential,

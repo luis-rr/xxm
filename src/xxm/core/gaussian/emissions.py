@@ -7,8 +7,9 @@ from jax import numpy as jnp
 from jax.scipy import linalg as jsp_linalg
 from jax.scipy import special as jsp_special
 
-from ..gaussian_chain import GaussianPotential
-from ..stats import gaussian, poisson
+from xxm.stats import gaussian, poisson
+
+from .chain import GaussianPotential
 
 
 class Emissions(typing.Protocol):

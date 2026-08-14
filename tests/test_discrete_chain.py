@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-import xxm.discrete_chain
+import xxm.core.discrete.chain
 
 jax.config.update('jax_enable_x64', True)
 
@@ -76,7 +76,7 @@ def _stack_static_transition(transition_probs: jax.Array, num_time_steps: int) -
 def test_forward_backward_matches_exact_enumeration() -> None:
     num_time_steps = 3
 
-    chain = xxm.discrete_chain.DiscreteChain(
+    chain = xxm.core.discrete.chain.DiscreteChain(
         initial_probs=jnp.array([0.6, 0.4]),
         transition_probs=_stack_static_transition(
             jnp.array(
@@ -145,13 +145,13 @@ def test_normalization_and_finiteness_invariants() -> None:
         )
     )
 
-    chain = xxm.discrete_chain.DiscreteChain(
+    chain = xxm.core.discrete.chain.DiscreteChain(
         initial_probs=initial_probs,
         transition_probs=transition_probs,
         state_log_potentials=state_log_potentials,
     )
 
-    messages = xxm.discrete_chain._forward_backward(chain)
+    messages = xxm.core.discrete.chain._forward_backward(chain)
 
     np.testing.assert_allclose(
         np.asarray(messages.forward_messages.sum(axis=1)),
@@ -205,7 +205,7 @@ def test_marginal_consistency_between_state_and_pair_posteriors() -> None:
         )
     )
 
-    chain = xxm.discrete_chain.DiscreteChain(
+    chain = xxm.core.discrete.chain.DiscreteChain(
         initial_probs=initial_probs,
         transition_probs=transition_probs,
         state_log_potentials=state_log_potentials,
@@ -244,13 +244,13 @@ def test_log_normalizer_matches_scaling_and_exact_enumeration() -> None:
         ]
     )
 
-    chain = xxm.discrete_chain.DiscreteChain(
+    chain = xxm.core.discrete.chain.DiscreteChain(
         initial_probs=initial_probs,
         transition_probs=transition_probs,
         state_log_potentials=state_log_potentials,
     )
 
-    messages = xxm.discrete_chain._forward_backward(chain)
+    messages = xxm.core.discrete.chain._forward_backward(chain)
     result = chain.forward_backward()
     exact_state_posterior_probs, exact_pair_posterior_probs, exact_log_marginal_likelihood = (
         _enumerate_exact_posterior(
@@ -306,7 +306,7 @@ def test_time_varying_transitions_match_exact_enumeration() -> None:
         )
     )
 
-    chain = xxm.discrete_chain.DiscreteChain(
+    chain = xxm.core.discrete.chain.DiscreteChain(
         initial_probs=initial_probs,
         transition_probs=transition_probs,
         state_log_potentials=state_log_potentials,
@@ -352,41 +352,41 @@ def test_shape_validation_raises_value_error() -> None:
     )
 
     with pytest.raises(ValueError):
-        xxm.discrete_chain.DiscreteChain(
+        xxm.core.discrete.chain.DiscreteChain(
             initial_probs=jnp.array([[0.6, 0.4]]),
             transition_probs=_stack_static_transition(jnp.array([[0.7, 0.3], [0.2, 0.8]]), 3),
             state_log_potentials=state_log_potentials,
         ).forward_backward()
 
     with pytest.raises(ValueError):
-        xxm.discrete_chain.DiscreteChain(
+        xxm.core.discrete.chain.DiscreteChain(
             initial_probs=jnp.array([0.6, 0.4]),
             transition_probs=jnp.array([[0.7, 0.3], [0.2, 0.8]]),
             state_log_potentials=state_log_potentials,
         ).forward_backward()
 
     with pytest.raises(ValueError):
-        xxm.discrete_chain.DiscreteChain(
+        xxm.core.discrete.chain.DiscreteChain(
             initial_probs=jnp.array([0.6, 0.4]),
             transition_probs=_stack_static_transition(jnp.array([[0.7, 0.3], [0.2, 0.8]]), 2),
             state_log_potentials=state_log_potentials,
         ).forward_backward()
 
-    valid_chain = xxm.discrete_chain.DiscreteChain(
+    valid_chain = xxm.core.discrete.chain.DiscreteChain(
         initial_probs=jnp.array([0.6, 0.4]),
         transition_probs=_stack_static_transition(jnp.array([[0.7, 0.3], [0.2, 0.8]]), 3),
         state_log_potentials=state_log_potentials,
     )
 
     with pytest.raises(ValueError):
-        xxm.discrete_chain._backward_pass(
+        xxm.core.discrete.chain._backward_pass(
             valid_chain,
             log_scaling_factors=jnp.ones((2,)),
         )
 
 
 def test_deterministic_transitions_concentrate_posterior_path() -> None:
-    chain = xxm.discrete_chain.DiscreteChain(
+    chain = xxm.core.discrete.chain.DiscreteChain(
         initial_probs=jnp.array([1.0, 0.0]),
         transition_probs=jnp.array(
             [
@@ -453,8 +453,8 @@ def test_forward_backward_is_jit_compatible() -> None:
         initial_probs: jax.Array,
         transition_probs: jax.Array,
         state_log_potentials: jax.Array,
-    ) -> xxm.discrete_chain.DiscreteChainMarginals:
-        return xxm.discrete_chain.DiscreteChain(
+    ) -> xxm.core.discrete.chain.DiscreteChainMarginals:
+        return xxm.core.discrete.chain.DiscreteChain(
             initial_probs=initial_probs,
             transition_probs=transition_probs,
             state_log_potentials=state_log_potentials,

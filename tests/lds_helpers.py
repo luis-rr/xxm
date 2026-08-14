@@ -1,8 +1,8 @@
 import jax
 from jax import numpy as jnp
 
+from xxm.core.gaussian.emissions import GaussianEmissions
 from xxm.lds.core import LatentDynamicsModel, LatentInitialModel, Model
-from xxm.lds.emissions import GaussianEmissions
 
 
 def make_model() -> Model[GaussianEmissions]:

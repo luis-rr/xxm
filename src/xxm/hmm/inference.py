@@ -1,7 +1,8 @@
 import jax
 from jax import numpy as jnp
 
-from ..discrete_chain import DiscreteChain
+from xxm.core.discrete.chain import DiscreteChain
+
 from .core import Model, Posterior
 
 

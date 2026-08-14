@@ -4,7 +4,7 @@ import jax
 import numpy as np
 from jax import numpy as jnp
 
-from xxm.lds.emissions import GaussianEmissions, PoissonEmissions
+from xxm.core.gaussian.emissions import GaussianEmissions, PoissonEmissions
 
 
 class MockPosterior(typing.NamedTuple):

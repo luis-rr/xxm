@@ -1,6 +1,7 @@
 """
 Damped Newton optimization for one or more independent optimization problems.
-The objective may be scalar or batched; parameter operations must follow the same objective batch shape.
+The objective may be scalar or batched; parameter operations must follow the
+same objective batch shape.
 """
 
 import typing

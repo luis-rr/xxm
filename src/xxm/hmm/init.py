@@ -1,8 +1,9 @@
 import jax
 from jax import numpy as jnp
 
+from xxm.core.discrete.emissions import GaussianEmissions, PoissonEmissions
+
 from .core import Emissions, LatentInitialModel, LatentTransitionModel, Model
-from .emissions import GaussianEmissions, PoissonEmissions
 
 
 def _kmeans(

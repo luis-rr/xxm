@@ -1,10 +1,11 @@
 import jax
 from jax import numpy as jnp
 
+from xxm.core.gaussian.emissions import GaussianEmissions, PoissonEmissions
+
 from ..fit import unstack_models
 from ..stats import gaussian, poisson
 from .core import LatentDynamicsModel, LatentInitialModel, Model
-from .emissions import GaussianEmissions, PoissonEmissions
 
 
 def _covariance(

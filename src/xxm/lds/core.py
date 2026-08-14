@@ -8,14 +8,15 @@ import jax
 from jax import numpy as jnp
 from jax.scipy import linalg as jsp_linalg
 
-from ..gaussian_chain import (
+from xxm.core.gaussian.chain import (
     GaussianChain,
     GaussianPairPotential,
     GaussianPotential,
 )
-from ..gaussian_chain import GaussianChainMarginals as Posterior
+from xxm.core.gaussian.chain import GaussianChainMarginals as Posterior
+from xxm.core.gaussian.emissions import Emissions
+
 from ..stats import gaussian
-from .emissions import Emissions
 
 EmissionsT = typing.TypeVar('EmissionsT', bound=Emissions)
 
