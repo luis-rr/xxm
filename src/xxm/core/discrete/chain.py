@@ -32,13 +32,21 @@ class DiscreteChain(typing.NamedTuple):
     def validate(self) -> None:
 
         if self.initial_probs.ndim != 1:
-            raise ValueError('initial_probs must have shape (K,)')
+            raise ValueError(
+                f'initial_probs must have shape (K,). Got shape {self.initial_probs.shape}'
+            )
 
         if self.state_log_potentials.ndim != 2:
-            raise ValueError('state_log_potentials must have shape (T, K)')
+            raise ValueError(
+                f'state_log_potentials must have shape (T, K). '
+                f'Got shape {self.state_log_potentials.shape}'
+            )
 
         if self.transition_probs.ndim != 3:
-            raise ValueError('transition_probs must have shape (T - 1, K, K)')
+            raise ValueError(
+                f'transition_probs must have shape (T - 1, K, K). '
+                f'Got shape {self.transition_probs.shape}'
+            )
 
         k = self.initial_probs.shape[0]
         t = self.state_log_potentials.shape[0]
@@ -53,7 +61,10 @@ class DiscreteChain(typing.NamedTuple):
             raise ValueError('state_log_potentials must have shape (T, K) with matching K')
 
         if self.transition_probs.shape != (max(0, t - 1), k, k):
-            raise ValueError('transition_probs must have shape (T - 1, K, K)')
+            raise ValueError(
+                f'transition_probs must have shape (T - 1, K, K). '
+                f'Got shape {self.transition_probs.shape}'
+            )
 
     @property
     def num_states(

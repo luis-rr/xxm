@@ -22,7 +22,7 @@ class Emissions(typing.Protocol):
     def sample(
         self,
         key: jax.Array,
-        state: jax.Array,
+        states: jax.Array,
     ) -> jax.Array: ...
 
     def permute(
@@ -140,35 +140,33 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     ) -> tuple[jax.Array, jax.Array]:
         """Sample latent states and observations from an HMM."""
 
-        key_initial, key_scan = jax.random.split(key)
+        key_initial, key_scan, key_observation = jax.random.split(key, 3)
 
         initial_state = self.initial.sample(key_initial)
 
         def step(carry, _):
             state, key = carry
+            key, key_transition = jax.random.split(key)
 
-            key, key_observation, key_transition = jax.random.split(
-                key,
-                3,
-            )
-
-            observation = self.emissions.sample(
-                key_observation,
-                state,
-            )
-
-            next_state = self.transitions.sample(
+            state = self.transitions.sample(
                 key_transition,
                 state,
             )
 
-            return (next_state, key), (state, observation)
+            return (state, key), state
 
-        _, (states, observations) = jax.lax.scan(
+        _, subsequent_states = jax.lax.scan(
             step,
             (initial_state, key_scan),
             xs=None,
-            length=num_steps,
+            length=num_steps - 1,
+        )
+
+        states = jnp.concatenate([initial_state[None], subsequent_states])
+
+        observations = self.emissions.sample(
+            key_observation,
+            states,
         )
 
         return states, observations

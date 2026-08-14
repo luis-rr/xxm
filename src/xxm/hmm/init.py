@@ -1,7 +1,8 @@
 import jax
 from jax import numpy as jnp
 
-from xxm.core.discrete.emissions import GaussianEmissions, PoissonEmissions
+from xxm.core.discrete.emissions import ARGaussianEmissions, GaussianEmissions, PoissonEmissions
+from xxm.stats import gaussian
 
 from .core import Emissions, LatentInitialModel, LatentTransitionModel, Model
 
@@ -80,7 +81,7 @@ def _initialize_gaussian_emissions(
     observations: jax.Array,
     num_states: int,
     key: jax.Array,
-) -> 'GaussianEmissions':
+) -> GaussianEmissions:
     assignments = _kmeans(
         observations,
         num_states,
@@ -117,6 +118,81 @@ def initialize_hmm_gaussian(
 ) -> Model:
     emissions = _initialize_gaussian_emissions(observations, num_states, key=key)
     return _initialize(num_states, emissions, self_transition_prob)
+
+
+def _initialize_ar_gaussian_emissions(
+    observations: jax.Array,
+    num_states: int,
+    lag: int,
+    key: jax.Array,
+) -> ARGaussianEmissions:
+    history = jnp.stack(
+        [observations[lag - i - 1 : observations.shape[0] - i - 1] for i in range(lag)],
+        axis=1,
+    )  # (T-L, L, N)
+
+    current = observations[lag:]  # (T-L, N)
+
+    # TODO: K-means on current clusters positions, not dynamics.
+    # Two AR states could occupy exactly the same region but have different dynamics,
+    # in which case this initialization will be bad.
+    assignments = _kmeans(
+        current,
+        num_states,
+        key,
+    )
+
+    state_weights = jax.nn.one_hot(assignments, num_states)  # (T-L, K)
+
+    num_samples, _, num_dims = history.shape
+    predictors = history.reshape(num_samples, lag * num_dims)
+
+    coefficients, biases, covariances = gaussian.fit_weighted_linear(
+        inputs=predictors,
+        outputs=current,
+        weights=state_weights,
+        ridge=1e-6,
+    )
+
+    coefficients = coefficients.reshape(
+        num_states,
+        num_dims,
+        lag,
+        num_dims,
+    )
+    coefficients = jnp.transpose(
+        coefficients,
+        (0, 2, 1, 3),
+    )  # (K, L, N, N)
+
+    covariances += 1e-6 * jnp.eye(num_dims)[None, :, :]
+
+    return ARGaussianEmissions(
+        coefficients=coefficients,
+        biases=biases,
+        covariances=covariances,
+    )
+
+
+def initialize_arhmm_gaussian(
+    num_states: int,
+    observations: jax.Array,
+    lag: int,
+    key: jax.Array,
+    self_transition_prob: float = 0.9,
+) -> Model:
+    emissions = _initialize_ar_gaussian_emissions(
+        observations,
+        num_states,
+        lag,
+        key,
+    )
+
+    return _initialize(
+        num_states,
+        emissions,
+        self_transition_prob,
+    )
 
 
 def _initialize_poisson_emissions(

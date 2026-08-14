@@ -111,14 +111,14 @@ class GaussianEmissions(typing.NamedTuple):
     def sample(
         self,
         key: jax.Array,
-        latent: jax.Array,
+        latents: jax.Array,
     ) -> jax.Array:
         """Sample an observation conditional on a latent."""
-        mean = self.readout @ latent + self.bias
+        means = latents @ self.readout.T + self.bias
 
         return jax.random.multivariate_normal(
             key,
-            mean=mean,
+            mean=means,
             cov=self.noise_covariance,
         )
 
@@ -285,10 +285,10 @@ class PoissonEmissions(typing.NamedTuple):
     def sample(
         self,
         key: jax.Array,
-        latent: jax.Array,
+        latents: jax.Array,
     ) -> jax.Array:
         """Sample an observation conditional on a latent."""
-        rate = jnp.exp(self.readout @ latent + self.bias)
+        rate = jnp.exp(latents @ self.readout.T + self.bias)
 
         return jax.random.poisson(
             key,
