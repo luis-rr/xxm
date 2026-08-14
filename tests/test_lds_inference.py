@@ -6,11 +6,12 @@ from lds_helpers import make_model, make_observations
 from xxm.lds.core import LatentDynamicsModel, LatentInitialModel, Model
 from xxm.lds.emissions import PoissonEmissions
 from xxm.lds.inference import (
-    NewtonModeSearch,
-    _laplace_objective,
+    _NewtonSearchModel,
+    _NewtonSearchParams,
     inference_exact,
     inference_laplace,
 )
+from xxm.newton import NewtonSearch
 
 
 def make_scalar_poisson_model() -> Model[PoissonEmissions]:
@@ -54,27 +55,32 @@ def test_laplace_recovers_known_scalar_map():
     np.testing.assert_allclose(posterior.means, [[0.0]], atol=1e-6)
 
 
-def test_newton_steps_do_not_decrease_the_objective():
+def test_laplace_newton_steps_do_not_decrease_objective():
     model = make_scalar_poisson_model()
     observations = jnp.array([[3.0]])
-    latent_chain = model.to_gaussian_chain(num_time_steps=1)
-    initial_latents = model.get_prior_mean_latents(num_time_steps=1)
-    initial_objective = _laplace_objective(
-        latent_chain,
-        model.emissions,
-        observations,
-        initial_latents,
-    )
-    search = NewtonModeSearch(
-        latent_chain=latent_chain,
+
+    num_time_steps = observations.shape[0]
+
+    laplace_model = _NewtonSearchModel(
+        latent_chain=model.to_gaussian_chain(num_time_steps),
         emissions=model.emissions,
         observations=observations,
+    )
+
+    initial_params = _NewtonSearchParams(
+        latents=model.get_prior_mean_latents(num_time_steps),
+    )
+
+    search = NewtonSearch[_NewtonSearchParams](
+        model=laplace_model,
         max_line_search_iters=10,
         tol=1e-6,
     )
-    state = search.initial_state(initial_latents, initial_objective)
+
+    state = search.initial_state(params=initial_params)
 
     objectives = [state.objective]
+
     for _ in range(5):
         state = search._newton_step(state)
         objectives.append(state.objective)
