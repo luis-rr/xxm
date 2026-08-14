@@ -8,140 +8,282 @@ import jax
 from jax import numpy as jnp
 from jax.scipy import linalg as jsp_linalg
 
-from ..gaussian_chain import GaussianChain, GaussianPairPotential, GaussianPotential
+from ..gaussian_chain import (
+    GaussianChain,
+    GaussianPairPotential,
+    GaussianPotential,
+)
 from ..gaussian_chain import GaussianChainMarginals as Posterior
+from ..stats import gaussian
+from .emissions import Emissions
+
+EmissionsT = typing.TypeVar('EmissionsT', bound=Emissions)
 
 
-class GaussianEmissions(typing.NamedTuple):
-    readout: jax.Array  # C, shape (N, D)
-    bias: jax.Array  # d, shape (N,)
-    noise_covariance: jax.Array  # R, shape (N, N)
+def _gaussian_log_prob_residuals(
+    residuals: jax.Array,
+    covariance: jax.Array,
+) -> jax.Array:
+    """Log probability of zero-mean Gaussian residuals with shared covariance."""
+    dimension = covariance.shape[0]
 
-    def get_potential(
+    cholesky = jsp_linalg.cholesky(
+        covariance,
+        lower=True,
+    )
+
+    whitened = jsp_linalg.solve_triangular(
+        cholesky,
+        residuals.T,
+        lower=True,
+    ).T
+
+    quadratic = jnp.sum(whitened**2, axis=1)
+
+    log_det = 2.0 * jnp.sum(jnp.log(jnp.diag(cholesky)))
+
+    return jnp.sum(-0.5 * (quadratic + log_det + dimension * jnp.log(2.0 * jnp.pi)))
+
+
+class LatentInitialModel(typing.NamedTuple):
+    mean: jax.Array
+    covariance: jax.Array
+
+    def fit_params(
         self,
-        observations: jax.Array,
-    ) -> GaussianPotential:
-        # observations: (T, N)
-        t = observations.shape[0]
-        n = observations.shape[1]
+        posterior: Posterior,
+    ) -> typing.Self:
+        r"""
+        Maximum-likelihood update of the latent model.
+        """
+        mean = posterior.means[0]
+        covariance = posterior.covariances[0]
 
-        cholesky = jnp.linalg.cholesky(self.noise_covariance)
-
-        precision = jsp_linalg.cho_solve(
-            (cholesky, True),
-            jnp.eye(n, dtype=self.noise_covariance.dtype),
-        )
-
-        centered_observations = observations - self.bias
-
-        precision_matrix = precision @ self.readout
-
-        precision_blocks = jnp.broadcast_to(
-            self.readout.T @ precision_matrix,
-            (t, self.readout.shape[1], self.readout.shape[1]),
-        )
-
-        information_vectors = centered_observations @ precision_matrix
-
-        log_det_covariance = 2.0 * jnp.sum(jnp.log(jnp.diag(cholesky)))
-
-        quadratic_terms = jnp.einsum(
-            'ti,ij,tj->t',
-            centered_observations,
-            precision,
-            centered_observations,
-        )
-
-        log_constant = jnp.sum(
-            -0.5 * quadratic_terms - 0.5 * log_det_covariance - 0.5 * n * jnp.log(2.0 * jnp.pi)
-        )
-
-        return GaussianPotential(
-            precision_blocks=precision_blocks,
-            information_vectors=information_vectors,
-            log_constant=log_constant,
+        return self.__class__(
+            mean=mean,
+            covariance=covariance,
         )
 
     def sample(
         self,
         key: jax.Array,
-        state: jax.Array,
     ) -> jax.Array:
-        """Sample an observation conditional on a state."""
-        mean = self.readout @ state + self.bias
 
         return jax.random.multivariate_normal(
             key,
-            mean=mean,
+            mean=self.mean,
+            cov=self.covariance,
+        )
+
+
+class LatentDynamicsModel(typing.NamedTuple):
+    matrix: jax.Array
+    bias: jax.Array
+    noise_covariance: jax.Array
+
+    def fit_params(
+        self,
+        posterior: Posterior,
+    ) -> typing.Self:
+        r"""
+        Maximum-likelihood update of the latent model.
+        """
+        means = posterior.means
+        second = posterior.raw_second_moments()
+        cross = posterior.raw_cross_moments()
+
+        matrix, bias, noise_covariance = gaussian.fit_linear_from_moments(
+            input_mean=jnp.mean(means[:-1], axis=0),
+            output_mean=jnp.mean(means[1:], axis=0),
+            input_second_moment=jnp.mean(second[:-1], axis=0),
+            output_second_moment=jnp.mean(second[1:], axis=0),
+            output_input_moment=jnp.mean(cross, axis=0).T,
+        )
+
+        return self.__class__(
+            matrix=matrix,
+            bias=bias,
+            noise_covariance=noise_covariance,
+        )
+
+    def next_mean(
+        self,
+        latent: jax.Array,
+    ) -> jax.Array:
+
+        return latent @ self.matrix.T + self.bias
+
+    def sample(
+        self,
+        key: jax.Array,
+        previous_latent: jax.Array,
+    ) -> jax.Array:
+        latent_mean = self.next_mean(previous_latent)
+
+        latent = jax.random.multivariate_normal(
+            key,
+            mean=latent_mean,
             cov=self.noise_covariance,
         )
 
-    # @classmethod
-    # def initialize(
-    #     cls,
-    #     observations: jax.Array,
-    #     num_states: int,
-    #     key: jax.Array,
-    # ) -> typing.Self: ...
-
-    # def m_step(
-    #     self,
-    #     observations: jax.Array,
-    #     posterior: Posterior,
-    # ) -> typing.Self: ...
+        return latent
 
 
-class Model(typing.NamedTuple):
+class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     r"""
     Container for LDS model parameters.
     """
 
-    initial_mean: jax.Array
-    initial_covariance: jax.Array
+    initial: LatentInitialModel
+    dynamics: LatentDynamicsModel
+    emissions: EmissionsT
 
-    dynamics_matrix: jax.Array
-    dynamics_bias: jax.Array
-    dynamics_noise_covariance: jax.Array
+    def sample(
+        self,
+        num_time_steps: int,
+        key: jax.Array,
+    ) -> tuple[jax.Array, jax.Array]:
+        """Sample latent and observations from the LDS."""
+        key, initial_key, initial_observation_key = jax.random.split(key, 3)
 
-    emissions: GaussianEmissions
+        initial_latent = self.initial.sample(initial_key)
 
-    # @classmethod
-    # def initialize(
-    #     cls,
-    # ) -> Model: ...  # TODO
+        def sample_step(
+            carry: tuple[jax.Array, jax.Array],
+            _: None,
+        ) -> tuple[
+            tuple[jax.Array, jax.Array],
+            tuple[jax.Array, jax.Array],
+        ]:
+            previous_latent, key = carry
 
-    def _to_chain(self, observations: jax.Array) -> GaussianChain:
-        t = observations.shape[0]
+            key, latent_key, observation_key = jax.random.split(key, 3)
 
-        observation_potential = self.emissions.get_potential(observations)
+            latent = self.dynamics.sample(latent_key, previous_latent)
+
+            observation = self.emissions.sample(observation_key, latent)
+
+            return (
+                (latent, key),
+                (latent, observation),
+            )
+
+        _, (remaining_latents, remaining_observations) = jax.lax.scan(
+            sample_step,
+            (initial_latent, key),
+            None,
+            length=num_time_steps - 1,
+        )
+
+        latents = jnp.concatenate(
+            [initial_latent[None], remaining_latents],
+            axis=0,
+        )
+
+        initial_observation = self.emissions.sample(
+            initial_observation_key,
+            initial_latent,
+        )
+
+        observations = jnp.concatenate(
+            [initial_observation[None], remaining_observations],
+            axis=0,
+        )
+
+        return latents, observations
+
+    def get_prior_mean_latents(self, num_time_steps: int) -> jax.Array:
+        """Compute the mean latent trajectory under the model's prior."""
+
+        def step(
+            latent: jax.Array,
+            _: None,
+        ) -> tuple[jax.Array, jax.Array]:
+
+            next_state = self.dynamics.next_mean(latent)
+
+            return next_state, next_state
+
+        _, remaining_latents = jax.lax.scan(
+            step,
+            self.initial.mean,
+            None,
+            length=num_time_steps - 1,
+        )
+
+        return jnp.concatenate(
+            [
+                self.initial.mean[None],
+                remaining_latents,
+            ],
+            axis=0,
+        )
+
+    def log_joint(
+        self,
+        observations: jax.Array,
+        latents: jax.Array,
+    ) -> jax.Array:
+        """Compute log p(x, y) for a latentsstrajectory."""
+
+        initial_residual = (latents[0] - self.initial.mean)[None]
+
+        initial_log_prob = _gaussian_log_prob_residuals(
+            initial_residual,
+            self.initial.covariance,
+        )
+
+        dynamics_means = self.dynamics.next_mean(latents[:-1])
+
+        dynamics_residuals = latents[1:] - dynamics_means
+
+        dynamics_log_prob = _gaussian_log_prob_residuals(
+            dynamics_residuals,
+            self.dynamics.noise_covariance,
+        )
+
+        emission_log_prob = self.emissions.log_likelihood(
+            observations,
+            latents,
+        )
+
+        return initial_log_prob + dynamics_log_prob + emission_log_prob
+
+    def to_gaussian_chain(self, num_time_steps: int) -> GaussianChain:
+        """Construct the Gaussian chain defined by the latent LDS prior."""
+        state_dim = self.initial.mean.shape[0]
 
         initial_potential = GaussianPotential.from_moments(
-            self.initial_mean, self.initial_covariance
+            self.initial.mean,
+            self.initial.covariance,
         )
 
         dynamics_potential = GaussianPairPotential.from_linear_conditional(
-            self.dynamics_matrix, self.dynamics_bias, self.dynamics_noise_covariance
+            self.dynamics.matrix,
+            self.dynamics.bias,
+            self.dynamics.noise_covariance,
         )
 
-        diagonal = observation_potential.precision_blocks
+        diagonal = jnp.zeros((num_time_steps, state_dim, state_dim), dtype=self.initial.mean.dtype)
         diagonal = diagonal.at[0].add(initial_potential.precision_blocks)
         diagonal = diagonal.at[:-1].add(dynamics_potential.left_precision)
         diagonal = diagonal.at[1:].add(dynamics_potential.right_precision)
 
-        information_vectors = observation_potential.information_vectors
+        information_vectors = jnp.zeros(
+            (num_time_steps, state_dim),
+            dtype=self.initial.mean.dtype,
+        )
         information_vectors = information_vectors.at[0].add(initial_potential.information_vectors)
         information_vectors = information_vectors.at[:-1].add(dynamics_potential.left_information)
         information_vectors = information_vectors.at[1:].add(dynamics_potential.right_information)
 
         lower_precision_blocks = jnp.broadcast_to(
             dynamics_potential.lower_precision,
-            (t - 1,) + dynamics_potential.lower_precision.shape,
+            (num_time_steps - 1,) + dynamics_potential.lower_precision.shape,
         )
 
         log_constant = (
-            observation_potential.log_constant
-            + initial_potential.log_constant
-            + (t - 1) * dynamics_potential.log_constant
+            initial_potential.log_constant + (num_time_steps - 1) * dynamics_potential.log_constant
         )
 
         return GaussianChain(
@@ -151,72 +293,19 @@ class Model(typing.NamedTuple):
             log_constant=log_constant,
         )
 
-    def inference(self, observations: jax.Array) -> Posterior:
-        chain = self._to_chain(observations)
-        return chain.forward_backward()
-
-    def sample(
+    def fit_params(
         self,
-        num_steps: int,
-        key: jax.Array,
-    ) -> tuple[jax.Array, jax.Array]:
-        """Sample states and observations from the LDS."""
-        key, initial_state_key, initial_observation_key = jax.random.split(key, 3)
+        observations: jax.Array,
+        posterior: Posterior,
+    ) -> typing.Self:
+        """Fit the parameters of the LDS given a posterior over latents."""
 
-        initial_state = jax.random.multivariate_normal(
-            initial_state_key,
-            mean=self.initial_mean,
-            cov=self.initial_covariance,
+        initial = self.initial.fit_params(posterior)
+        dynamics = self.dynamics.fit_params(posterior)
+        emissions = self.emissions.fit_params(observations, posterior)
+
+        return self.__class__(
+            initial=initial,
+            dynamics=dynamics,
+            emissions=emissions,
         )
-
-        initial_observation = self.emissions.sample(
-            initial_observation_key,
-            initial_state,
-        )
-
-        def sample_step(
-            carry: tuple[jax.Array, jax.Array],
-            _: None,
-        ) -> tuple[
-            tuple[jax.Array, jax.Array],
-            tuple[jax.Array, jax.Array],
-        ]:
-            previous_state, key = carry
-
-            key, state_key, observation_key = jax.random.split(key, 3)
-
-            state_mean = self.dynamics_matrix @ previous_state + self.dynamics_bias
-
-            state = jax.random.multivariate_normal(
-                state_key,
-                mean=state_mean,
-                cov=self.dynamics_noise_covariance,
-            )
-
-            observation = self.emissions.sample(
-                observation_key,
-                state,
-            )
-
-            return (
-                (state, key),
-                (state, observation),
-            )
-
-        _, (remaining_states, remaining_observations) = jax.lax.scan(
-            sample_step,
-            (initial_state, key),
-            None,
-            length=num_steps - 1,
-        )
-
-        states = jnp.concatenate(
-            [initial_state[None], remaining_states],
-            axis=0,
-        )
-        observations = jnp.concatenate(
-            [initial_observation[None], remaining_observations],
-            axis=0,
-        )
-
-        return states, observations

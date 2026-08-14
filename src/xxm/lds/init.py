@@ -2,8 +2,9 @@ import jax
 from jax import numpy as jnp
 
 from ..fit import unstack_models
-from ..gaussian_chain import fit_linear_gaussian
-from .core import GaussianEmissions, Model
+from ..stats import gaussian, poisson
+from .core import LatentDynamicsModel, LatentInitialModel, Model
+from .emissions import GaussianEmissions, PoissonEmissions
 
 
 def _covariance(
@@ -27,57 +28,110 @@ def _add_covariance_floor(
     )
 
 
-def _init_from_states(
+def poisson_emissions_from_latents(
     observations: jax.Array,
-    states: jax.Array,
-    covariance_floor: float,
-) -> Model:
-    """Construct an LDS from an initial latent trajectory."""
+    latents: jax.Array,
+) -> PoissonEmissions:
+    """Fit Poisson emissions to a known latent trajectory."""
 
-    # y_t = C x_t + d + noise
-    emission_matrix, emission_bias, emission_covariance = fit_linear_gaussian(
-        states,
+    observation_dim = observations.shape[1]
+    latent_dim = latents.shape[1]
+
+    # Sensible intercept-only starting point.
+    mean_rates = jnp.maximum(
+        jnp.mean(observations, axis=0),
+        1e-6,
+    )
+
+    readout = jnp.zeros(
+        (observation_dim, latent_dim),
+        dtype=latents.dtype,
+    )
+    bias = jnp.log(mean_rates)
+
+    # Known latents have zero posterior uncertainty.
+    covariances = jnp.zeros(
+        (latents.shape[0], latent_dim, latent_dim),
+        dtype=latents.dtype,
+    )
+
+    readout, bias = poisson.fit_from_moments(
+        observations=observations,
+        means=latents,
+        covariances=covariances,
+        readout=readout,
+        bias=bias,
+    )
+
+    return PoissonEmissions(
+        readout=readout,
+        bias=bias,
+    )
+
+
+def gaussian_emissions_from_latents(
+    observations: jax.Array,
+    latents: jax.Array,
+    covariance_floor: float,
+) -> GaussianEmissions:
+    """Fit Gaussian emissions to a known latent trajectory."""
+    emission_matrix, emission_bias, emission_covariance = gaussian.fit_linear(
+        latents,
         observations,
     )
+
     emission_covariance = _add_covariance_floor(
         emission_covariance,
         covariance_floor,
         reference=observations,
     )
 
-    emissions = GaussianEmissions(
+    return GaussianEmissions(
         readout=emission_matrix,
         bias=emission_bias,
         noise_covariance=emission_covariance,
     )
 
-    # x[t+1] = A x[t] + b + noise
-    dynamics_matrix, dynamics_bias, dynamics_covariance = fit_linear_gaussian(
-        states[:-1],
-        states[1:],
+
+def dynamics_from_latents(
+    latents: jax.Array,
+    covariance_floor: float,
+) -> LatentDynamicsModel:
+    """Fit linear dynamics to a known latent trajectory."""
+    dynamics_matrix, dynamics_bias, dynamics_noise_covariance = gaussian.fit_linear(
+        latents[:-1],
+        latents[1:],
     )
-    dynamics_covariance = _add_covariance_floor(
-        dynamics_covariance,
+
+    dynamics_noise_covariance = _add_covariance_floor(
+        dynamics_noise_covariance,
         covariance_floor,
-        reference=states,
+        reference=latents,
     )
+
+    return LatentDynamicsModel(
+        matrix=dynamics_matrix,
+        bias=dynamics_bias,
+        noise_covariance=dynamics_noise_covariance,
+    )
+
+
+def initial_from_latents(
+    observations: jax.Array,
+    latents: jax.Array,
+    covariance_floor: float = 1e-2,
+) -> LatentInitialModel:
+    """Construct an LDS from a known latent trajectory."""
 
     # There is only one initial state estimate, so use the overall
     # latent covariance as a reasonable scale for its uncertainty.
-    initial_mean = states[0]
-    initial_covariance = _add_covariance_floor(
-        _covariance(states),
-        covariance_floor,
-        reference=states,
-    )
-
-    return Model(
-        initial_mean=initial_mean,
-        initial_covariance=initial_covariance,
-        dynamics_matrix=dynamics_matrix,
-        dynamics_bias=dynamics_bias,
-        dynamics_noise_covariance=dynamics_covariance,
-        emissions=emissions,
+    return LatentInitialModel(
+        mean=latents[0],
+        covariance=_add_covariance_floor(
+            _covariance(latents),
+            covariance_floor,
+            reference=latents,
+        ),
     )
 
 
@@ -113,11 +167,11 @@ def _pca_states(
     return centered @ vt[:state_dim].T
 
 
-def init_pca(
+def init_pca_gaussian(
     observations: jax.Array,
     state_dim: int,
     covariance_floor: float = 1e-2,
-) -> Model:
+) -> Model[GaussianEmissions]:
     _validate_initialization(observations, state_dim)
 
     states = _pca_states(
@@ -125,22 +179,22 @@ def init_pca(
         state_dim,
     )
 
-    return _init_from_states(
-        observations,
-        states,
-        covariance_floor,
+    return Model(
+        initial=initial_from_latents(observations, states, covariance_floor),
+        dynamics=dynamics_from_latents(states, covariance_floor),
+        emissions=gaussian_emissions_from_latents(observations, states, covariance_floor),
     )
 
 
-def init_pca_many(
+def init_pca_gaussian_many(
     observations: jax.Array,
     state_dim: int,
     covariance_floors: jax.Array | None = None,
-) -> tuple[Model, ...]:
+) -> tuple[Model[GaussianEmissions], ...]:
     """Initialize multiple LDS models from PCA latent projections."""
 
     stacked = jax.vmap(
-        lambda covariance_floor: init_pca(
+        lambda covariance_floor: init_pca_gaussian(
             observations,
             state_dim,
             covariance_floor,
@@ -150,62 +204,38 @@ def init_pca_many(
     return unstack_models(stacked)
 
 
-def _random_states(
+def init_pca_poisson(
     observations: jax.Array,
     state_dim: int,
-    key: jax.Array,
-) -> jax.Array:
-    centered = observations - jnp.mean(observations, axis=0)
-
-    projection = jax.random.normal(
-        key,
-        shape=(observations.shape[1], state_dim),
-        dtype=observations.dtype,
-    )
-
-    basis, _ = jnp.linalg.qr(projection)
-
-    return centered @ basis
-
-
-def init_random(
-    observations: jax.Array,
-    state_dim: int,
-    key: jax.Array,
     covariance_floor: float = 1e-2,
-) -> Model:
+) -> Model[PoissonEmissions]:
     _validate_initialization(observations, state_dim)
 
-    states = _random_states(
+    states = _pca_states(
         observations,
         state_dim,
-        key,
     )
 
-    return _init_from_states(
-        observations,
-        states,
-        covariance_floor,
+    return Model(
+        initial=initial_from_latents(observations, states, covariance_floor),
+        dynamics=dynamics_from_latents(states, covariance_floor),
+        emissions=poisson_emissions_from_latents(observations, states),
     )
 
 
-def init_random_many(
+def init_pca_poisson_many(
     observations: jax.Array,
     state_dim: int,
-    num_models: int,
-    key: jax.Array,
-    covariance_floor: float = 1e-2,
-) -> tuple[Model, ...]:
-    """Initialize multiple LDS models from random latent projections."""
-    keys = jax.random.split(key, num_models)
+    covariance_floors: jax.Array | None = None,
+) -> tuple[Model[PoissonEmissions], ...]:
+    """Initialize multiple LDS models from PCA latent projections."""
 
     stacked = jax.vmap(
-        lambda key: init_random(
+        lambda covariance_floor: init_pca_poisson(
             observations,
             state_dim,
-            key,
             covariance_floor,
         )
-    )(keys)
+    )(covariance_floors)
 
     return unstack_models(stacked)

@@ -1,117 +1,114 @@
 from __future__ import annotations
 
+import typing
+
 import jax
-from jax import numpy as jnp
 
 from ..fit import Fit, FitCollection
 from ..fit import fit_many as _fit_many
 from ..fit import fit_one as _fit_one
-from ..gaussian_chain import fit_linear_gaussian_from_moments
-from .core import GaussianEmissions, Model, Posterior
+from .core import Model
+from .emissions import LaplaceEmissionsT, QuadraticEmissionsT
+from .inference import inference_exact, inference_laplace
+
+ModelT = typing.TypeVar('ModelT')
+PosteriorT = typing.TypeVar('PosteriorT')
 
 
-def _m_step_initial_probs(
-    posterior: Posterior,
-) -> tuple[jax.Array, jax.Array]:
-    r"""
-    Maximum-likelihood update of the initial-state probabilities.
-    """
-    initial_mean = posterior.means[0]
-    initial_covariance = posterior.covariances[0]
-
-    return initial_mean, initial_covariance
-
-
-def _m_step_dynamics(
-    posterior: Posterior,
-) -> tuple[jax.Array, jax.Array, jax.Array]:
-    means = posterior.means
-    second = posterior.raw_second_moments()
-    cross = posterior.raw_cross_moments()
-
-    return fit_linear_gaussian_from_moments(
-        input_mean=jnp.mean(means[:-1], axis=0),
-        output_mean=jnp.mean(means[1:], axis=0),
-        input_second_moment=jnp.mean(second[:-1], axis=0),
-        output_second_moment=jnp.mean(second[1:], axis=0),
-        output_input_moment=jnp.mean(cross, axis=0).T,
-    )
-
-
-def _m_step_emissions(
-    observations: jax.Array,
-    posterior: Posterior,
-) -> GaussianEmissions:
-    means = posterior.means
-    second = posterior.raw_second_moments()
-
-    num_samples = observations.shape[0]
-
-    readout, bias, noise_covariance = fit_linear_gaussian_from_moments(
-        input_mean=jnp.mean(means, axis=0),
-        output_mean=jnp.mean(observations, axis=0),
-        input_second_moment=jnp.mean(second, axis=0),
-        output_second_moment=observations.T @ observations / num_samples,
-        output_input_moment=observations.T @ means / num_samples,
-    )
-
-    return GaussianEmissions(
-        readout=readout,
-        bias=bias,
-        noise_covariance=noise_covariance,
-    )
+InferenceFn = typing.Callable[[ModelT, jax.Array], PosteriorT]
 
 
 def em_step(
-    model: Model,
+    model: Model[QuadraticEmissionsT],
     observations: jax.Array,
-) -> tuple[Model, jax.Array]:
+) -> tuple[Model[QuadraticEmissionsT], jax.Array]:
 
-    # e step
-    posterior = model.inference(observations)
+    posterior = inference_exact(
+        model,
+        observations,
+    )
 
-    # m step
-    initial_mean, initial_covariance = _m_step_initial_probs(posterior)
-    dynamics_matrix, dynamics_bias, dynamics_covariance = _m_step_dynamics(posterior)
-    emissions = _m_step_emissions(observations, posterior)
+    new_model = model.fit_params(
+        observations,
+        posterior,
+    )
 
-    new_model = Model(
-        initial_mean=initial_mean,
-        initial_covariance=initial_covariance,
-        dynamics_matrix=dynamics_matrix,
-        dynamics_bias=dynamics_bias,
-        dynamics_noise_covariance=dynamics_covariance,
-        emissions=emissions,
+    return new_model, posterior.log_normalizer
+
+
+def laplace_em_step(
+    model: Model[LaplaceEmissionsT],
+    observations: jax.Array,
+) -> tuple[Model[LaplaceEmissionsT], jax.Array]:
+
+    posterior = inference_laplace(
+        model,
+        observations,
+    )
+
+    new_model = model.fit_params(
+        observations,
+        posterior,
     )
 
     return new_model, posterior.log_normalizer
 
 
 def fit_em(
-    model: Model,
+    model: Model[QuadraticEmissionsT],
     observations: jax.Array,
     num_iters: int,
-) -> Fit[Model]:
+) -> Fit[Model[QuadraticEmissionsT]]:
 
     return _fit_one(
         model,
         observations,
         num_iters,
         step=em_step,
-        objective=lambda m, o: m.inference(o).log_normalizer,
+        objective=lambda m, o: inference_exact(m, o).log_normalizer,
     )
 
 
 def fit_em_many(
-    models: tuple[Model, ...],
+    models: tuple[Model[QuadraticEmissionsT], ...],
     observations: jax.Array,
     num_iters: int,
-) -> FitCollection[Model]:
+) -> FitCollection[Model[QuadraticEmissionsT]]:
 
     return _fit_many(
         models,
         observations,
         num_iters,
         step=em_step,
-        objective=lambda m, o: m.inference(o).log_normalizer,
+        objective=lambda m, o: inference_exact(m, o).log_normalizer,
+    )
+
+
+def fit_laplace_em(
+    model: Model[LaplaceEmissionsT],
+    observations: jax.Array,
+    num_iters: int,
+) -> Fit[Model[LaplaceEmissionsT]]:
+
+    return _fit_one(
+        model,
+        observations,
+        num_iters,
+        step=laplace_em_step,
+        objective=lambda m, o: inference_laplace(m, o).log_normalizer,
+    )
+
+
+def fit_laplace_em_many(
+    models: tuple[Model[LaplaceEmissionsT], ...],
+    observations: jax.Array,
+    num_iters: int,
+) -> FitCollection[Model[LaplaceEmissionsT]]:
+
+    return _fit_many(
+        models,
+        observations,
+        num_iters,
+        step=laplace_em_step,
+        objective=lambda m, o: inference_laplace(m, o).log_normalizer,
     )
