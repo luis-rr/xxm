@@ -116,9 +116,9 @@ class LatentDynamicsModel(typing.NamedTuple):
     def sample(
         self,
         key: jax.Array,
-        previous_latent: jax.Array,
+        previous: jax.Array,
     ) -> jax.Array:
-        latent_mean = self.next_mean(previous_latent)
+        latent_mean = self.next_mean(previous)
 
         latent = jax.random.multivariate_normal(
             key,

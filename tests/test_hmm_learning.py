@@ -3,13 +3,9 @@ import jax.numpy as jnp
 import numpy as np
 
 from xxm.discrete_chain import DiscreteChainMarginals
-from xxm.hmm.core import Model
+from xxm.hmm.core import LatentInitialModel, LatentTransitionModel, Model
 from xxm.hmm.emissions import GaussianEmissions, PoissonEmissions
-from xxm.hmm.learning import (
-    em_step,
-    m_step_initial_probs,
-    m_step_transition_probs,
-)
+from xxm.hmm.learning import em_step
 
 jax.config.update('jax_enable_x64', True)
 
@@ -45,9 +41,11 @@ def test_m_step_initial_probs():
         pair_marginals=jnp.zeros((2, 2, 2)),
     )
 
-    result = m_step_initial_probs(posterior)
+    initial = LatentInitialModel(initial_probs=jnp.array([0.5, 0.5]))
 
-    np.testing.assert_allclose(result, [0.8, 0.2])
+    result = initial.fit_params(posterior=posterior)
+
+    np.testing.assert_allclose(result.initial_probs, [0.8, 0.2])
 
 
 def test_m_step_transition_probs():
@@ -77,7 +75,9 @@ def test_m_step_transition_probs():
         pair_marginals,
     )
 
-    result = m_step_transition_probs(posterior)
+    transitions = LatentTransitionModel(transition_probs=jnp.array([[0.5, 0.5], [0.5, 0.5]]))
+
+    result = transitions.fit_params(posterior)
 
     expected = np.array(
         [
@@ -86,8 +86,8 @@ def test_m_step_transition_probs():
         ]
     )
 
-    np.testing.assert_allclose(result, expected)
-    np.testing.assert_allclose(result.sum(axis=1), 1.0)
+    np.testing.assert_allclose(result.transition_probs, expected)
+    np.testing.assert_allclose(result.transition_probs.sum(axis=1), 1.0)
 
 
 def test_poisson_log_likelihoods():
@@ -146,7 +146,7 @@ def test_poisson_m_step():
         rates=jnp.ones((2, 1)),
     )
 
-    result = emissions.m_step(observations, posterior.state_marginals)
+    result = emissions.fit_params(observations, posterior)
 
     expected = np.array(
         [
@@ -220,7 +220,7 @@ def test_gaussian_m_step():
         covariances=jnp.ones((2, 1, 1)),
     )
 
-    result = emissions.m_step(observations, posterior.state_marginals)
+    result = emissions.fit_params(observations, posterior)
 
     expected_means = np.array(
         [
@@ -254,12 +254,14 @@ def test_gaussian_m_step():
 
 def test_em_step_is_jit_compatible():
     model = Model(
-        initial_probs=jnp.array([0.5, 0.5]),
-        transition_probs=jnp.array(
-            [
-                [0.8, 0.2],
-                [0.2, 0.8],
-            ]
+        initial=LatentInitialModel(initial_probs=jnp.array([0.5, 0.5])),
+        transitions=LatentTransitionModel(
+            transition_probs=jnp.array(
+                [
+                    [0.8, 0.2],
+                    [0.2, 0.8],
+                ]
+            )
         ),
         emissions=PoissonEmissions(
             rates=jnp.array(
@@ -280,17 +282,17 @@ def test_em_step_is_jit_compatible():
         ]
     )
 
-    eager_model, eager_posterior = em_step(model, observations)
-    jitted_model, jitted_posterior = jax.jit(em_step)(model, observations)
+    eager_model, eager_log_likelihood = em_step(model, observations)
+    jitted_model, jitted_log_likelihood = jax.jit(em_step)(model, observations)
 
     np.testing.assert_allclose(
-        jitted_model.initial_probs,
-        eager_model.initial_probs,
+        jitted_model.initial.initial_probs,
+        eager_model.initial.initial_probs,
         atol=1e-6,
     )
     np.testing.assert_allclose(
-        jitted_model.transition_probs,
-        eager_model.transition_probs,
+        jitted_model.transitions.transition_probs,
+        eager_model.transitions.transition_probs,
         atol=1e-6,
     )
     np.testing.assert_allclose(
@@ -299,7 +301,7 @@ def test_em_step_is_jit_compatible():
         atol=1e-6,
     )
     np.testing.assert_allclose(
-        jitted_posterior.state_marginals,
-        eager_posterior.state_marginals,
+        jitted_log_likelihood,
+        eager_log_likelihood,
         atol=1e-6,
     )

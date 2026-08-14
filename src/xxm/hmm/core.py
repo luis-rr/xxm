@@ -7,25 +7,16 @@ import typing
 import jax
 import jax.numpy as jnp
 
-from ..discrete_chain import DiscreteChain
 from ..discrete_chain import DiscreteChainMarginals as Posterior
 
 
 class Emissions(typing.Protocol):
     def log_likelihoods(self, observations: jax.Array) -> jax.Array: ...
 
-    @classmethod
-    def initialize(
-        cls,
-        observations: jax.Array,
-        num_states: int,
-        key: jax.Array,
-    ) -> typing.Self: ...
-
-    def m_step(
+    def fit_params(
         self,
         observations: jax.Array,
-        state_marginals: jax.Array,
+        posterior: Posterior,
     ) -> typing.Self: ...
 
     def sample(
@@ -40,7 +31,84 @@ class Emissions(typing.Protocol):
     ) -> typing.Self: ...
 
 
-class Model(typing.NamedTuple):
+EmissionsT = typing.TypeVar('EmissionsT', bound=Emissions)
+
+
+class LatentInitialModel(typing.NamedTuple):
+    initial_probs: jax.Array
+
+    def sample(self, key: jax.Array) -> jax.Array:
+        return jax.random.categorical(
+            key,
+            jnp.log(self.initial_probs),
+        )
+
+    def permute(self, permutation: jax.Array) -> LatentInitialModel:
+        return LatentInitialModel(
+            initial_probs=self.initial_probs[permutation],
+        )
+
+    def fit_params(
+        self,
+        posterior: Posterior,
+    ) -> typing.Self:
+        r"""
+        Maximum-likelihood update of the initial-state probabilities.
+
+        .. math::
+
+            \pi_k^{new}
+            = p(z_0 = k \mid y)
+            = \gamma_0(k)
+
+        where ``gamma`` is the smoothed state posterior.
+        """
+        return self.__class__(initial_probs=posterior.state_marginals[0])
+
+
+class LatentTransitionModel(typing.NamedTuple):
+    transition_probs: jax.Array
+
+    def sample(
+        self,
+        key: jax.Array,
+        previous: jax.Array,
+    ) -> jax.Array:
+        return jax.random.categorical(
+            key,
+            jnp.log(self.transition_probs[previous]),
+        )
+
+    def permute(self, permutation: jax.Array) -> LatentTransitionModel:
+        return LatentTransitionModel(
+            transition_probs=self.transition_probs[permutation][:, permutation],
+        )
+
+    def fit_params(
+        self,
+        posterior: Posterior,
+    ) -> typing.Self:
+        r"""
+        Maximum-likelihood update of the transition probabilities.
+
+        .. math::
+
+            A_{ij}^{new}
+            =
+            \frac{\sum_t \xi_t(i,j)}
+                {\sum_t \sum_j \xi_t(i,j)}
+
+        where ``xi[t, i, j]`` is the posterior probability of the
+        transition ``i -> j`` at time ``t``.
+        """
+        expected_transitions = posterior.pair_marginals.sum(axis=0)
+
+        return self.__class__(
+            transition_probs=expected_transitions / expected_transitions.sum(axis=-1, keepdims=True)
+        )
+
+
+class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     r"""
     Container for HMM model parameters.
 
@@ -49,55 +117,19 @@ class Model(typing.NamedTuple):
     * ``emission_log_likelihoods[t, k] = \log p(y_t \mid z_t=k)``
     """
 
-    initial_probs: jax.Array
-    transition_probs: jax.Array
-    emissions: Emissions
+    initial: LatentInitialModel
+    transitions: LatentTransitionModel
+    emissions: EmissionsT
 
     @property
     def num_states(self) -> int:
-        return self.initial_probs.shape[0]
-
-    @classmethod
-    def initialize(
-        cls,
-        observations: jax.Array,
-        num_states: int,
-        emissions_type: type[Emissions],
-        key: jax.Array,
-        self_transition_prob: float = 0.9,
-    ) -> Model:
-        initial_probs = jnp.ones(num_states) / num_states
-
-        off_diagonal_prob = (1.0 - self_transition_prob) / (num_states - 1)
-
-        transition_probs = jnp.full(
-            (num_states, num_states),
-            off_diagonal_prob,
-        )
-        transition_probs = transition_probs.at[jnp.diag_indices(num_states)].set(
-            self_transition_prob
-        )
-
-        emissions = emissions_type.initialize(
-            observations,
-            num_states,
-            key,
-        )
-
-        return cls(
-            initial_probs=initial_probs,
-            transition_probs=transition_probs,
-            emissions=emissions,
-        )
+        return self.initial.initial_probs.shape[0]
 
     def permute(self, permutation: jax.Array) -> Model:
 
         return Model(
-            initial_probs=self.initial_probs[permutation],
-            transition_probs=self.transition_probs[
-                permutation[:, None],
-                permutation[None, :],
-            ],
+            initial=self.initial.permute(permutation),
+            transitions=self.transitions.permute(permutation),
             emissions=self.emissions.permute(permutation),
         )
 
@@ -110,10 +142,7 @@ class Model(typing.NamedTuple):
 
         key_initial, key_scan = jax.random.split(key)
 
-        initial_state = jax.random.categorical(
-            key_initial,
-            jnp.log(self.initial_probs),
-        )
+        initial_state = self.initial.sample(key_initial)
 
         def step(carry, _):
             state, key = carry
@@ -128,9 +157,9 @@ class Model(typing.NamedTuple):
                 state,
             )
 
-            next_state = jax.random.categorical(
+            next_state = self.transitions.sample(
                 key_transition,
-                jnp.log(self.transition_probs[state]),
+                state,
             )
 
             return (next_state, key), (state, observation)
@@ -144,26 +173,15 @@ class Model(typing.NamedTuple):
 
         return states, observations
 
-    def _to_chain(self, observations: jax.Array) -> DiscreteChain:
-        state_log_potentials = self.emissions.log_likelihoods(observations)
+    def fit_params(
+        self,
+        observations: jax.Array,
+        posterior: Posterior,
+    ) -> Model[EmissionsT]:
+        """Fit the model parameters to the given observations and posterior."""
 
-        num_time_steps = observations.shape[0]
-
-        transition_probs = jnp.broadcast_to(
-            self.transition_probs,
-            (
-                num_time_steps - 1,
-                self.num_states,
-                self.num_states,
-            ),
+        return Model(
+            initial=self.initial.fit_params(posterior),
+            transitions=self.transitions.fit_params(posterior),
+            emissions=self.emissions.fit_params(observations, posterior),
         )
-
-        return DiscreteChain(
-            initial_probs=self.initial_probs,
-            transition_probs=transition_probs,
-            state_log_potentials=state_log_potentials,
-        )
-
-    def inference(self, observations: jax.Array) -> Posterior:
-        chain = self._to_chain(observations)
-        return chain.forward_backward()

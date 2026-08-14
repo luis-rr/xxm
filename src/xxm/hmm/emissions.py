@@ -4,53 +4,7 @@ import jax
 import jax.numpy as jnp
 import jax.scipy as jsp
 
-
-def _kmeans(
-    observations: jax.Array,
-    num_states: int,
-    key: jax.Array,
-    num_iters: int = 20,
-) -> jax.Array:
-    """Return hard K-means assignments with shape (T,)."""
-    initial_indices = jax.random.choice(
-        key,
-        observations.shape[0],
-        shape=(num_states,),
-        replace=False,
-    )
-    initial_centers = observations[initial_indices]
-
-    def step(_, centers):
-        distances = jnp.sum(
-            (observations[:, None, :] - centers[None, :, :]) ** 2,
-            axis=-1,
-        )
-        assignments = jnp.argmin(distances, axis=1)
-
-        weights = jax.nn.one_hot(assignments, num_states)
-        counts = weights.sum(axis=0)
-
-        new_centers = weights.T @ observations / jnp.maximum(counts[:, None], 1)
-
-        # Keep the old center if a cluster is empty.
-        return jnp.where(
-            (counts > 0)[:, None],
-            new_centers,
-            centers,
-        )
-
-    centers = jax.lax.fori_loop(
-        0,
-        num_iters,
-        step,
-        initial_centers,
-    )
-
-    distances = jnp.sum(
-        (observations[:, None, :] - centers[None, :, :]) ** 2,
-        axis=-1,
-    )
-    return jnp.argmin(distances, axis=1)
+from .core import Posterior
 
 
 class PoissonEmissions(typing.NamedTuple):
@@ -66,39 +20,8 @@ class PoissonEmissions(typing.NamedTuple):
             axis=-1,
         )
 
-    def m_step(
-        self,
-        observations: jax.Array,
-        state_marginals: jax.Array,  # (T, K)
-    ) -> 'PoissonEmissions':
-
-        state_counts = state_marginals.sum(axis=0)  # (K,)
-
-        rates = state_marginals.T @ observations / state_counts[:, None]
-
-        return PoissonEmissions(rates=rates)
-
-    @classmethod
-    def initialize(
-        cls,
-        observations: jax.Array,
-        num_states: int,
-        key: jax.Array,
-    ) -> 'PoissonEmissions':
-        assignments = _kmeans(
-            observations,
-            num_states,
-            key,
-        )
-
-        weights = jax.nn.one_hot(assignments, num_states)
-        counts = weights.sum(axis=0)
-
-        rates = weights.T @ observations / jnp.maximum(counts[:, None], 1)
-
-        rates = jnp.maximum(rates, 1e-8)
-
-        return cls(rates=rates)
+    def fit_params(self, observations: jax.Array, posterior: Posterior) -> 'PoissonEmissions':
+        return self.__class__(posterior.weighted_means(observations))
 
     def permute(
         self,
@@ -148,11 +71,13 @@ class GaussianEmissions(typing.NamedTuple):
 
         return -0.5 * (n_dims * jnp.log(2 * jnp.pi) + log_det[None, :] + mahalanobis)
 
-    def m_step(
+    def fit_params(
         self,
         observations: jax.Array,
-        state_marginals: jax.Array,  # (T, K)
+        posterior: Posterior,
     ) -> 'GaussianEmissions':
+
+        state_marginals = posterior.state_marginals  # (T, K)
         state_counts = state_marginals.sum(axis=0)  # (K,)
 
         means = state_marginals.T @ observations / state_counts[:, None]  # (K, N)
@@ -183,40 +108,6 @@ class GaussianEmissions(typing.NamedTuple):
             key,
             self.means[state],
             self.covariances[state],
-        )
-
-    @classmethod
-    def initialize(
-        cls,
-        observations: jax.Array,
-        num_states: int,
-        key: jax.Array,
-    ) -> 'GaussianEmissions':
-        assignments = _kmeans(
-            observations,
-            num_states,
-            key,
-        )
-
-        weights = jax.nn.one_hot(assignments, num_states)
-        counts = weights.sum(axis=0)
-
-        means = weights.T @ observations / jnp.maximum(counts[:, None], 1)
-
-        residuals = observations[:, None, :] - means[None, :, :]
-
-        covariances = jnp.einsum(
-            'tk,tki,tkj->kij',
-            weights,
-            residuals,
-            residuals,
-        ) / jnp.maximum(counts[:, None, None], 1)
-
-        covariances += 1e-6 * jnp.eye(observations.shape[-1])[None, :, :]
-
-        return cls(
-            means=means,
-            covariances=covariances,
         )
 
     def permute(
