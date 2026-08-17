@@ -312,6 +312,7 @@ def fit_linear_from_marginals(
 ) -> LinearPoissonFit:
     """Fit a Poisson linear model from Gaussian input marginals.
 
+    Predictors are centered internally for numerical conditioning.
     ``ridge`` penalizes coefficients relative to the average weighted
     log likelihood; the bias is not penalized.
     """
@@ -321,9 +322,17 @@ def fit_linear_from_marginals(
             dtype=observations.dtype,
         )
 
+    weight_sum = jnp.sum(sample_weights)
+
+    center = jnp.sum(sample_weights[:, None] * means, axis=0) / jnp.maximum(weight_sum, 1e-8)
+    centered_means = means - center
+
+    # b + C x = (b + C center) + C (x - center)
+    centered_bias = bias + coefficients @ center
+
     model = _NewtonSearchModel(
         observations=observations,
-        means=means,
+        means=centered_means,
         covariances=covariances,
         sample_weights=sample_weights,
         ridge=ridge,
@@ -331,7 +340,7 @@ def fit_linear_from_marginals(
 
     initial_params = _NewtonSearchParams(
         coefficients=coefficients,
-        bias=bias,
+        bias=centered_bias,
     )
 
     search = NewtonSearch[_NewtonSearchParams](
@@ -340,11 +349,17 @@ def fit_linear_from_marginals(
         tol=tol,
     )
 
-    final = search.optimize(params=initial_params, max_iter=max_iter)
+    final = search.optimize(
+        params=initial_params,
+        max_iter=max_iter,
+    )
+
+    # Convert the intercept back to the original predictor coordinates.
+    bias = final.params.bias - final.params.coefficients @ center
 
     return LinearPoissonFit(
         coefficients=final.params.coefficients,
-        bias=final.params.bias,
+        bias=bias,
     )
 
 
