@@ -33,7 +33,7 @@ from xxm.hmm.core import Posterior
 from xxm.stats import gaussian, poisson
 
 
-def _lagged_observations(
+def lagged_observations(
     observations: jax.Array,
     lag: int,
     num_dims: int,
@@ -63,7 +63,7 @@ class ARGaussianEmissions(typing.NamedTuple):
         return self.coefficients.shape[-1]
 
     def conditional_means(self, observations: jax.Array) -> jax.Array:
-        history = _lagged_observations(
+        history = lagged_observations(
             observations,
             lag=self.lag,
             num_dims=self.num_dims,
@@ -100,7 +100,7 @@ class ARGaussianEmissions(typing.NamedTuple):
         observations: jax.Array,
         posterior: Posterior,
     ) -> typing.Self:
-        history = _lagged_observations(
+        history = lagged_observations(
             observations,
             lag=self.lag,
             num_dims=self.num_dims,
@@ -205,7 +205,7 @@ class ARPoissonEmissions(typing.NamedTuple):
         return self.coefficients.shape[-1]
 
     def log_rates(self, observations: jax.Array) -> jax.Array:
-        history = _lagged_observations(
+        history = lagged_observations(
             observations,
             lag=self.lag,
             num_dims=self.num_dims,
@@ -241,7 +241,7 @@ class ARPoissonEmissions(typing.NamedTuple):
         observations: jax.Array,
         posterior: Posterior,
     ) -> typing.Self:
-        history = _lagged_observations(
+        history = lagged_observations(
             observations,
             lag=self.lag,
             num_dims=self.num_dims,

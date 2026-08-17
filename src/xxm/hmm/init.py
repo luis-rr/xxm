@@ -5,7 +5,11 @@ from xxm.core.discrete.emissions import (
     GaussianEmissions,
     PoissonEmissions,
 )
-from xxm.core.discrete.emissions_ar import ARGaussianEmissions, ARPoissonEmissions
+from xxm.core.discrete.emissions_ar import (
+    ARGaussianEmissions,
+    ARPoissonEmissions,
+    lagged_observations,
+)
 from xxm.stats import gaussian, poisson
 
 from .core import Emissions, LatentInitialModel, LatentTransitionModel, Model
@@ -135,32 +139,49 @@ def initialize_hmm_gaussian(
     return _initialize(num_states, emissions, self_transition_prob)
 
 
+def _initialize_ar_state_weights(
+    predictors: jax.Array,
+    current: jax.Array,
+    num_states: int,
+    key: jax.Array,
+) -> jax.Array:
+    """Initialize AR states by clustering histories together with current observations."""
+    features = jnp.concatenate(
+        [predictors, current],
+        axis=-1,
+    )
+
+    assignments = _kmeans(
+        features,
+        num_states,
+        key,
+    )
+
+    return jax.nn.one_hot(assignments, num_states)
+
+
 def _initialize_ar_gaussian_emissions(
     observations: jax.Array,
     num_states: int,
     lag: int,
     key: jax.Array,
 ) -> ARGaussianEmissions:
-    history = jnp.stack(
-        [observations[lag - i - 1 : observations.shape[0] - i - 1] for i in range(lag)],
-        axis=1,
-    )  # (T-L, L, N)
+    history = lagged_observations(
+        observations,
+        lag=lag,
+        num_dims=observations.shape[-1],
+    )
+    current = observations[lag:]
 
-    current = observations[lag:]  # (T-L, N)
+    num_samples, _, num_dims = history.shape
+    predictors = history.reshape(num_samples, lag * num_dims)
 
-    # TODO: K-means on current clusters positions, not dynamics.
-    # Two AR states could occupy exactly the same region but have different dynamics,
-    # in which case this initialization will be bad.
-    assignments = _kmeans(
+    state_weights = _initialize_ar_state_weights(
+        predictors,
         current,
         num_states,
         key,
     )
-
-    state_weights = jax.nn.one_hot(assignments, num_states)  # (T-L, K)
-
-    num_samples, _, num_dims = history.shape
-    predictors = history.reshape(num_samples, lag * num_dims)
 
     coefficients, biases, covariances = gaussian.fit_weighted_linear(
         inputs=predictors,
@@ -178,7 +199,7 @@ def _initialize_ar_gaussian_emissions(
     coefficients = jnp.transpose(
         coefficients,
         (0, 2, 1, 3),
-    )  # (K, L, N, N)
+    )
 
     covariances += 1e-6 * jnp.eye(num_dims)[None, :, :]
 
@@ -247,23 +268,22 @@ def _initialize_ar_poisson_emissions(
     lag: int,
     key: jax.Array,
 ) -> ARPoissonEmissions:
-    current = observations[lag:]  # (T-L, N)
-
-    history = jnp.stack(
-        [observations[lag - i - 1 : observations.shape[0] - i - 1] for i in range(lag)],
-        axis=1,
-    )  # (T-L, L, N)
+    history = lagged_observations(
+        observations,
+        lag=lag,
+        num_dims=observations.shape[-1],
+    )
+    current = observations[lag:]
 
     num_samples, _, num_dims = history.shape
     predictors = history.reshape(num_samples, lag * num_dims)
 
-    assignments = _kmeans(
+    state_weights = _initialize_ar_state_weights(
+        predictors,
         current,
         num_states,
         key,
     )
-
-    state_weights = jax.nn.one_hot(assignments, num_states)
 
     counts = state_weights.sum(axis=0)
     rates = state_weights.T @ current / jnp.maximum(counts[:, None], 1)

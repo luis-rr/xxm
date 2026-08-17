@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from xxm.core.discrete.chain import DiscreteChainMarginals
-from xxm.core.discrete.emissions_ar import ARGaussianEmissions, _lagged_observations
+from xxm.core.discrete.emissions_ar import ARGaussianEmissions, lagged_observations
 
 ATOL = 1e-6
 FIT_ATOL = 2e-5
@@ -37,7 +37,7 @@ def test_ar_gaussian_lagged_observations():
         ]
     )
 
-    history = _lagged_observations(observations, lag=emissions.lag, num_dims=emissions.num_dims)
+    history = lagged_observations(observations, lag=emissions.lag, num_dims=emissions.num_dims)
 
     expected = jnp.array(
         [
