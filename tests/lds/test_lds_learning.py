@@ -1,7 +1,7 @@
 import jax
 import numpy as np
-from lds_helpers import make_model, make_observations
 
+from tests.lds.lds_helpers import make_model, make_observations
 from xxm.lds.learning import em_step, fit_em
 
 

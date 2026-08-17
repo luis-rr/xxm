@@ -1,6 +1,7 @@
 import jax
 from jax import numpy as jnp
-from lds_helpers import make_model
+
+from tests.lds.lds_helpers import make_model
 
 
 def test_dynamics_next_mean_applies_matrix_and_bias():

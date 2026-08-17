@@ -56,11 +56,11 @@ def poisson_emissions_from_latents(
         dtype=latents.dtype,
     )
 
-    readout, bias = poisson.fit_from_moments(
+    readout, bias = poisson.fit_linear_from_marginals(
         observations=observations,
         means=latents,
         covariances=covariances,
-        readout=readout,
+        coefficients=readout,
         bias=bias,
     )
 

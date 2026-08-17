@@ -1,6 +1,16 @@
+import typing
+
 import jax
 import jax.numpy as jnp
-from jax.scipy import linalg as jsp_linalg
+import jax.scipy as jsp
+
+
+class LinearGaussianFit(typing.NamedTuple):
+    """Parameters of a fitted linear Gaussian model."""
+
+    coefficients: jax.Array
+    bias: jax.Array
+    covariance: jax.Array
 
 
 def log_likelihoods(
@@ -8,11 +18,12 @@ def log_likelihoods(
     means: jax.Array,  # (1 or T, K, N)
     covariances: jax.Array,  # (K, N, N)
 ) -> jax.Array:
+    """Gaussian log likelihood for each time and state."""
     residuals = observations[:, None, :] - means  # (T, K, N)
 
     chol = jnp.linalg.cholesky(covariances)  # (K, N, N)
 
-    solved = jsp_linalg.solve_triangular(
+    solved = jsp.linalg.solve_triangular(
         chol[None, :, :, :],
         residuals[..., None],
         lower=True,
@@ -62,7 +73,7 @@ def fit_linear_from_moments(
     output_second_moment: jax.Array,
     output_input_moment: jax.Array,
     ridge: float = 0.0,
-) -> tuple[jax.Array, jax.Array, jax.Array]:
+) -> LinearGaussianFit:
     r"""Fit the linear Gaussian model
 
         y = A x + b + \epsilon,    \epsilon ~ N(0, \Sigma),
@@ -71,42 +82,50 @@ def fit_linear_from_moments(
 
     Parameters are E[x], E[y], E[xxᵀ], E[yyᵀ], and E[yxᵀ],
     where the expectation includes both posterior uncertainty and
-    averaging over samples.
-
-    Returns A, b, and \Sigma.
+    averaging over samples. Leading batch dimensions are supported.
     """
-    covariance_xx = input_second_moment - jnp.outer(input_mean, input_mean)
-    covariance_yx = output_input_moment - jnp.outer(output_mean, input_mean)
-    covariance_yy = output_second_moment - jnp.outer(output_mean, output_mean)
+    input_covariance = input_second_moment - input_mean[..., :, None] * input_mean[..., None, :]
 
-    covariance_xx = covariance_xx + ridge * jnp.eye(
-        covariance_xx.shape[-1],
-        dtype=covariance_xx.dtype,
+    output_input_covariance = (
+        output_input_moment - output_mean[..., :, None] * input_mean[..., None, :]
     )
+
+    output_covariance = output_second_moment - output_mean[..., :, None] * output_mean[..., None, :]
+
+    identity = jnp.eye(
+        input_covariance.shape[-1],
+        dtype=input_covariance.dtype,
+    )
+    regularized_input_covariance = input_covariance + ridge * identity
 
     coefficients = jnp.linalg.solve(
-        covariance_xx,
-        covariance_yx.T,
-    ).T
+        regularized_input_covariance,
+        jnp.swapaxes(output_input_covariance, -2, -1),
+    )
+    coefficients = jnp.swapaxes(coefficients, -2, -1)
 
-    bias = output_mean - coefficients @ input_mean
+    bias = output_mean - jnp.einsum('...np,...p->...n', coefficients, input_mean)
 
     noise_covariance = (
-        covariance_yy
-        - coefficients @ covariance_yx.T
-        - covariance_yx @ coefficients.T
-        + coefficients @ covariance_xx @ coefficients.T
+        output_covariance
+        - coefficients @ jnp.swapaxes(output_input_covariance, -2, -1)
+        - output_input_covariance @ jnp.swapaxes(coefficients, -2, -1)
+        + coefficients @ input_covariance @ jnp.swapaxes(coefficients, -2, -1)
     )
-    noise_covariance = 0.5 * (noise_covariance + noise_covariance.T)
+    noise_covariance = 0.5 * (noise_covariance + jnp.swapaxes(noise_covariance, -2, -1))
 
-    return coefficients, bias, noise_covariance
+    return LinearGaussianFit(
+        coefficients=coefficients,
+        bias=bias,
+        covariance=noise_covariance,
+    )
 
 
 def fit_linear(
     inputs: jax.Array,
     outputs: jax.Array,
     ridge: float = 0.0,
-) -> tuple[jax.Array, jax.Array, jax.Array]:
+) -> LinearGaussianFit:
     """Fit y = A x + b + noise from paired samples."""
     n = inputs.shape[0]
 
@@ -126,34 +145,28 @@ def fit_weighted_linear(
     weights: jax.Array,  # (T, K)
     eps: float = 1e-8,
     ridge: float = 0.0,
-) -> tuple[jax.Array, jax.Array, jax.Array]:
+) -> LinearGaussianFit:
     """Fit weighted linear Gaussian models y = A x + b + noise."""
     counts = jnp.maximum(weights.sum(axis=0), eps)  # (K,)
 
-    input_means = jnp.einsum('tk,tp->kp', weights, inputs) / counts[:, None]  # (K, P)
-
-    output_means = jnp.einsum('tk,tn->kn', weights, outputs) / counts[:, None]  # (K, N)
+    input_means = jnp.einsum('tk,tp->kp', weights, inputs) / counts[:, None]
+    output_means = jnp.einsum('tk,tn->kn', weights, outputs) / counts[:, None]
 
     input_second_moments = (
         jnp.einsum('tk,tp,tq->kpq', weights, inputs, inputs) / counts[:, None, None]
-    )  # (K, P, P)
-
+    )
     output_second_moments = (
         jnp.einsum('tk,tn,tm->knm', weights, outputs, outputs) / counts[:, None, None]
-    )  # (K, N, N)
-
+    )
     output_input_moments = (
         jnp.einsum('tk,tn,tp->knp', weights, outputs, inputs) / counts[:, None, None]
-    )  # (K, N, P)
+    )
 
-    return jax.vmap(
-        fit_linear_from_moments,
-        in_axes=(0, 0, 0, 0, 0, None),
-    )(
-        input_means,
-        output_means,
-        input_second_moments,
-        output_second_moments,
-        output_input_moments,
-        ridge,
+    return fit_linear_from_moments(
+        input_mean=input_means,
+        output_mean=output_means,
+        input_second_moment=input_second_moments,
+        output_second_moment=output_second_moments,
+        output_input_moment=output_input_moments,
+        ridge=ridge,
     )

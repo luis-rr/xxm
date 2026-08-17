@@ -1,8 +1,8 @@
 import jax
 import numpy as np
 from jax import numpy as jnp
-from lds_helpers import make_model, make_observations
 
+from tests.lds.lds_helpers import make_model, make_observations
 from xxm.core.gaussian.emissions import PoissonEmissions
 from xxm.lds.core import LatentDynamicsModel, LatentInitialModel, Model
 from xxm.lds.inference import (

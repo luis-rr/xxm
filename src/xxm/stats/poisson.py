@@ -1,54 +1,139 @@
 import typing
 
 import jax
-from jax import numpy as jnp
+import jax.numpy as jnp
+import jax.scipy as jsp
 
 from ..newton import NewtonSearch
 
 
-def log_likelihood_batched(mean, covariances, observations, readout, bias) -> jax.Array:
-    """Expected Poisson log likelihood for each neuron."""
+class LinearPoissonFit(typing.NamedTuple):
+    """Parameters of a fitted linear Poisson model."""
 
-    linear_predictors = mean @ readout.T + bias
+    coefficients: jax.Array
+    bias: jax.Array
 
-    variance_correction = 0.5 * jnp.einsum(
-        'ni,tij,nj->tn',
-        readout,
-        covariances,
-        readout,
+
+class _PredictorMoments(typing.NamedTuple):
+    """Mean and variance of Gaussian linear predictors."""
+
+    mean: jax.Array
+    variance: jax.Array | float
+
+
+def _linear_predictor_moments(
+    means: jax.Array,
+    covariances: jax.Array | None,
+    coefficients: jax.Array,
+    bias: jax.Array,
+) -> _PredictorMoments:
+    """Compute moments of linear predictors under Gaussian inputs."""
+    mean = means @ coefficients.T + bias
+
+    if covariances is None:
+        variance = 0.0
+    else:
+        variance = jnp.einsum(
+            'ni,tij,nj->tn',
+            coefficients,
+            covariances,
+            coefficients,
+        )
+
+    return _PredictorMoments(mean=mean, variance=variance)
+
+
+def _expected_poisson_log_prob(
+    observations: jax.Array,
+    mean_log_rates: jax.Array,
+    variance_log_rates: jax.Array | float = 0.0,
+) -> jax.Array:
+    """Expected elementwise Poisson log probabilities."""
+    return (
+        observations * mean_log_rates
+        - jnp.exp(mean_log_rates + 0.5 * variance_log_rates)
+        - jsp.special.gammaln(observations + 1)
     )
 
-    expected_rates = jnp.exp(linear_predictors + variance_correction)
 
+def log_likelihoods(
+    observations: jax.Array,  # (T, N)
+    log_rates: jax.Array,  # (1 or T, K, N)
+) -> jax.Array:  # (T, K)
+    """Poisson log likelihood for each time and state."""
     return jnp.sum(
-        observations * linear_predictors - expected_rates,
-        axis=0,
+        _expected_poisson_log_prob(
+            observations=observations[:, None, :],
+            mean_log_rates=log_rates,
+        ),
+        axis=-1,
     )
 
 
-def log_likelihood(
+def expected_log_likelihood_per_output(
     observations: jax.Array,
     means: jax.Array,
-    covariances: jax.Array,
-    readout: jax.Array,
+    covariances: jax.Array | None,
+    coefficients: jax.Array,
     bias: jax.Array,
+    sample_weights: jax.Array | None = None,
 ) -> jax.Array:
-    """Expected Poisson log likelihood of linear model with exponential link function."""
+    """Expected Poisson log likelihood for each output dimension."""
+    predictor = _linear_predictor_moments(
+        means=means,
+        covariances=covariances,
+        coefficients=coefficients,
+        bias=bias,
+    )
+
+    log_probs = _expected_poisson_log_prob(
+        observations,
+        predictor.mean,
+        predictor.variance,
+    )
+
+    if sample_weights is not None:
+        log_probs = sample_weights[:, None] * log_probs
+
+    return jnp.sum(log_probs, axis=0)
+
+
+def expected_log_likelihood(
+    observations: jax.Array,
+    means: jax.Array,
+    covariances: jax.Array | None,
+    coefficients: jax.Array,
+    bias: jax.Array,
+    sample_weights: jax.Array | None = None,
+) -> jax.Array:
+    """Expected Poisson log likelihood under Gaussian input marginals."""
     return jnp.sum(
-        log_likelihood_batched(
-            mean=means,
-            covariances=covariances,
+        expected_log_likelihood_per_output(
             observations=observations,
-            readout=readout,
+            means=means,
+            covariances=covariances,
+            coefficients=coefficients,
             bias=bias,
+            sample_weights=sample_weights,
         )
     )
 
 
-class _NewtonSearchParams(typing.NamedTuple):
-    """Poisson readout parameters, with one independent block per neuron."""
+def fit_weighted(
+    observations: jax.Array,  # (T, N)
+    weights: jax.Array,  # (T, K)
+    eps: float = 1e-8,
+) -> jax.Array:
+    """Fit weighted state-specific Poisson log rates."""
+    counts = jnp.maximum(weights.sum(axis=0), eps)  # (K,)
+    rates = weights.T @ observations / counts[:, None]  # (K, N)
+    return jnp.log(jnp.maximum(rates, eps))
 
-    readout: jax.Array
+
+class _NewtonSearchParams(typing.NamedTuple):
+    """Poisson regression parameters, with one independent block per output."""
+
+    coefficients: jax.Array
     bias: jax.Array
 
     def take_step(
@@ -56,20 +141,20 @@ class _NewtonSearchParams(typing.NamedTuple):
         direction: typing.Self,
         step_size: jax.Array,
     ) -> typing.Self:
-        """Take a possibly different step for each neuron."""
+        """Take a possibly different step for each output."""
         return self.__class__(
-            readout=self.readout + step_size[..., None] * direction.readout,
+            coefficients=self.coefficients + step_size[..., None] * direction.coefficients,
             bias=self.bias + step_size * direction.bias,
         )
 
     def norm(self) -> jax.Array:
-        """Return the parameter norm for each neuron."""
-        return jnp.sqrt(jnp.sum(self.readout**2, axis=-1) + self.bias**2)
+        """Return the parameter norm for each output."""
+        return jnp.sqrt(jnp.sum(self.coefficients**2, axis=-1) + self.bias**2)
 
     def relative_change_from(self, other: typing.Self) -> jax.Array:
-        """Return the relative parameter change from ``other`` for each neuron."""
+        """Return the relative parameter change from ``other`` for each output."""
         distance = self.__class__(
-            readout=self.readout - other.readout,
+            coefficients=self.coefficients - other.coefficients,
             bias=self.bias - other.bias,
         ).norm()
 
@@ -80,85 +165,111 @@ class _NewtonSearchParams(typing.NamedTuple):
         mask: jax.Array,
         other: typing.Self,
     ) -> typing.Self:
-        """Select one parameter block or the other independently per neuron."""
+        """Select one parameter block or the other independently per output."""
         return self.__class__(
-            readout=jnp.where(mask[..., None], self.readout, other.readout),
+            coefficients=jnp.where(mask[..., None], self.coefficients, other.coefficients),
             bias=jnp.where(mask, self.bias, other.bias),
         )
 
 
 class _NewtonSearchModel(typing.NamedTuple):
-    """Quantities held fixed while fitting the Poisson readout."""
+    """Quantities held fixed while fitting a Poisson linear model."""
 
     observations: jax.Array
     means: jax.Array
-    covariances: jax.Array
+    covariances: jax.Array | None
+    sample_weights: jax.Array  # (T,)
+    ridge: float
 
     def objective(self, params: _NewtonSearchParams) -> jax.Array:
-        """Expected Poisson log likelihood for each neuron."""
-
-        return log_likelihood_batched(
-            mean=self.means,
-            covariances=self.covariances,
+        """Expected Poisson log likelihood for each output."""
+        log_likelihood = expected_log_likelihood_per_output(
             observations=self.observations,
-            readout=params.readout,
+            means=self.means,
+            covariances=self.covariances,
+            coefficients=params.coefficients,
             bias=params.bias,
+            sample_weights=self.sample_weights,
         )
+        weight_sum = jnp.sum(self.sample_weights)
+        penalty = 0.5 * self.ridge * weight_sum * jnp.sum(params.coefficients**2, axis=-1)
+        return log_likelihood - penalty
 
     def newton_direction(self, params: _NewtonSearchParams) -> _NewtonSearchParams:
-        """Compute the Newton direction independently for all neurons."""
+        """Compute the Newton direction independently for all outputs."""
+        predictor = _linear_predictor_moments(
+            means=self.means,
+            covariances=self.covariances,
+            coefficients=params.coefficients,
+            bias=params.bias,
+        )
+        expected_rates = jnp.exp(predictor.mean + 0.5 * predictor.variance)
 
-        expected_rates = jnp.exp(
-            self.means @ params.readout.T
-            + params.bias
-            + 0.5
-            * jnp.einsum(
-                'ni,tij,nj->tn',
-                params.readout,
-                self.covariances,
-                params.readout,
+        weighted_observations = self.sample_weights[:, None] * self.observations
+        weighted_rates = self.sample_weights[:, None] * expected_rates
+
+        gradient_bias = jnp.sum(weighted_observations - weighted_rates, axis=0)
+
+        if self.covariances is None:
+            residual_weights = weighted_observations - weighted_rates
+            gradient_coefficients = residual_weights.T @ self.means
+
+            precision_coefficients = jnp.einsum(
+                'tn,ti,tj->nij',
+                weighted_rates,
+                self.means,
+                self.means,
             )
+            precision_cross = weighted_rates.T @ self.means
+        else:
+            shifted_means = self.means[:, None, :] + jnp.einsum(
+                'tij,nj->tni',
+                self.covariances,
+                params.coefficients,
+            )
+
+            gradient_coefficients = weighted_observations.T @ self.means - jnp.einsum(
+                'tn,tni->ni',
+                weighted_rates,
+                shifted_means,
+            )
+
+            precision_coefficients = jnp.einsum(
+                'tn,tni,tnj->nij',
+                weighted_rates,
+                shifted_means,
+                shifted_means,
+            ) + jnp.einsum(
+                'tn,tij->nij',
+                weighted_rates,
+                self.covariances,
+            )
+
+            precision_cross = jnp.einsum(
+                'tn,tni->ni',
+                weighted_rates,
+                shifted_means,
+            )
+        weight_sum = jnp.sum(self.sample_weights)
+        ridge_precision = self.ridge * weight_sum
+        coefficient_dim = params.coefficients.shape[-1]
+
+        gradient_coefficients = gradient_coefficients - ridge_precision * params.coefficients
+        precision_coefficients = (
+            precision_coefficients
+            + ridge_precision * jnp.eye(coefficient_dim, dtype=precision_coefficients.dtype)[None]
         )
 
-        # Derivative of
-        #
-        #   c.T m_t + 1/2 c.T V_t c
-        #
-        # with respect to c.
-        shifted_means = self.means[:, None, :] + jnp.einsum(
-            'tij,nj->tni', self.covariances, params.readout
+        precision_bias = jnp.sum(weighted_rates, axis=0)
+
+        top = jnp.concatenate(
+            [precision_coefficients, precision_cross[..., None]],
+            axis=-1,
         )
-
-        gradient_readout = self.observations.T @ self.means - jnp.einsum(
-            'tn,tni->ni',
-            expected_rates,
-            shifted_means,
-        )
-
-        gradient_bias = jnp.sum(
-            self.observations - expected_rates,
-            axis=0,
-        )
-
-        # Negative Hessian (= positive Newton precision).
-        precision_readout = jnp.einsum(
-            'tn,tni,tnj->nij',
-            expected_rates,
-            shifted_means,
-            shifted_means,
-        ) + jnp.einsum(
-            'tn,tij->nij',
-            expected_rates,
-            self.covariances,
-        )
-
-        precision_cross = jnp.einsum('tn,tni->ni', expected_rates, shifted_means)
-
-        precision_bias = jnp.sum(expected_rates, axis=0)
-
-        # Assemble one (D+1)x(D+1) Newton system per neuron.
-        top = jnp.concatenate([precision_readout, precision_cross[..., None]], axis=-1)
-        bottom = jnp.concatenate([precision_cross, precision_bias[:, None]], axis=-1)[:, None, :]
+        bottom = jnp.concatenate(
+            [precision_cross, precision_bias[:, None]],
+            axis=-1,
+        )[:, None, :]
         precision = jnp.concatenate([top, bottom], axis=-2)
 
         parameter_dim = precision.shape[-1]
@@ -172,10 +283,7 @@ class _NewtonSearchModel(typing.NamedTuple):
         )
 
         gradient = jnp.concatenate(
-            [
-                gradient_readout,
-                gradient_bias[:, None],
-            ],
+            [gradient_coefficients, gradient_bias[:, None]],
             axis=-1,
         )
 
@@ -185,31 +293,44 @@ class _NewtonSearchModel(typing.NamedTuple):
         )[..., 0]
 
         return _NewtonSearchParams(
-            readout=direction[..., :-1],
+            coefficients=direction[..., :-1],
             bias=direction[..., -1],
         )
 
 
-def fit_from_moments(
+def fit_linear_from_marginals(
     observations: jax.Array,
     means: jax.Array,
-    covariances: jax.Array,
-    readout: jax.Array,
+    covariances: jax.Array | None,
+    coefficients: jax.Array,
     bias: jax.Array,
     max_iter: int = 20,
     tol: float = 1e-6,
     max_line_search_iters: int = 20,
-) -> tuple[jax.Array, jax.Array]:
-    """Fit Poisson readout parameters by damped Newton optimization."""
+    sample_weights: jax.Array | None = None,
+    ridge: float = 0.0,
+) -> LinearPoissonFit:
+    """Fit a Poisson linear model from Gaussian input marginals.
+
+    ``ridge`` penalizes coefficients relative to the average weighted
+    log likelihood; the bias is not penalized.
+    """
+    if sample_weights is None:
+        sample_weights = jnp.ones(
+            observations.shape[0],
+            dtype=observations.dtype,
+        )
 
     model = _NewtonSearchModel(
         observations=observations,
         means=means,
         covariances=covariances,
+        sample_weights=sample_weights,
+        ridge=ridge,
     )
 
     initial_params = _NewtonSearchParams(
-        readout=readout,
+        coefficients=coefficients,
         bias=bias,
     )
 
@@ -221,4 +342,79 @@ def fit_from_moments(
 
     final = search.optimize(params=initial_params, max_iter=max_iter)
 
-    return final.params.readout, final.params.bias
+    return LinearPoissonFit(
+        coefficients=final.params.coefficients,
+        bias=final.params.bias,
+    )
+
+
+def fit_linear(
+    inputs: jax.Array,  # (T, P)
+    outputs: jax.Array,  # (T, N)
+    coefficients: jax.Array,  # (N, P)
+    bias: jax.Array,  # (N,)
+    max_iter: int = 20,
+    tol: float = 1e-6,
+    max_line_search_iters: int = 20,
+    ridge: float = 0.0,
+) -> LinearPoissonFit:
+    """Fit a Poisson linear model from paired samples."""
+    dtype = jnp.result_type(inputs, coefficients, bias, jnp.float32)
+
+    return fit_linear_from_marginals(
+        observations=outputs,
+        means=inputs.astype(dtype),
+        covariances=None,
+        coefficients=coefficients.astype(dtype),
+        bias=bias.astype(dtype),
+        max_iter=max_iter,
+        tol=tol,
+        max_line_search_iters=max_line_search_iters,
+        ridge=ridge,
+    )
+
+
+def fit_weighted_linear(
+    inputs: jax.Array,  # (T, P)
+    outputs: jax.Array,  # (T, N)
+    weights: jax.Array,  # (T, K)
+    coefficients: jax.Array,  # (K, N, P)
+    bias: jax.Array,  # (K, N)
+    max_iter: int = 20,
+    tol: float = 1e-6,
+    max_line_search_iters: int = 20,
+    ridge: float = 0.0,
+) -> LinearPoissonFit:
+    """Fit state-specific weighted Poisson linear models."""
+    dtype = jnp.result_type(inputs, coefficients, bias, jnp.float32)
+
+    inputs = inputs.astype(dtype)
+    coefficients = coefficients.astype(dtype)
+    bias = bias.astype(dtype)
+
+    def fit_state(
+        state_weights,
+        state_coefficients,
+        state_bias,
+    ):
+        return fit_linear_from_marginals(
+            observations=outputs,
+            means=inputs,
+            covariances=None,
+            coefficients=state_coefficients,
+            bias=state_bias,
+            sample_weights=state_weights,
+            max_iter=max_iter,
+            tol=tol,
+            max_line_search_iters=max_line_search_iters,
+            ridge=ridge,
+        )
+
+    return jax.vmap(
+        fit_state,
+        in_axes=(1, 0, 0),
+    )(
+        weights,
+        coefficients,
+        bias,
+    )

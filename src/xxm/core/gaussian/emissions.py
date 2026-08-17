@@ -13,7 +13,7 @@ from .chain import GaussianPotential
 
 
 class Emissions(typing.Protocol):
-    def sample(self, key, latent) -> jax.Array: ...
+    def sample(self, key, latents) -> jax.Array: ...
 
     def fit_params(self, observations, posterior) -> typing.Self: ...
 
@@ -301,11 +301,11 @@ class PoissonEmissions(typing.NamedTuple):
         posterior: typing.Any,
     ) -> PoissonEmissions:
         """Fit the parameters of the emissions model given a posterior over latents."""
-        readout, bias = poisson.fit_from_moments(
+        readout, bias = poisson.fit_linear_from_marginals(
             observations=observations,
             means=posterior.means,
             covariances=posterior.covariances,
-            readout=self.readout,
+            coefficients=self.readout,
             bias=self.bias,
         )
 

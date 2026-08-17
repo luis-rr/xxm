@@ -1,8 +1,12 @@
 import jax
 from jax import numpy as jnp
 
-from xxm.core.discrete.emissions import ARGaussianEmissions, GaussianEmissions, PoissonEmissions
-from xxm.stats import gaussian
+from xxm.core.discrete.emissions import (
+    GaussianEmissions,
+    PoissonEmissions,
+)
+from xxm.core.discrete.emissions_ar import ARGaussianEmissions, ARPoissonEmissions
+from xxm.stats import gaussian, poisson
 
 from .core import Emissions, LatentInitialModel, LatentTransitionModel, Model
 
@@ -14,6 +18,11 @@ def _kmeans(
     num_iters: int = 20,
 ) -> jax.Array:
     """Return hard K-means assignments with shape (T,)."""
+    observations = jnp.asarray(
+        observations,
+        dtype=jnp.result_type(observations, jnp.float32),
+    )
+
     initial_indices = jax.random.choice(
         key,
         observations.shape[0],
@@ -62,13 +71,19 @@ def _initialize(
 ) -> Model:
     initial_probs = jnp.ones(num_states) / num_states
 
-    off_diagonal_prob = (1.0 - self_transition_prob) / (num_states - 1)
+    if num_states == 1:
+        transition_probs = jnp.array([[1.0]])
 
-    transition_probs = jnp.full(
-        (num_states, num_states),
-        off_diagonal_prob,
-    )
-    transition_probs = transition_probs.at[jnp.diag_indices(num_states)].set(self_transition_prob)
+    else:
+        off_diagonal_prob = (1.0 - self_transition_prob) / (num_states - 1)
+
+        transition_probs = jnp.full(
+            (num_states, num_states),
+            off_diagonal_prob,
+        )
+        transition_probs = transition_probs.at[jnp.diag_indices(num_states)].set(
+            self_transition_prob
+        )
 
     return Model(
         initial=LatentInitialModel(initial_probs=initial_probs),
@@ -223,4 +238,76 @@ def initialize_hmm_poisson(
     self_transition_prob: float = 0.9,
 ) -> Model:
     emissions = _initialize_poisson_emissions(observations, num_states, key=key)
+    return _initialize(num_states, emissions, self_transition_prob)
+
+
+def _initialize_ar_poisson_emissions(
+    observations: jax.Array,
+    num_states: int,
+    lag: int,
+    key: jax.Array,
+) -> ARPoissonEmissions:
+    current = observations[lag:]  # (T-L, N)
+
+    history = jnp.stack(
+        [observations[lag - i - 1 : observations.shape[0] - i - 1] for i in range(lag)],
+        axis=1,
+    )  # (T-L, L, N)
+
+    num_samples, _, num_dims = history.shape
+    predictors = history.reshape(num_samples, lag * num_dims)
+
+    assignments = _kmeans(
+        current,
+        num_states,
+        key,
+    )
+
+    state_weights = jax.nn.one_hot(assignments, num_states)
+
+    counts = state_weights.sum(axis=0)
+    rates = state_weights.T @ current / jnp.maximum(counts[:, None], 1)
+    rates = jnp.maximum(rates, 1e-8)
+
+    dtype = jnp.result_type(observations, jnp.float32)
+
+    initial_readout = jnp.zeros(
+        (num_states, num_dims, lag * num_dims),
+        dtype=dtype,
+    )
+    initial_bias = jnp.log(rates.astype(dtype))
+
+    readout, biases = poisson.fit_weighted_linear(
+        inputs=predictors,
+        outputs=current,
+        weights=state_weights,
+        coefficients=initial_readout,
+        bias=initial_bias,
+    )
+
+    coefficients = readout.reshape(
+        num_states,
+        num_dims,
+        lag,
+        num_dims,
+    )
+    coefficients = jnp.transpose(
+        coefficients,
+        (0, 2, 1, 3),
+    )
+
+    return ARPoissonEmissions(
+        coefficients=coefficients,
+        biases=biases,
+    )
+
+
+def initialize_arhmm_poisson(
+    num_states: int,
+    observations: jax.Array,
+    lag: int,
+    key: jax.Array,
+    self_transition_prob: float = 0.9,
+) -> Model:
+    emissions = _initialize_ar_poisson_emissions(observations, num_states, lag=lag, key=key)
     return _initialize(num_states, emissions, self_transition_prob)
