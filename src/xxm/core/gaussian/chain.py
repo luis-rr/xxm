@@ -294,6 +294,92 @@ class GaussianPairPotential(typing.NamedTuple):
             ),
         )
 
+    def expected(
+        self,
+        weights: jax.Array,  # (..., K)
+    ) -> GaussianPairPotential:
+        """Average a batch of potentials using weights over the last axis."""
+
+        if self.batch_shape != (weights.shape[-1],):
+            raise ValueError(
+                'last dimension of weights must match the potential batch dimension; '
+                f'expected {self.batch_shape}, got {weights.shape}'
+            )
+
+        return GaussianPairPotential(
+            left_precision=jnp.einsum(
+                '...k,kij->...ij',
+                weights,
+                self.left_precision,
+            ),
+            right_precision=jnp.einsum(
+                '...k,kij->...ij',
+                weights,
+                self.right_precision,
+            ),
+            lower_precision=jnp.einsum(
+                '...k,kij->...ij',
+                weights,
+                self.lower_precision,
+            ),
+            left_information=jnp.einsum(
+                '...k,ki->...i',
+                weights,
+                self.left_information,
+            ),
+            right_information=jnp.einsum(
+                '...k,ki->...i',
+                weights,
+                self.right_information,
+            ),
+            log_constant=jnp.einsum(
+                '...k,k->...',
+                weights,
+                self.log_constant,
+            ),
+        )
+
+    def expected_log_likelihoods(
+        self,
+        posterior: GaussianChainMarginals,
+    ) -> jax.Array:
+        """Return E_q(x)[log p(x[t+1] | x[t], z[t]=k)], shape (T-1, K)."""
+
+        means = posterior.means
+        second = posterior.raw_second_moments()
+        cross = posterior.raw_cross_moments()
+
+        return (
+            -0.5
+            * jnp.einsum(
+                'kij,tij->tk',
+                self.left_precision,
+                second[:-1],
+            )
+            - jnp.einsum(
+                'kij,tji->tk',
+                self.lower_precision,
+                cross,
+            )
+            - 0.5
+            * jnp.einsum(
+                'kij,tij->tk',
+                self.right_precision,
+                second[1:],
+            )
+            + jnp.einsum(
+                'ki,ti->tk',
+                self.left_information,
+                means[:-1],
+            )
+            + jnp.einsum(
+                'ki,ti->tk',
+                self.right_information,
+                means[1:],
+            )
+            + self.log_constant[None, :]
+        )
+
 
 class GaussianChain(typing.NamedTuple):
     r"""Represents a Gaussian chain with block-tridiagonal structure in canonical form.

@@ -37,6 +37,10 @@ EmissionsT = typing.TypeVar('EmissionsT', bound=Emissions)
 class DiscreteInitialModel(typing.NamedTuple):
     initial_probs: jax.Array
 
+    @property
+    def num_states(self) -> int:
+        return self.initial_probs.shape[0]
+
     def sample(self, key: jax.Array) -> jax.Array:
         return jax.random.categorical(
             key,
@@ -68,6 +72,10 @@ class DiscreteInitialModel(typing.NamedTuple):
 
 class DiscreteTransitionModel(typing.NamedTuple):
     transition_probs: jax.Array
+
+    @property
+    def num_states(self) -> int:
+        return self.transition_probs.shape[0]
 
     def sample(
         self,
@@ -105,6 +113,19 @@ class DiscreteTransitionModel(typing.NamedTuple):
 
         return self.__class__(
             transition_probs=expected_transitions / expected_transitions.sum(axis=-1, keepdims=True)
+        )
+
+    def broadcast(
+        self,
+        batch_shape: tuple[int, ...],
+    ) -> jax.Array:
+        return jnp.broadcast_to(
+            self.transition_probs,
+            (
+                *batch_shape,
+                self.num_states,
+                self.num_states,
+            ),
         )
 
 
