@@ -98,7 +98,7 @@ class GaussianEmissions(typing.NamedTuple):
             centered_observations,
         )
 
-        log_constant = jnp.sum(
+        log_constant = (
             -0.5 * quadratic_terms - 0.5 * log_det_covariance - 0.5 * n * jnp.log(2.0 * jnp.pi)
         )
 
@@ -274,7 +274,7 @@ class PoissonEmissions(typing.NamedTuple):
 
         # Constant chosen so that the quadratic approximation has exactly
         # the true likelihood value at the reference state.
-        log_constant = jnp.sum(log_likelihoods - gradient_terms - 0.5 * quadratic_terms)
+        log_constant = log_likelihoods - gradient_terms - 0.5 * quadratic_terms
 
         return GaussianPotential(
             precision_blocks=precision_blocks,

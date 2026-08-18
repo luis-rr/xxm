@@ -46,7 +46,7 @@ def _gaussian_log_prob_residuals(
     return jnp.sum(-0.5 * (quadratic + log_det + dimension * jnp.log(2.0 * jnp.pi)))
 
 
-class LatentInitialModel(typing.NamedTuple):
+class GaussianInitialModel(typing.NamedTuple):
     mean: jax.Array
     covariance: jax.Array
 
@@ -77,7 +77,7 @@ class LatentInitialModel(typing.NamedTuple):
         )
 
 
-class LatentDynamicsModel(typing.NamedTuple):
+class LinearGaussianDynamicsModel(typing.NamedTuple):
     matrix: jax.Array
     bias: jax.Array
     noise_covariance: jax.Array
@@ -135,9 +135,34 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     Container for LDS model parameters.
     """
 
-    initial: LatentInitialModel
-    dynamics: LatentDynamicsModel
+    initial: GaussianInitialModel
+    dynamics: LinearGaussianDynamicsModel
     emissions: EmissionsT
+
+    def get_initial_potential(self) -> GaussianPotential:
+        return GaussianPotential.from_moments(
+            self.initial.mean,
+            self.initial.covariance,
+        )
+
+    def get_pair_potentials(
+        self,
+        num_time_steps: int,
+    ) -> GaussianPairPotential:
+        potential = GaussianPairPotential.from_linear_conditional(
+            self.dynamics.matrix,
+            self.dynamics.bias,
+            self.dynamics.noise_covariance,
+        )
+
+        return potential.broadcast(batch_shape=(num_time_steps - 1,))
+
+    def to_gaussian_chain(self, num_time_steps: int) -> GaussianChain:
+        """Construct the Gaussian chain defined by the latent LDS prior."""
+        return GaussianChain.from_pair_potentials(
+            self.get_initial_potential(),
+            self.get_pair_potentials(num_time_steps),
+        )
 
     def sample(
         self,
@@ -239,50 +264,6 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         )
 
         return initial_log_prob + dynamics_log_prob + emission_log_prob
-
-    def to_gaussian_chain(self, num_time_steps: int) -> GaussianChain:
-        """Construct the Gaussian chain defined by the latent LDS prior."""
-        state_dim = self.initial.mean.shape[0]
-
-        initial_potential = GaussianPotential.from_moments(
-            self.initial.mean,
-            self.initial.covariance,
-        )
-
-        dynamics_potential = GaussianPairPotential.from_linear_conditional(
-            self.dynamics.matrix,
-            self.dynamics.bias,
-            self.dynamics.noise_covariance,
-        )
-
-        diagonal = jnp.zeros((num_time_steps, state_dim, state_dim), dtype=self.initial.mean.dtype)
-        diagonal = diagonal.at[0].add(initial_potential.precision_blocks)
-        diagonal = diagonal.at[:-1].add(dynamics_potential.left_precision)
-        diagonal = diagonal.at[1:].add(dynamics_potential.right_precision)
-
-        information_vectors = jnp.zeros(
-            (num_time_steps, state_dim),
-            dtype=self.initial.mean.dtype,
-        )
-        information_vectors = information_vectors.at[0].add(initial_potential.information_vectors)
-        information_vectors = information_vectors.at[:-1].add(dynamics_potential.left_information)
-        information_vectors = information_vectors.at[1:].add(dynamics_potential.right_information)
-
-        lower_precision_blocks = jnp.broadcast_to(
-            dynamics_potential.lower_precision,
-            (num_time_steps - 1,) + dynamics_potential.lower_precision.shape,
-        )
-
-        log_constant = (
-            initial_potential.log_constant + (num_time_steps - 1) * dynamics_potential.log_constant
-        )
-
-        return GaussianChain(
-            diagonal_precision_blocks=diagonal,
-            lower_precision_blocks=lower_precision_blocks,
-            information_vectors=information_vectors,
-            log_constant=log_constant,
-        )
 
     def fit_params(
         self,

@@ -145,6 +145,59 @@ def test_gaussian_sample_has_expected_shape():
     assert jnp.all(jnp.isfinite(sample))
 
 
+def test_gaussian_emissions_potential_has_one_factor_per_observation():
+    # y_t | x_t ~ N(2 x_t + 1, 4)
+    emissions = GaussianEmissions(
+        readout=jnp.array([[2.0]]),
+        bias=jnp.array([1.0]),
+        noise_covariance=jnp.array([[4.0]]),
+    )
+
+    observations = jnp.array(
+        [
+            [1.0],
+            [3.0],
+            [5.0],
+        ]
+    )
+
+    potential = emissions.get_potential(observations)
+
+    # For R = 4 and C = 2:
+    #
+    # J = C^T R^-1 C = 1
+    #
+    # h_t = C^T R^-1 (y_t - 1)
+    #     = [0, 1, 2]
+    #
+    # c_t = -1/2 (y_t - 1)^2 / 4
+    #       -1/2 log(4)
+    #       -1/2 log(2 pi)
+    residuals = np.array([0.0, 2.0, 4.0])
+
+    expected_precision = np.ones((3, 1, 1))
+    expected_information = np.array([[0.0], [1.0], [2.0]])
+    expected_log_constant = (
+        -0.5 * residuals**2 / 4.0 - 0.5 * np.log(4.0) - 0.5 * np.log(2.0 * np.pi)
+    )
+
+    assert potential.batch_shape == (3,)
+    assert potential.variable_dim == 1
+
+    np.testing.assert_allclose(
+        potential.precision_blocks,
+        expected_precision,
+    )
+    np.testing.assert_allclose(
+        potential.information_vectors,
+        expected_information,
+    )
+    np.testing.assert_allclose(
+        potential.log_constant,
+        expected_log_constant,
+    )
+
+
 # ---------------------------------------------------------------------
 # Poisson
 # ---------------------------------------------------------------------

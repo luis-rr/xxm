@@ -1,6 +1,8 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
+
 
 from xxm.core.gaussian.chain import (
     GaussianChain,
@@ -350,3 +352,275 @@ def test_gaussian_pair_potential_log_density():
     )
 
     np.testing.assert_allclose(log_f, expected, atol=ATOL, rtol=RTOL)
+
+
+# --- Batched GaussianPotential ---
+
+
+def test_gaussian_potential_from_moments_batched():
+    means = jnp.array(
+        [
+            [[1.0, -0.5], [0.2, 0.7]],
+            [[-0.3, 0.4], [0.8, -0.1]],
+        ]
+    )  # (2, 2, D)
+
+    covariances = jnp.array(
+        [
+            [
+                [[2.0, 0.3], [0.3, 1.5]],
+                [[1.2, 0.1], [0.1, 0.9]],
+            ],
+            [
+                [[1.5, -0.2], [-0.2, 1.1]],
+                [[0.8, 0.1], [0.1, 1.4]],
+            ],
+        ]
+    )  # (2, 2, D, D)
+
+    result = GaussianPotential.from_moments(means, covariances)
+
+    expected = jax.vmap(
+        jax.vmap(lambda mean, covariance: GaussianPotential.from_moments(mean, covariance))
+    )(means, covariances)
+
+    np.testing.assert_allclose(
+        result.precision_blocks,
+        expected.precision_blocks,
+        atol=ATOL,
+        rtol=RTOL,
+    )
+    np.testing.assert_allclose(
+        result.information_vectors,
+        expected.information_vectors,
+        atol=ATOL,
+        rtol=RTOL,
+    )
+    np.testing.assert_allclose(
+        result.log_constant,
+        expected.log_constant,
+        atol=ATOL,
+        rtol=RTOL,
+    )
+
+    assert result.precision_blocks.shape == (2, 2, 2, 2)
+    assert result.information_vectors.shape == (2, 2, 2)
+    assert result.log_constant.shape == (2, 2)
+
+
+def test_gaussian_potential_from_moments_batched_jit():
+    means = jnp.array(
+        [
+            [1.0, -0.5],
+            [0.2, 0.7],
+        ]
+    )
+    covariances = jnp.array(
+        [
+            [[2.0, 0.3], [0.3, 1.5]],
+            [[1.2, 0.1], [0.1, 0.9]],
+        ]
+    )
+
+    eager = GaussianPotential.from_moments(means, covariances)
+    jitted = jax.jit(lambda mean, covariance: GaussianPotential.from_moments(mean, covariance))(
+        means, covariances
+    )
+
+    np.testing.assert_allclose(jitted.precision_blocks, eager.precision_blocks)
+    np.testing.assert_allclose(jitted.information_vectors, eager.information_vectors)
+    np.testing.assert_allclose(jitted.log_constant, eager.log_constant)
+
+
+# --- Batched GaussianPairPotential ---
+
+
+def test_gaussian_pair_potential_from_linear_conditional_batched():
+    matrices = jnp.array(
+        [
+            [[0.8, 0.1], [-0.2, 0.9]],
+            [[1.0, -0.1], [0.3, 0.7]],
+            [[0.6, 0.2], [0.1, 0.8]],
+        ]
+    )
+    biases = jnp.array(
+        [
+            [0.5, -0.3],
+            [-0.2, 0.4],
+            [0.1, 0.2],
+        ]
+    )
+    covariances = jnp.array(
+        [
+            [[1.5, 0.2], [0.2, 1.0]],
+            [[1.2, -0.1], [-0.1, 0.9]],
+            [[0.8, 0.1], [0.1, 1.3]],
+        ]
+    )
+
+    result = GaussianPairPotential.from_linear_conditional(
+        matrices,
+        biases,
+        covariances,
+    )
+
+    expected = jax.vmap(
+        lambda matrix, bias, covariance: GaussianPairPotential.from_linear_conditional(
+            matrix,
+            bias,
+            covariance,
+        )
+    )(matrices, biases, covariances)
+
+    np.testing.assert_allclose(result.left_precision, expected.left_precision, atol=ATOL, rtol=RTOL)
+    np.testing.assert_allclose(
+        result.right_precision, expected.right_precision, atol=ATOL, rtol=RTOL
+    )
+    np.testing.assert_allclose(
+        result.lower_precision, expected.lower_precision, atol=ATOL, rtol=RTOL
+    )
+    np.testing.assert_allclose(
+        result.left_information, expected.left_information, atol=ATOL, rtol=RTOL
+    )
+    np.testing.assert_allclose(
+        result.right_information, expected.right_information, atol=ATOL, rtol=RTOL
+    )
+    np.testing.assert_allclose(result.log_constant, expected.log_constant, atol=ATOL, rtol=RTOL)
+
+    assert result.left_precision.shape == (3, 2, 2)
+    assert result.left_information.shape == (3, 2)
+    assert result.log_constant.shape == (3,)
+
+
+def test_gaussian_pair_potential_from_linear_conditional_batched_jit():
+    matrices = jnp.array(
+        [
+            [[0.8, 0.1], [-0.2, 0.9]],
+            [[1.0, -0.1], [0.3, 0.7]],
+        ]
+    )
+    biases = jnp.array(
+        [
+            [0.5, -0.3],
+            [-0.2, 0.4],
+        ]
+    )
+    covariances = jnp.array(
+        [
+            [[1.5, 0.2], [0.2, 1.0]],
+            [[1.2, -0.1], [-0.1, 0.9]],
+        ]
+    )
+
+    eager = GaussianPairPotential.from_linear_conditional(
+        matrices,
+        biases,
+        covariances,
+    )
+    jitted = jax.jit(
+        lambda matrix, bias, covariance: GaussianPairPotential.from_linear_conditional(
+            matrix,
+            bias,
+            covariance,
+        )
+    )(matrices, biases, covariances)
+
+    for eager_field, jitted_field in zip(eager, jitted):
+        np.testing.assert_allclose(jitted_field, eager_field, atol=ATOL, rtol=RTOL)
+
+
+# --- GaussianChain + local potentials ---
+
+
+def test_gaussian_chain_add_time_indexed_local_potential():
+    chain = make_chain()
+
+    means = jnp.array(
+        [
+            [0.1, -0.2],
+            [0.3, 0.4],
+            [-0.1, 0.2],
+        ]
+    )
+    covariances = jnp.broadcast_to(jnp.eye(2), (3, 2, 2))
+
+    potential = GaussianPotential.from_moments(means, covariances)
+
+    result = chain.add_local_potential(potential)
+
+    np.testing.assert_allclose(
+        result.diagonal_precision_blocks,
+        chain.diagonal_precision_blocks + potential.precision_blocks,
+    )
+    np.testing.assert_allclose(
+        result.information_vectors,
+        chain.information_vectors + potential.information_vectors,
+    )
+    np.testing.assert_allclose(
+        result.log_constant,
+        chain.log_constant + jnp.sum(potential.log_constant),
+    )
+    np.testing.assert_allclose(
+        result.lower_precision_blocks,
+        chain.lower_precision_blocks,
+    )
+
+
+def test_gaussian_chain_add_local_potential_does_not_broadcast_over_time():
+    chain = make_chain()
+
+    potential = GaussianPotential.from_moments(
+        mean=jnp.zeros(2),
+        covariance=jnp.eye(2),
+    )
+
+    with pytest.raises(ValueError):
+        chain.add_local_potential(potential)
+
+
+def test_gaussian_chain_add_local_potential_requires_matching_variable_dim():
+    chain = make_chain()
+
+    potential = GaussianPotential.from_moments(
+        mean=jnp.zeros((3, 1)),
+        covariance=jnp.ones((3, 1, 1)),
+    )
+
+    with pytest.raises(ValueError):
+        chain.add_local_potential(potential)
+
+
+def test_gaussian_chain_add_local_potential_jit():
+    chain = make_chain()
+
+    potential = GaussianPotential.from_moments(
+        mean=jnp.zeros((3, 2)),
+        covariance=jnp.broadcast_to(jnp.eye(2), (3, 2, 2)),
+    )
+
+    eager = chain.add_local_potential(potential)
+    jitted = jax.jit(lambda chain, potential: chain.add_local_potential(potential))(
+        chain,
+        potential,
+    )
+
+    for eager_field, jitted_field in zip(eager, jitted):
+        np.testing.assert_allclose(jitted_field, eager_field)
+
+
+def test_gaussian_chain_rejects_batched_chain():
+    chain = make_chain()
+
+    batched_chain = GaussianChain(
+        diagonal_precision_blocks=jnp.stack(
+            [chain.diagonal_precision_blocks, chain.diagonal_precision_blocks]
+        ),
+        lower_precision_blocks=jnp.stack(
+            [chain.lower_precision_blocks, chain.lower_precision_blocks]
+        ),
+        information_vectors=jnp.stack([chain.information_vectors, chain.information_vectors]),
+        log_constant=jnp.zeros(2),
+    )
+
+    with pytest.raises(ValueError):
+        batched_chain.forward_backward()

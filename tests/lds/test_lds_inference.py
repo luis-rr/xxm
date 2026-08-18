@@ -4,7 +4,7 @@ from jax import numpy as jnp
 
 from tests.lds.lds_helpers import make_model, make_observations
 from xxm.core.gaussian.emissions import PoissonEmissions
-from xxm.lds.core import LatentDynamicsModel, LatentInitialModel, Model
+from xxm.lds.core import LinearGaussianDynamicsModel, GaussianInitialModel, Model
 from xxm.lds.inference import (
     _NewtonSearchModel,
     _NewtonSearchParams,
@@ -16,8 +16,8 @@ from xxm.newton import NewtonSearch
 
 def make_scalar_poisson_model() -> Model[PoissonEmissions]:
     return Model(
-        initial=LatentInitialModel(mean=jnp.zeros(1), covariance=jnp.eye(1)),
-        dynamics=LatentDynamicsModel(
+        initial=GaussianInitialModel(mean=jnp.zeros(1), covariance=jnp.eye(1)),
+        dynamics=LinearGaussianDynamicsModel(
             matrix=jnp.eye(1),
             bias=jnp.zeros(1),
             noise_covariance=jnp.eye(1),

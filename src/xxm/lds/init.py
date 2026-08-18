@@ -5,7 +5,7 @@ from xxm.core.gaussian.emissions import GaussianEmissions, PoissonEmissions
 
 from ..fit import unstack_models
 from ..stats import gaussian, poisson
-from .core import LatentDynamicsModel, LatentInitialModel, Model
+from .core import LinearGaussianDynamicsModel, GaussianInitialModel, Model
 
 
 def _covariance(
@@ -97,7 +97,7 @@ def gaussian_emissions_from_latents(
 def dynamics_from_latents(
     latents: jax.Array,
     covariance_floor: float,
-) -> LatentDynamicsModel:
+) -> LinearGaussianDynamicsModel:
     """Fit linear dynamics to a known latent trajectory."""
     dynamics_matrix, dynamics_bias, dynamics_noise_covariance = gaussian.fit_linear(
         latents[:-1],
@@ -110,7 +110,7 @@ def dynamics_from_latents(
         reference=latents,
     )
 
-    return LatentDynamicsModel(
+    return LinearGaussianDynamicsModel(
         matrix=dynamics_matrix,
         bias=dynamics_bias,
         noise_covariance=dynamics_noise_covariance,
@@ -121,12 +121,12 @@ def initial_from_latents(
     observations: jax.Array,
     latents: jax.Array,
     covariance_floor: float = 1e-2,
-) -> LatentInitialModel:
+) -> GaussianInitialModel:
     """Construct an LDS from a known latent trajectory."""
 
     # There is only one initial state estimate, so use the overall
     # latent covariance as a reasonable scale for its uncertainty.
-    return LatentInitialModel(
+    return GaussianInitialModel(
         mean=latents[0],
         covariance=_add_covariance_floor(
             _covariance(latents),

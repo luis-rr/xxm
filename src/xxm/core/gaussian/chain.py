@@ -29,16 +29,31 @@ import jax.scipy.linalg as jsp_linalg
 
 
 def _precision_and_log_det(
-    covariance: jax.Array,
+    covariance: jax.Array,  # (..., D, D)
 ) -> tuple[jax.Array, jax.Array]:
+    """Compute precision matrices and covariance log determinants."""
+
+    if covariance.shape[-2] != covariance.shape[-1]:
+        raise ValueError('covariance must have shape (..., D, D)')
+
+    variable_dim = covariance.shape[-1]
+
     cholesky = jnp.linalg.cholesky(covariance)
+
+    identity = jnp.broadcast_to(
+        jnp.eye(variable_dim, dtype=covariance.dtype),
+        covariance.shape,
+    )
 
     precision = jsp_linalg.cho_solve(
         (cholesky, True),
-        jnp.eye(covariance.shape[0], dtype=covariance.dtype),
+        identity,
     )
 
-    log_det = 2.0 * jnp.sum(jnp.log(jnp.diag(cholesky)))
+    log_det = 2.0 * jnp.sum(
+        jnp.log(jnp.diagonal(cholesky, axis1=-2, axis2=-1)),
+        axis=-1,
+    )
 
     return precision, log_det
 
@@ -52,11 +67,39 @@ class GaussianPotential(typing.NamedTuple):
 
     where ``precision_blocks`` contains J, ``information_vectors``
     contains h, and ``log_constant`` is c.
+
+    Leading dimensions are treated as batch dimensions for independent potentials.
     """
 
     precision_blocks: jax.Array  # (..., D, D)
     information_vectors: jax.Array  # (..., D)
-    log_constant: jax.Array  # scalar
+    log_constant: jax.Array  # (...)
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        return self.precision_blocks.shape[:-2]
+
+    @property
+    def variable_dim(self) -> int:
+        return self.precision_blocks.shape[-1]
+
+    def validate(self) -> None:
+        if self.precision_blocks.ndim < 2:
+            raise ValueError('precision_blocks must have shape (..., D, D)')
+
+        if self.precision_blocks.shape[-2] != self.precision_blocks.shape[-1]:
+            raise ValueError('precision_blocks must have shape (..., D, D)')
+
+        if self.variable_dim < 1:
+            raise ValueError('Potential must contain at least one variable dimension')
+
+        if self.information_vectors.shape != self.batch_shape + (self.variable_dim,):
+            raise ValueError(
+                'information_vectors must have shape (..., D) matching precision_blocks'
+            )
+
+        if self.log_constant.shape != self.batch_shape:
+            raise ValueError('log_constant must have the same leading shape as precision_blocks')
 
     @classmethod
     def from_moments(
@@ -64,20 +107,40 @@ class GaussianPotential(typing.NamedTuple):
         mean: jax.Array,
         covariance: jax.Array,
     ) -> GaussianPotential:
-        precision, log_det_covariance = _precision_and_log_det(covariance)
+        if mean.ndim < 1:
+            raise ValueError('mean must have shape (..., D)')
 
-        information = precision @ mean
+        if covariance.ndim < 2:
+            raise ValueError('covariance must have shape (..., D, D)')
 
         d = mean.shape[-1]
+        batch_shape = mean.shape[:-1]
 
-        log_constant = (
-            -0.5 * mean @ information - 0.5 * log_det_covariance - 0.5 * d * jnp.log(2.0 * jnp.pi)
+        if d < 1:
+            raise ValueError('mean must contain at least one variable dimension')
+
+        if covariance.shape != batch_shape + (d, d):
+            raise ValueError(
+                'mean and covariance must have shapes (..., D) and (..., D, D) '
+                'with matching leading dimensions'
+            )
+
+        precision, log_det_covariance = _precision_and_log_det(covariance)
+
+        information = jnp.einsum(
+            '...ij,...j->...i',
+            precision,
+            mean,
         )
 
-        return GaussianPotential(
+        quadratic = jnp.sum(mean * information, axis=-1)
+
+        return cls(
             precision_blocks=precision,
             information_vectors=information,
-            log_constant=log_constant,
+            log_constant=(
+                -0.5 * quadratic - 0.5 * log_det_covariance - 0.5 * d * jnp.log(2.0 * jnp.pi)
+            ),
         )
 
 
@@ -94,8 +157,7 @@ class GaussianPairPotential(typing.NamedTuple):
           + h_1.T @ x_1
           + c.
 
-    The fields contain the corresponding precision, information,
-    and constant terms.
+    Leading dimensions are treated as batch dimensions for independent potentials.
     """
 
     left_precision: jax.Array  # (..., D, D)
@@ -103,7 +165,46 @@ class GaussianPairPotential(typing.NamedTuple):
     lower_precision: jax.Array  # (..., D, D)
     left_information: jax.Array  # (..., D)
     right_information: jax.Array  # (..., D)
-    log_constant: jax.Array  # scalar
+    log_constant: jax.Array  # (...)
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        return self.left_precision.shape[:-2]
+
+    @property
+    def variable_dim(self) -> int:
+        return self.left_precision.shape[-1]
+
+    def validate(self) -> None:
+        if self.left_precision.ndim < 2:
+            raise ValueError('left_precision must have shape (..., D, D)')
+
+        if self.left_precision.shape[-2] != self.left_precision.shape[-1]:
+            raise ValueError('left_precision must have shape (..., D, D)')
+
+        if self.variable_dim < 1:
+            raise ValueError('Potential must contain at least one variable dimension')
+
+        matrix_shape = self.batch_shape + (
+            self.variable_dim,
+            self.variable_dim,
+        )
+        vector_shape = self.batch_shape + (self.variable_dim,)
+
+        if self.right_precision.shape != matrix_shape:
+            raise ValueError('right_precision must have shape (..., D, D) matching left_precision')
+
+        if self.lower_precision.shape != matrix_shape:
+            raise ValueError('lower_precision must have shape (..., D, D) matching left_precision')
+
+        if self.left_information.shape != vector_shape:
+            raise ValueError('left_information must have shape (..., D) matching left_precision')
+
+        if self.right_information.shape != vector_shape:
+            raise ValueError('right_information must have shape (..., D) matching left_precision')
+
+        if self.log_constant.shape != self.batch_shape:
+            raise ValueError('log_constant must have the same leading shape as left_precision')
 
     @classmethod
     def from_linear_conditional(
@@ -112,23 +213,84 @@ class GaussianPairPotential(typing.NamedTuple):
         bias: jax.Array,
         covariance: jax.Array,
     ) -> GaussianPairPotential:
+        if matrix.ndim < 2:
+            raise ValueError('matrix must have shape (..., D, D)')
+
+        if matrix.shape[-2] != matrix.shape[-1]:
+            raise ValueError('matrix must have shape (..., D, D)')
+
+        d = matrix.shape[-1]
+        batch_shape = matrix.shape[:-2]
+
+        if d < 1:
+            raise ValueError('matrix must contain at least one variable dimension')
+
+        if bias.shape != batch_shape + (d,):
+            raise ValueError(
+                'matrix and bias must have shapes (..., D, D) and (..., D) '
+                'with matching leading dimensions'
+            )
+
+        if covariance.shape != batch_shape + (d, d):
+            raise ValueError(
+                'matrix and covariance must both have shape (..., D, D) '
+                'with matching leading dimensions'
+            )
+
         precision, log_det_covariance = _precision_and_log_det(covariance)
 
+        matrix_t = jnp.swapaxes(matrix, -1, -2)
+
         precision_matrix = precision @ matrix
-        precision_bias = precision @ bias
 
-        d = bias.shape[-1]
+        precision_bias = jnp.einsum(
+            '...ij,...j->...i',
+            precision,
+            bias,
+        )
 
-        return GaussianPairPotential(
-            left_precision=matrix.T @ precision_matrix,
+        return cls(
+            left_precision=matrix_t @ precision_matrix,
             right_precision=precision,
             lower_precision=-precision_matrix,
-            left_information=-matrix.T @ precision_bias,
+            left_information=-jnp.einsum(
+                '...ij,...j->...i',
+                matrix_t,
+                precision_bias,
+            ),
             right_information=precision_bias,
             log_constant=(
-                -0.5 * bias @ precision_bias
+                -0.5 * jnp.sum(bias * precision_bias, axis=-1)
                 - 0.5 * log_det_covariance
                 - 0.5 * d * jnp.log(2.0 * jnp.pi)
+            ),
+        )
+
+    def broadcast(self, batch_shape) -> GaussianPairPotential:
+        return GaussianPairPotential(
+            left_precision=jnp.broadcast_to(
+                self.left_precision,
+                batch_shape + self.left_precision.shape,
+            ),
+            right_precision=jnp.broadcast_to(
+                self.right_precision,
+                batch_shape + self.right_precision.shape,
+            ),
+            lower_precision=jnp.broadcast_to(
+                self.lower_precision,
+                batch_shape + self.lower_precision.shape,
+            ),
+            left_information=jnp.broadcast_to(
+                self.left_information,
+                batch_shape + self.left_information.shape,
+            ),
+            right_information=jnp.broadcast_to(
+                self.right_information,
+                batch_shape + self.right_information.shape,
+            ),
+            log_constant=jnp.broadcast_to(
+                self.log_constant,
+                batch_shape + self.log_constant.shape,
             ),
         )
 
@@ -142,7 +304,6 @@ class GaussianChain(typing.NamedTuple):
 
     where J is symmetric positive definite and block tridiagonal,
     h is the information vector, and c is ``log_constant``.
-
 
     The block convention is
 
@@ -158,13 +319,54 @@ class GaussianChain(typing.NamedTuple):
 
     with ``B_t = lower_precision_blocks[t]``.
 
-    ``information_vectors[t]`` contains the block of ``h`` associated with the variable ``x_t``.
+    ``information_vectors[t]`` contains the block of ``h`` associated
+    with the variable ``x_t``.
+
+    A ``GaussianChain`` represents a single chain. Batch dimensions are
+    intentionally not supported; use ``jax.vmap`` over chains instead.
     """
 
-    diagonal_precision_blocks: jax.Array
-    lower_precision_blocks: jax.Array
-    information_vectors: jax.Array
+    diagonal_precision_blocks: jax.Array  # (T, D, D)
+    lower_precision_blocks: jax.Array  # (T - 1, D, D)
+    information_vectors: jax.Array  # (T, D)
     log_constant: jax.Array  # scalar
+
+    @classmethod
+    def from_pair_potentials(
+        cls,
+        initial_potential: GaussianPotential,  # (D, D)
+        pair_potentials: GaussianPairPotential,  # (T-1, D, D)
+    ) -> GaussianChain:
+        """Construct a Gaussian chain from initial and time-indexed pair potentials."""
+
+        num_time_steps = pair_potentials.left_precision.shape[0] + 1
+        state_dim = initial_potential.precision_blocks.shape[0]
+        dtype = initial_potential.precision_blocks.dtype
+
+        diagonal = jnp.zeros(
+            (num_time_steps, state_dim, state_dim),
+            dtype=dtype,
+        )
+        diagonal = diagonal.at[0].add(initial_potential.precision_blocks)
+        diagonal = diagonal.at[:-1].add(pair_potentials.left_precision)
+        diagonal = diagonal.at[1:].add(pair_potentials.right_precision)
+
+        information_vectors = jnp.zeros(
+            (num_time_steps, state_dim),
+            dtype=dtype,
+        )
+        information_vectors = information_vectors.at[0].add(initial_potential.information_vectors)
+        information_vectors = information_vectors.at[:-1].add(pair_potentials.left_information)
+        information_vectors = information_vectors.at[1:].add(pair_potentials.right_information)
+
+        log_constant = initial_potential.log_constant + jnp.sum(pair_potentials.log_constant)
+
+        return cls(
+            diagonal_precision_blocks=diagonal,
+            lower_precision_blocks=pair_potentials.lower_precision,
+            information_vectors=information_vectors,
+            log_constant=log_constant,
+        )
 
     @property
     def num_time_steps(self) -> int:
@@ -184,11 +386,13 @@ class GaussianChain(typing.NamedTuple):
         if self.information_vectors.ndim != 2:
             raise ValueError('information_vectors must have shape (T, D)')
 
+        if self.log_constant.ndim != 0:
+            raise ValueError('log_constant must be scalar')
+
         t = self.num_time_steps
         d = self.variable_dim
-        d_ = self.diagonal_precision_blocks.shape[2]
 
-        if d != d_:
+        if self.diagonal_precision_blocks.shape[2] != d:
             raise ValueError('diagonal_precision_blocks must have shape (T, D, D)')
 
         if t < 1:
@@ -200,20 +404,37 @@ class GaussianChain(typing.NamedTuple):
         if self.information_vectors.shape != (t, d):
             raise ValueError('information_vectors must have shape (T, D)')
 
-        if self.lower_precision_blocks.shape != (max(t - 1, 0), d, d):
+        if self.lower_precision_blocks.shape != (t - 1, d, d):
             raise ValueError('lower_precision_blocks must have shape (T - 1, D, D)')
 
     def add_local_potential(
         self,
         potential: GaussianPotential,
     ) -> GaussianChain:
-        """Adding a collection of unary Gaussian factors to a Gaussian chain"""
+        """Add one unary Gaussian potential at each time step."""
+        self.validate()
+        potential.validate()
+
+        expected_batch_shape = (self.num_time_steps,)
+
+        if potential.batch_shape != expected_batch_shape:
+            raise ValueError(
+                'potential must contain exactly one potential per time step; '
+                f'expected leading shape {expected_batch_shape}, '
+                f'got {potential.batch_shape}'
+            )
+
+        if potential.variable_dim != self.variable_dim:
+            raise ValueError(
+                'potential variable dimension must match chain variable dimension; '
+                f'expected {self.variable_dim}, got {potential.variable_dim}'
+            )
 
         return GaussianChain(
             diagonal_precision_blocks=(self.diagonal_precision_blocks + potential.precision_blocks),
             lower_precision_blocks=self.lower_precision_blocks,
             information_vectors=(self.information_vectors + potential.information_vectors),
-            log_constant=(self.log_constant + potential.log_constant),
+            log_constant=(self.log_constant + jnp.sum(potential.log_constant)),
         )
 
     def log_potential(
@@ -221,6 +442,12 @@ class GaussianChain(typing.NamedTuple):
         latent: jax.Array,
     ) -> jax.Array:
         """Compute log f(x) for a latent trajectory."""
+        self.validate()
+
+        expected_shape = (self.num_time_steps, self.variable_dim)
+
+        if latent.shape != expected_shape:
+            raise ValueError(f'latent must have shape {expected_shape}. Got shape {latent.shape}')
 
         diagonal_terms = jnp.einsum(
             'ti,tij,tj->',
@@ -300,19 +527,35 @@ class GaussianChain(typing.NamedTuple):
             prev_cholesky, prev_eff_info = carry
             lower_block, diag_block, info_vec = x
 
-            solved_lower_transpose = _solve_from_cholesky(prev_cholesky, lower_block.T)
+            solved_lower_transpose = _solve_from_cholesky(
+                prev_cholesky,
+                lower_block.T,
+            )
             effective_precision = diag_block - lower_block @ solved_lower_transpose
             current_cholesky = jnp.linalg.cholesky(effective_precision)
 
-            solved_prev_info = _solve_from_cholesky(prev_cholesky, prev_eff_info)
+            solved_prev_info = _solve_from_cholesky(
+                prev_cholesky,
+                prev_eff_info,
+            )
             current_eff_info = info_vec - lower_block @ solved_prev_info
 
-            return (current_cholesky, current_eff_info), (current_cholesky, current_eff_info)
+            return (
+                current_cholesky,
+                current_eff_info,
+            ), (
+                current_cholesky,
+                current_eff_info,
+            )
 
         _, (rest_cholesky, rest_eff_info) = jax.lax.scan(
             step,
             (first_cholesky, information_vectors[0]),
-            (lower_blocks, diagonal_blocks[1:], information_vectors[1:]),
+            (
+                lower_blocks,
+                diagonal_blocks[1:],
+                information_vectors[1:],
+            ),
         )
 
         precision_cholesky_factors = jnp.concatenate([first_cholesky[None], rest_cholesky])
@@ -330,7 +573,6 @@ class GaussianChain(typing.NamedTuple):
         self,
     ) -> GaussianChainMarginals:
         """Compute moments and log normalizer for a Gaussian chain."""
-
         self.validate()
 
         factorization = self._factorize()
@@ -340,16 +582,7 @@ class GaussianChain(typing.NamedTuple):
         effective_information_vectors = factorization.effective_information_vectors
 
         time_steps, variable_dim, _ = self.diagonal_precision_blocks.shape
-
         dtype = self.diagonal_precision_blocks.dtype
-
-        if time_steps == 0:
-            return GaussianChainMarginals(
-                means=jnp.zeros((time_steps, variable_dim), dtype=dtype),
-                covariances=jnp.zeros((time_steps, variable_dim, variable_dim), dtype=dtype),
-                cross_covariances=jnp.zeros((0, variable_dim, variable_dim), dtype=dtype),
-                log_normalizer=jnp.array(0.0, dtype=dtype),
-            )
 
         # Backward mean recursion.
         last_mean = _solve_from_cholesky(
@@ -360,13 +593,22 @@ class GaussianChain(typing.NamedTuple):
         def backward_mean_step(carry, x):
             next_mean = carry
             lower_block, cholesky, eff_info = x
-            mean = _solve_from_cholesky(cholesky, eff_info - lower_block.T @ next_mean)
+
+            mean = _solve_from_cholesky(
+                cholesky,
+                eff_info - lower_block.T @ next_mean,
+            )
+
             return mean, mean
 
         _, means_rest = jax.lax.scan(
             backward_mean_step,
             last_mean,
-            (lower_blocks, precision_cholesky_factors[:-1], effective_information_vectors[:-1]),
+            (
+                lower_blocks,
+                precision_cholesky_factors[:-1],
+                effective_information_vectors[:-1],
+            ),
             reverse=True,
         )
 
@@ -380,19 +622,28 @@ class GaussianChain(typing.NamedTuple):
             lower_block, cholesky = x
 
             conditional_covariance = _inverse_from_cholesky(cholesky)
-            mean_coefficient = -_solve_from_cholesky(cholesky, lower_block.T)
+            mean_coefficient = -_solve_from_cholesky(
+                cholesky,
+                lower_block.T,
+            )
 
             covariance = (
                 conditional_covariance + mean_coefficient @ next_covariance @ mean_coefficient.T
             )
             cross_covariance = mean_coefficient @ next_covariance
 
-            return covariance, (covariance, cross_covariance)
+            return covariance, (
+                covariance,
+                cross_covariance,
+            )
 
         _, (covs_rest, cross_covariances) = jax.lax.scan(
             backward_cov_step,
             last_covariance,
-            (lower_blocks, precision_cholesky_factors[:-1]),
+            (
+                lower_blocks,
+                precision_cholesky_factors[:-1],
+            ),
             reverse=True,
         )
 
@@ -480,6 +731,7 @@ def _solve_from_cholesky(
         rhs,
         lower=True,
     )
+
     return jsp_linalg.solve_triangular(
         cholesky_factor.T,
         intermediate,
@@ -487,15 +739,23 @@ def _solve_from_cholesky(
     )
 
 
-def _inverse_from_cholesky(cholesky_factor: jax.Array) -> jax.Array:
+def _inverse_from_cholesky(
+    cholesky_factor: jax.Array,
+) -> jax.Array:
     """Compute an SPD inverse from its Cholesky factor."""
     identity = jnp.eye(
         cholesky_factor.shape[0],
         dtype=cholesky_factor.dtype,
     )
-    return _solve_from_cholesky(cholesky_factor, identity)
+
+    return _solve_from_cholesky(
+        cholesky_factor,
+        identity,
+    )
 
 
-def _log_det_from_cholesky(cholesky_factor: jax.Array) -> jax.Array:
+def _log_det_from_cholesky(
+    cholesky_factor: jax.Array,
+) -> jax.Array:
     """Compute an SPD log determinant from its Cholesky factor."""
     return 2.0 * jnp.sum(jnp.log(jnp.diag(cholesky_factor)))
