@@ -29,6 +29,7 @@ import typing
 import jax
 import jax.numpy as jnp
 
+from xxm.core.discrete.chain import DiscretePotential
 from xxm.hmm.core import Posterior
 from xxm.stats import gaussian, poisson
 
@@ -94,6 +95,11 @@ class ARGaussianEmissions(typing.NamedTuple):
         )
 
         return jnp.concatenate([padding, log_likelihoods], axis=0)
+
+    def get_potential(self, observations: jax.Array) -> DiscretePotential:
+        return DiscretePotential(
+            log_values=self.log_likelihoods(observations),
+        )
 
     def fit_params(
         self,
@@ -235,6 +241,11 @@ class ARPoissonEmissions(typing.NamedTuple):
         )
 
         return jnp.concatenate([padding, log_likelihoods], axis=0)
+
+    def get_potential(self, observations: jax.Array) -> DiscretePotential:
+        return DiscretePotential(
+            log_values=self.log_likelihoods(observations),
+        )
 
     def fit_params(
         self,

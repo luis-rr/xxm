@@ -4,7 +4,7 @@ import numpy as np
 
 from xxm.core.discrete.chain import DiscreteChainMarginals
 from xxm.core.discrete.emissions import GaussianEmissions, PoissonEmissions
-from xxm.hmm.core import LatentInitialModel, LatentTransitionModel, Model
+from xxm.hmm.core import DiscreteInitialModel, DiscreteTransitionModel, Model
 from xxm.hmm.learning import em_step
 
 jax.config.update('jax_enable_x64', True)
@@ -41,7 +41,7 @@ def test_m_step_initial_probs():
         pair_marginals=jnp.zeros((2, 2, 2)),
     )
 
-    initial = LatentInitialModel(initial_probs=jnp.array([0.5, 0.5]))
+    initial = DiscreteInitialModel(initial_probs=jnp.array([0.5, 0.5]))
 
     result = initial.fit_params(posterior=posterior)
 
@@ -75,7 +75,7 @@ def test_m_step_transition_probs():
         pair_marginals,
     )
 
-    transitions = LatentTransitionModel(transition_probs=jnp.array([[0.5, 0.5], [0.5, 0.5]]))
+    transitions = DiscreteTransitionModel(transition_probs=jnp.array([[0.5, 0.5], [0.5, 0.5]]))
 
     result = transitions.fit_params(posterior)
 
@@ -254,8 +254,8 @@ def test_gaussian_m_step():
 
 def test_em_step_is_jit_compatible():
     model = Model(
-        initial=LatentInitialModel(initial_probs=jnp.array([0.5, 0.5])),
-        transitions=LatentTransitionModel(
+        initial=DiscreteInitialModel(initial_probs=jnp.array([0.5, 0.5])),
+        transitions=DiscreteTransitionModel(
             transition_probs=jnp.array(
                 [
                     [0.8, 0.2],

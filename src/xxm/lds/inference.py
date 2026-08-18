@@ -3,12 +3,23 @@ import typing
 import jax
 from jax import numpy as jnp
 
-from xxm.core.gaussian.chain import GaussianChain
+from xxm.core.gaussian.chain import GaussianChain as Chain
 from xxm.core.gaussian.chain import GaussianChainMarginals as Posterior
 from xxm.core.gaussian.emissions import LaplaceEmissionsT, QuadraticEmissionsT
 from xxm.newton import NewtonSearch
 
 from .core import Model
+
+
+def to_chain(
+    model: Model,
+    num_time_steps: int,
+) -> Chain:
+    """Construct the Gaussian chain defined by the latent LDS prior."""
+    return Chain.from_pair_potentials(
+        model.get_initial_potential(),
+        model.get_pair_potentials(num_time_steps),
+    )
 
 
 def inference_exact(
@@ -17,7 +28,8 @@ def inference_exact(
 ) -> Posterior:
     """Compute the exact posterior over latents for quadratic emissions."""
 
-    latent_chain = model.to_gaussian_chain(
+    latent_chain = to_chain(
+        model,
         num_time_steps=observations.shape[0],
     )
 
@@ -64,7 +76,7 @@ class _NewtonSearchModel(
 ):
     """Find the Laplace posterior mode."""
 
-    latent_chain: GaussianChain
+    latent_chain: Chain
     emissions: LaplaceEmissionsT
     observations: jax.Array
 
@@ -134,7 +146,8 @@ def inference_laplace(
         latents = initial_latents
 
     newton_model = _NewtonSearchModel(
-        latent_chain=model.to_gaussian_chain(
+        latent_chain=to_chain(
+            model=model,
             num_time_steps=num_time_steps,
         ),
         emissions=model.emissions,

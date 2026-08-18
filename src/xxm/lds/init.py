@@ -5,7 +5,7 @@ from xxm.core.gaussian.emissions import GaussianEmissions, PoissonEmissions
 
 from ..fit import unstack_models
 from ..stats import gaussian, poisson
-from .core import LinearGaussianDynamicsModel, GaussianInitialModel, Model
+from .core import GaussianInitialModel, LinearGaussianDynamicsModel, Model
 
 
 def _covariance(

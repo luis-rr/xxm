@@ -479,3 +479,366 @@ def test_forward_backward_is_jit_compatible() -> None:
         float(eager_result.log_normalizer),
         atol=ATOL,
     )
+
+
+def test_discrete_chain_rejects_batched_chain() -> None:
+    """DiscreteChain represents one chain, not a batch of chains."""
+    chain = xxm.core.discrete.chain.DiscreteChain(
+        initial_probs=jnp.array(
+            [
+                [0.6, 0.4],
+                [0.3, 0.7],
+            ]
+        ),
+        transition_probs=jnp.ones((2, 2, 2, 2)) / 2.0,
+        state_log_potentials=jnp.zeros((2, 3, 2)),
+    )
+
+    with pytest.raises(ValueError):
+        chain.forward_backward()
+
+
+def test_forward_backward_supports_batching_with_vmap() -> None:
+    """Independent chains can be batched externally with vmap."""
+    initial_probs = jnp.array(
+        [
+            [0.6, 0.4],
+            [0.25, 0.75],
+        ]
+    )
+
+    transition_probs = jnp.array(
+        [
+            [
+                [[0.8, 0.2], [0.3, 0.7]],
+                [[0.6, 0.4], [0.1, 0.9]],
+            ],
+            [
+                [[0.5, 0.5], [0.2, 0.8]],
+                [[0.9, 0.1], [0.4, 0.6]],
+            ],
+        ]
+    )
+
+    state_log_potentials = jnp.log(
+        jnp.array(
+            [
+                [
+                    [0.9, 0.1],
+                    [0.4, 0.6],
+                    [0.7, 0.3],
+                ],
+                [
+                    [0.2, 0.8],
+                    [0.6, 0.4],
+                    [0.3, 0.7],
+                ],
+            ]
+        )
+    )
+
+    def run(
+        initial_probs: jax.Array,
+        transition_probs: jax.Array,
+        state_log_potentials: jax.Array,
+    ) -> xxm.core.discrete.chain.DiscreteChainMarginals:
+        return xxm.core.discrete.chain.DiscreteChain(
+            initial_probs=initial_probs,
+            transition_probs=transition_probs,
+            state_log_potentials=state_log_potentials,
+        ).forward_backward()
+
+    batched_result = jax.vmap(run)(
+        initial_probs,
+        transition_probs,
+        state_log_potentials,
+    )
+
+    for batch_index in range(2):
+        expected = run(
+            initial_probs[batch_index],
+            transition_probs[batch_index],
+            state_log_potentials[batch_index],
+        )
+
+        np.testing.assert_allclose(
+            batched_result.state_marginals[batch_index],
+            expected.state_marginals,
+            atol=ATOL,
+            rtol=RTOL,
+        )
+        np.testing.assert_allclose(
+            batched_result.pair_marginals[batch_index],
+            expected.pair_marginals,
+            atol=ATOL,
+            rtol=RTOL,
+        )
+        np.testing.assert_allclose(
+            batched_result.log_normalizer[batch_index],
+            expected.log_normalizer,
+            atol=ATOL,
+            rtol=RTOL,
+        )
+
+    assert batched_result.state_marginals.shape == (2, 3, 2)
+    assert batched_result.pair_marginals.shape == (2, 2, 2, 2)
+    assert batched_result.log_normalizer.shape == (2,)
+
+
+def test_vmapped_forward_backward_is_jit_compatible() -> None:
+    initial_probs = jnp.array(
+        [
+            [0.6, 0.4],
+            [0.3, 0.7],
+        ]
+    )
+
+    transition_probs = jnp.array(
+        [
+            [
+                [[0.8, 0.2], [0.3, 0.7]],
+                [[0.6, 0.4], [0.1, 0.9]],
+            ],
+            [
+                [[0.5, 0.5], [0.2, 0.8]],
+                [[0.9, 0.1], [0.4, 0.6]],
+            ],
+        ]
+    )
+
+    state_log_potentials = jnp.log(
+        jnp.array(
+            [
+                [
+                    [0.9, 0.1],
+                    [0.4, 0.6],
+                    [0.7, 0.3],
+                ],
+                [
+                    [0.2, 0.8],
+                    [0.6, 0.4],
+                    [0.3, 0.7],
+                ],
+            ]
+        )
+    )
+
+    def run(
+        initial_probs: jax.Array,
+        transition_probs: jax.Array,
+        state_log_potentials: jax.Array,
+    ) -> xxm.core.discrete.chain.DiscreteChainMarginals:
+        return xxm.core.discrete.chain.DiscreteChain(
+            initial_probs=initial_probs,
+            transition_probs=transition_probs,
+            state_log_potentials=state_log_potentials,
+        ).forward_backward()
+
+    batched_run = jax.vmap(run)
+
+    eager = batched_run(
+        initial_probs,
+        transition_probs,
+        state_log_potentials,
+    )
+    jitted = jax.jit(batched_run)(
+        initial_probs,
+        transition_probs,
+        state_log_potentials,
+    )
+
+    np.testing.assert_allclose(
+        jitted.state_marginals,
+        eager.state_marginals,
+        atol=ATOL,
+        rtol=RTOL,
+    )
+    np.testing.assert_allclose(
+        jitted.pair_marginals,
+        eager.pair_marginals,
+        atol=ATOL,
+        rtol=RTOL,
+    )
+    np.testing.assert_allclose(
+        jitted.log_normalizer,
+        eager.log_normalizer,
+        atol=ATOL,
+        rtol=RTOL,
+    )
+
+
+def test_single_time_step_matches_direct_normalization() -> None:
+    initial_probs = jnp.array([0.6, 0.4])
+    state_log_potentials = jnp.log(
+        jnp.array(
+            [
+                [0.2, 0.8],
+            ]
+        )
+    )
+
+    chain = xxm.core.discrete.chain.DiscreteChain(
+        initial_probs=initial_probs,
+        transition_probs=jnp.zeros((0, 2, 2)),
+        state_log_potentials=state_log_potentials,
+    )
+
+    result = chain.forward_backward()
+
+    unnormalized = np.array([0.6 * 0.2, 0.4 * 0.8])
+    normalizer = unnormalized.sum()
+    expected = unnormalized / normalizer
+
+    np.testing.assert_allclose(
+        result.state_marginals[0],
+        expected,
+        atol=ATOL,
+        rtol=RTOL,
+    )
+    np.testing.assert_allclose(
+        result.log_normalizer,
+        np.log(normalizer),
+        atol=ATOL,
+        rtol=RTOL,
+    )
+
+    assert result.pair_marginals.shape == (0, 2, 2)
+
+
+def test_single_state_chain() -> None:
+    state_log_potentials = jnp.array(
+        [
+            [0.2],
+            [-0.4],
+            [0.7],
+        ]
+    )
+
+    chain = xxm.core.discrete.chain.DiscreteChain(
+        initial_probs=jnp.ones(1),
+        transition_probs=jnp.ones((2, 1, 1)),
+        state_log_potentials=state_log_potentials,
+    )
+
+    result = chain.forward_backward()
+
+    np.testing.assert_allclose(
+        result.state_marginals,
+        np.ones((3, 1)),
+        atol=ATOL,
+    )
+    np.testing.assert_allclose(
+        result.pair_marginals,
+        np.ones((2, 1, 1)),
+        atol=ATOL,
+    )
+    np.testing.assert_allclose(
+        result.log_normalizer,
+        np.sum(state_log_potentials),
+        atol=ATOL,
+    )
+
+
+def test_state_log_potential_offsets_only_shift_log_normalizer() -> None:
+    chain = xxm.core.discrete.chain.DiscreteChain(
+        initial_probs=jnp.array([0.6, 0.4]),
+        transition_probs=jnp.array(
+            [
+                [[0.8, 0.2], [0.3, 0.7]],
+                [[0.6, 0.4], [0.1, 0.9]],
+            ]
+        ),
+        state_log_potentials=jnp.log(
+            jnp.array(
+                [
+                    [0.9, 0.1],
+                    [0.4, 0.6],
+                    [0.7, 0.3],
+                ]
+            )
+        ),
+    )
+
+    offsets = jnp.array([100.0, -20.0, 7.5])
+
+    shifted_chain = chain._replace(
+        state_log_potentials=(chain.state_log_potentials + offsets[:, None])
+    )
+
+    original = chain.forward_backward()
+    shifted = shifted_chain.forward_backward()
+
+    np.testing.assert_allclose(
+        shifted.state_marginals,
+        original.state_marginals,
+        atol=ATOL,
+        rtol=RTOL,
+    )
+    np.testing.assert_allclose(
+        shifted.pair_marginals,
+        original.pair_marginals,
+        atol=ATOL,
+        rtol=RTOL,
+    )
+    np.testing.assert_allclose(
+        shifted.log_normalizer,
+        original.log_normalizer + offsets.sum(),
+        atol=ATOL,
+        rtol=RTOL,
+    )
+
+
+def test_weighted_means_matches_analytic_result_and_is_jittable() -> None:
+    marginals = xxm.core.discrete.chain.DiscreteChainMarginals(
+        state_marginals=jnp.array(
+            [
+                [1.0, 0.0],
+                [0.5, 0.5],
+                [0.0, 1.0],
+            ]
+        ),
+        pair_marginals=jnp.zeros((2, 2, 2)),
+        log_normalizer=jnp.array(0.0),
+    )
+
+    data = jnp.array(
+        [
+            [0.0, 2.0],
+            [2.0, 4.0],
+            [4.0, 6.0],
+        ]
+    )
+
+    expected = np.array(
+        [
+            [2.0 / 3.0, 8.0 / 3.0],
+            [10.0 / 3.0, 16.0 / 3.0],
+        ]
+    )
+
+    eager = marginals.weighted_means(data)
+    jitted = jax.jit(lambda marginals, data: marginals.weighted_means(data))(marginals, data)
+
+    np.testing.assert_allclose(
+        eager,
+        expected,
+        atol=ATOL,
+        rtol=RTOL,
+    )
+    np.testing.assert_allclose(
+        jitted,
+        expected,
+        atol=ATOL,
+        rtol=RTOL,
+    )
+
+
+def test_weighted_means_requires_matching_time_dimension() -> None:
+    marginals = xxm.core.discrete.chain.DiscreteChainMarginals(
+        state_marginals=jnp.ones((3, 2)) / 2,
+        pair_marginals=jnp.ones((2, 2, 2)) / 4,
+        log_normalizer=jnp.array(0.0),
+    )
+
+    with pytest.raises(ValueError):
+        marginals.weighted_means(jnp.ones((4, 1)))

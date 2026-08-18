@@ -8,12 +8,11 @@ import jax
 from jax import numpy as jnp
 from jax.scipy import linalg as jsp_linalg
 
+from xxm.core.gaussian.chain import GaussianChainMarginals as Posterior
 from xxm.core.gaussian.chain import (
-    GaussianChain,
     GaussianPairPotential,
     GaussianPotential,
 )
-from xxm.core.gaussian.chain import GaussianChainMarginals as Posterior
 from xxm.core.gaussian.emissions import Emissions
 
 from ..stats import gaussian
@@ -156,13 +155,6 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         )
 
         return potential.broadcast(batch_shape=(num_time_steps - 1,))
-
-    def to_gaussian_chain(self, num_time_steps: int) -> GaussianChain:
-        """Construct the Gaussian chain defined by the latent LDS prior."""
-        return GaussianChain.from_pair_potentials(
-            self.get_initial_potential(),
-            self.get_pair_potentials(num_time_steps),
-        )
 
     def sample(
         self,

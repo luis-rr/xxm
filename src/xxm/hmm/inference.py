@@ -1,16 +1,14 @@
 import jax
 from jax import numpy as jnp
 
-from xxm.core.discrete.chain import DiscreteChain
+from xxm.core.discrete.chain import DiscreteChain as Chain
+from xxm.hmm.core import Model, Posterior
 
-from .core import Model, Posterior
 
-
-def _to_chain(model: Model, observations: jax.Array) -> DiscreteChain:
-    state_log_potentials = model.emissions.log_likelihoods(observations)
-
-    num_time_steps = observations.shape[0]
-
+def to_chain(
+    model: Model,
+    num_time_steps: int,
+) -> Chain:
     transition_probs = jnp.broadcast_to(
         model.transitions.transition_probs,
         (
@@ -20,13 +18,31 @@ def _to_chain(model: Model, observations: jax.Array) -> DiscreteChain:
         ),
     )
 
-    return DiscreteChain(
+    return Chain(
         initial_probs=model.initial.initial_probs,
         transition_probs=transition_probs,
-        state_log_potentials=state_log_potentials,
+        state_log_potentials=jnp.zeros(
+            (num_time_steps, model.num_states),
+            dtype=model.initial.initial_probs.dtype,
+        ),
     )
 
 
-def inference_exact(model: Model, observations: jax.Array) -> Posterior:
-    chain = _to_chain(model, observations)
-    return chain.forward_backward()
+def inference_exact(
+    model: Model,
+    observations: jax.Array,
+) -> Posterior:
+    """Compute the exact posterior over latents."""
+
+    latent_chain = to_chain(
+        model,
+        num_time_steps=observations.shape[0],
+    )
+
+    observation_potential = model.emissions.get_potential(observations)
+
+    posterior_chain = latent_chain.add_local_potential(
+        observation_potential,
+    )
+
+    return posterior_chain.forward_backward()

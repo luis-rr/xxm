@@ -12,7 +12,7 @@ from xxm.core.discrete.emissions_ar import (
 )
 from xxm.stats import gaussian, poisson
 
-from .core import Emissions, LatentInitialModel, LatentTransitionModel, Model
+from .core import DiscreteInitialModel, DiscreteTransitionModel, Emissions, Model
 
 
 def _kmeans(
@@ -90,8 +90,8 @@ def _initialize(
         )
 
     return Model(
-        initial=LatentInitialModel(initial_probs=initial_probs),
-        transitions=LatentTransitionModel(transition_probs=transition_probs),
+        initial=DiscreteInitialModel(initial_probs=initial_probs),
+        transitions=DiscreteTransitionModel(transition_probs=transition_probs),
         emissions=emissions,
     )
 

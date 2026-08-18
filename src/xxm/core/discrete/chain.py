@@ -8,44 +8,63 @@ import jax
 import jax.numpy as jnp
 
 
+class DiscretePotential(typing.NamedTuple):
+    """Unary log potentials over a discrete variable."""
+
+    log_values: jax.Array  # (..., K)
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        return self.log_values.shape[:-1]
+
+    @property
+    def num_states(self) -> int:
+        return self.log_values.shape[-1]
+
+
 class DiscreteChain(typing.NamedTuple):
-    r"""Parameters defining a finite-state chain with local observation likelihoods.
+    r"""Parameters defining a finite-state chain with local state potentials.
 
     For fixed observations, the unnormalized distribution over states is
 
         f(z_{0:T-1})
         = p(z_0)
         \prod_{t=0}^{T-2} p(z_{t+1} | z_t)
-        \prod_{t=0}^{T-1} p(y_t | z_t).
+        \prod_{t=0}^{T-1} f_t(z_t).
 
     where
 
     * ``initial_probs[k] = p(z_0=k)``
     * ``transition_probs[t, i, j] = p(z_{t+1}=j | z_t=i)``
-    * ``state_log_potentials[t, k] = log p(y_t | z_t=k)``
+    * ``state_log_potentials[t, k] = log f_t(z_t=k)``
+
+    A ``DiscreteChain`` represents a single chain. Batch dimensions are
+    intentionally not supported; use ``jax.vmap`` over chains instead.
+
+    Transitions are always represented explicitly for each transition,
+    with shape ``(T - 1, K, K)``.
     """
 
-    initial_probs: jax.Array
-    transition_probs: jax.Array
-    state_log_potentials: jax.Array
+    initial_probs: jax.Array  # (K,)
+    transition_probs: jax.Array  # (T - 1, K, K)
+    state_log_potentials: jax.Array  # (T, K)
 
     def validate(self) -> None:
-
         if self.initial_probs.ndim != 1:
             raise ValueError(
                 f'initial_probs must have shape (K,). Got shape {self.initial_probs.shape}'
-            )
-
-        if self.state_log_potentials.ndim != 2:
-            raise ValueError(
-                f'state_log_potentials must have shape (T, K). '
-                f'Got shape {self.state_log_potentials.shape}'
             )
 
         if self.transition_probs.ndim != 3:
             raise ValueError(
                 f'transition_probs must have shape (T - 1, K, K). '
                 f'Got shape {self.transition_probs.shape}'
+            )
+
+        if self.state_log_potentials.ndim != 2:
+            raise ValueError(
+                f'state_log_potentials must have shape (T, K). '
+                f'Got shape {self.state_log_potentials.shape}'
             )
 
         k = self.initial_probs.shape[0]
@@ -57,36 +76,47 @@ class DiscreteChain(typing.NamedTuple):
         if k < 1:
             raise ValueError('Chain must contain at least one state')
 
-        if self.state_log_potentials.shape[1] != k:
-            raise ValueError('state_log_potentials must have shape (T, K) with matching K')
+        if self.state_log_potentials.shape != (t, k):
+            raise ValueError(
+                f'state_log_potentials must have shape (T, K). '
+                f'Got shape {self.state_log_potentials.shape}'
+            )
 
-        if self.transition_probs.shape != (max(0, t - 1), k, k):
+        if self.transition_probs.shape != (t - 1, k, k):
             raise ValueError(
                 f'transition_probs must have shape (T - 1, K, K). '
                 f'Got shape {self.transition_probs.shape}'
             )
 
     @property
-    def num_states(
-        self,
-    ) -> int:
+    def num_states(self) -> int:
         return self.initial_probs.shape[0]
 
     @property
-    def num_time_steps(
-        self,
-    ) -> int:
+    def num_time_steps(self) -> int:
         return self.state_log_potentials.shape[0]
 
-    def forward_backward(
-        self,
-    ) -> DiscreteChainMarginals:
-        """Run full forward-backward inference for one sequence."""
+    def forward_backward(self) -> DiscreteChainMarginals:
+        """Run full forward-backward inference for one chain."""
         self.validate()
 
         messages = _forward_backward(self)
 
         return messages.calculate_marginals(self)
+
+    def add_local_potential(
+        self,
+        potential: DiscretePotential,
+    ) -> DiscreteChain:
+        if potential.batch_shape != (self.num_time_steps,):
+            raise ValueError(...)
+
+        if potential.num_states != self.num_states:
+            raise ValueError(...)
+
+        return self._replace(
+            state_log_potentials=(self.state_log_potentials + potential.log_values)
+        )
 
 
 class DiscreteChainMarginals(typing.NamedTuple):
@@ -95,11 +125,14 @@ class DiscreteChainMarginals(typing.NamedTuple):
     * ``state_marginals[t, k] = p_f(z_t=k)``.
     * ``pair_marginals[t, i, j] = p_f(z_t=i, z_{t+1}=j)``.
     * ``log_normalizer = log Z``.
+
+    Represents the marginals of one chain. Batch dimensions can be introduced
+    externally by applying ``jax.vmap`` to chain inference.
     """
 
-    state_marginals: jax.Array
-    pair_marginals: jax.Array
-    log_normalizer: jax.Array
+    state_marginals: jax.Array  # (T, K)
+    pair_marginals: jax.Array  # (T - 1, K, K)
+    log_normalizer: jax.Array  # scalar
 
     def weighted_means(self, data: jax.Array) -> jax.Array:
         r"""Compute the posterior-weighted mean of ``data`` for each state \(k\).
@@ -109,31 +142,42 @@ class DiscreteChainMarginals(typing.NamedTuple):
         \frac{\sum_t p(z_t = k)\, x_t}
             {\sum_t p(z_t = k)}.
         \]
+
+        ``data`` must have shape ``(T, D)``.
         """
+        if data.ndim != 2:
+            raise ValueError(f'data must have shape (T, D). Got shape {data.shape}')
+
+        if data.shape[0] != self.state_marginals.shape[0]:
+            raise ValueError(
+                'data and state_marginals must have the same number of '
+                f'time steps. Got {data.shape[0]} and '
+                f'{self.state_marginals.shape[0]}'
+            )
+
         state_counts = self.state_marginals.sum(axis=0)
+
         return self.state_marginals.T @ data / state_counts[:, None]
 
 
 class _DiscreteChainMessages(typing.NamedTuple):
-    r"""
-    Normalized forward messages, scaled backward messages,
-    and per-step log normalizers for a discrete chain.
-    """
+    r"""Normalized messages and per-step log normalizers for one chain."""
 
-    forward_messages: jax.Array
-    backward_messages: jax.Array
-    log_scaling_factors: jax.Array
+    forward_messages: jax.Array  # (T, K)
+    backward_messages: jax.Array  # (T, K)
+    log_scaling_factors: jax.Array  # (T,)
 
-    def calculate_marginals(self, chain: DiscreteChain) -> DiscreteChainMarginals:
+    def calculate_marginals(
+        self,
+        chain: DiscreteChain,
+    ) -> DiscreteChainMarginals:
         return DiscreteChainMarginals(
             state_marginals=self.calculate_state_marginals(),
             pair_marginals=self.calculate_pair_marginals(chain),
             log_normalizer=self.calculate_log_normalizer(),
         )
 
-    def calculate_state_marginals(
-        self,
-    ) -> jax.Array:
+    def calculate_state_marginals(self) -> jax.Array:
         """Compute state probabilities gamma[t, k]."""
         if (
             self.forward_messages.ndim != 2
@@ -145,11 +189,18 @@ class _DiscreteChainMessages(typing.NamedTuple):
             )
 
         unnormalized_state_marginals = self.forward_messages * self.backward_messages
+
         min_normalizer = jnp.finfo(self.forward_messages.dtype).tiny
+
         state_marginal_normalizers = jnp.maximum(
-            jnp.sum(unnormalized_state_marginals, axis=1, keepdims=True),
+            jnp.sum(
+                unnormalized_state_marginals,
+                axis=1,
+                keepdims=True,
+            ),
             min_normalizer,
         )
+
         return unnormalized_state_marginals / state_marginal_normalizers
 
     def calculate_pair_marginals(
@@ -170,7 +221,10 @@ class _DiscreteChainMessages(typing.NamedTuple):
         k = chain.num_states
 
         if t == 1:
-            return jnp.zeros((0, k, k), dtype=self.forward_messages.dtype)
+            return jnp.zeros(
+                (0, k, k),
+                dtype=self.forward_messages.dtype,
+            )
 
         def pair_step(
             current_forward_messages: jax.Array,
@@ -201,9 +255,7 @@ class _DiscreteChainMessages(typing.NamedTuple):
             self.log_scaling_factors[1:],
         )
 
-    def calculate_log_normalizer(
-        self,
-    ) -> jax.Array:
+    def calculate_log_normalizer(self) -> jax.Array:
         """Compute the log normalizer of the chain distribution."""
         return jnp.sum(self.log_scaling_factors)
 
@@ -221,35 +273,50 @@ def _forward_pass(
     ) -> tuple[jax.Array, jax.Array]:
         observation_offset = jnp.max(state_log_potential)
         observation_weights = jnp.exp(state_log_potential - observation_offset)
+
         return observation_weights, observation_offset
 
-    first_observation_weights, first_observation_offset = _normalized_observation_weights(
-        chain.state_log_potentials[0]
-    )
+    (
+        first_observation_weights,
+        first_observation_offset,
+    ) = _normalized_observation_weights(chain.state_log_potentials[0])
+
     first_unnormalized = chain.initial_probs * first_observation_weights
-    first_normalizer = jnp.maximum(jnp.sum(first_unnormalized), min_normalizer)
+
+    first_normalizer = jnp.maximum(
+        jnp.sum(first_unnormalized),
+        min_normalizer,
+    )
+
     first_forward_messages = first_unnormalized / first_normalizer
+
     first_log_normalizer = jnp.log(first_normalizer) + first_observation_offset
 
     def forward_step(
         previous_forward_messages: jax.Array,
         inputs: tuple[jax.Array, jax.Array],
-    ) -> tuple[jax.Array, tuple[jax.Array, jax.Array]]:
+    ) -> tuple[
+        jax.Array,
+        tuple[jax.Array, jax.Array],
+    ]:
         transition_probs, state_log_potential = inputs
 
         predictive_probs = previous_forward_messages @ transition_probs
 
-        observation_weights, observation_offset = _normalized_observation_weights(
-            state_log_potential
-        )
+        (
+            observation_weights,
+            observation_offset,
+        ) = _normalized_observation_weights(state_log_potential)
 
         unnormalized_forward_messages = predictive_probs * observation_weights
+
         forward_normalizer = jnp.maximum(
             jnp.sum(unnormalized_forward_messages),
             min_normalizer,
         )
 
         current_forward_messages = unnormalized_forward_messages / forward_normalizer
+
         current_log_normalizer = jnp.log(forward_normalizer) + observation_offset
 
         return current_forward_messages, (
@@ -258,7 +325,10 @@ def _forward_pass(
         )
 
     if t == 1:
-        return first_forward_messages[None, :], first_log_normalizer[None]
+        return (
+            first_forward_messages[None, :],
+            first_log_normalizer[None],
+        )
 
     (
         _,
@@ -276,11 +346,18 @@ def _forward_pass(
     )
 
     forward_messages = jnp.concatenate(
-        [first_forward_messages[None, :], remaining_forward_messages],
+        [
+            first_forward_messages[None, :],
+            remaining_forward_messages,
+        ],
         axis=0,
     )
+
     log_scaling_factors = jnp.concatenate(
-        [first_log_normalizer[None], remaining_log_scaling_factors],
+        [
+            first_log_normalizer[None],
+            remaining_log_scaling_factors,
+        ],
         axis=0,
     )
 
@@ -292,7 +369,6 @@ def _backward_pass(
     log_scaling_factors: jax.Array,
 ) -> jax.Array:
     """Run the backward recursion consistent with forward normalizers."""
-
     k = chain.num_states
     t = chain.num_time_steps
 
@@ -309,7 +385,11 @@ def _backward_pass(
 
     def backward_step(
         backward_messages_at_next_time: jax.Array,
-        inputs: tuple[jax.Array, jax.Array, jax.Array],
+        inputs: tuple[
+            jax.Array,
+            jax.Array,
+            jax.Array,
+        ],
     ) -> tuple[jax.Array, jax.Array]:
         (
             transition_probs,
@@ -318,6 +398,7 @@ def _backward_pass(
         ) = inputs
 
         observation_offset = jnp.max(next_state_log_potential)
+
         next_observation_weights = jnp.exp(next_state_log_potential - observation_offset)
 
         weighted_future_probs = next_observation_weights * backward_messages_at_next_time
@@ -344,16 +425,27 @@ def _backward_pass(
     )
 
     return jnp.concatenate(
-        [reverse_backward_messages[::-1], terminal_backward_messages[None, :]],
+        [
+            reverse_backward_messages[::-1],
+            terminal_backward_messages[None, :],
+        ],
         axis=0,
     )
 
 
-def _forward_backward(chain: DiscreteChain) -> _DiscreteChainMessages:
-    """Run full forward-backward inference for one sequence."""
-    forward_messages, log_scaling_factors = _forward_pass(chain)
+def _forward_backward(
+    chain: DiscreteChain,
+) -> _DiscreteChainMessages:
+    """Run full forward-backward inference for one chain."""
+    (
+        forward_messages,
+        log_scaling_factors,
+    ) = _forward_pass(chain)
 
-    backward_messages = _backward_pass(chain, log_scaling_factors=log_scaling_factors)
+    backward_messages = _backward_pass(
+        chain,
+        log_scaling_factors=log_scaling_factors,
+    )
 
     return _DiscreteChainMessages(
         forward_messages=forward_messages,

@@ -3,6 +3,7 @@ import typing
 import jax
 import jax.numpy as jnp
 
+from xxm.core.discrete.chain import DiscretePotential
 from xxm.hmm.core import Posterior
 from xxm.stats import gaussian, poisson
 
@@ -17,6 +18,11 @@ class GaussianEmissions(typing.NamedTuple):
             observations=observations,
             means=self.means[None, :, :],
             covariances=self.covariances,
+        )
+
+    def get_potential(self, observations: jax.Array) -> DiscretePotential:
+        return DiscretePotential(
+            log_values=self.log_likelihoods(observations),
         )
 
     def fit_params(
@@ -62,6 +68,11 @@ class PoissonEmissions(typing.NamedTuple):
         return poisson.log_likelihoods(
             observations,
             jnp.log(self.rates)[None, :, :],
+        )
+
+    def get_potential(self, observations: jax.Array) -> DiscretePotential:
+        return DiscretePotential(
+            log_values=self.log_likelihoods(observations),
         )
 
     def fit_params(self, observations: jax.Array, posterior: Posterior) -> 'PoissonEmissions':

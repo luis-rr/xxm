@@ -34,7 +34,7 @@ class Emissions(typing.Protocol):
 EmissionsT = typing.TypeVar('EmissionsT', bound=Emissions)
 
 
-class LatentInitialModel(typing.NamedTuple):
+class DiscreteInitialModel(typing.NamedTuple):
     initial_probs: jax.Array
 
     def sample(self, key: jax.Array) -> jax.Array:
@@ -43,8 +43,8 @@ class LatentInitialModel(typing.NamedTuple):
             jnp.log(self.initial_probs),
         )
 
-    def permute(self, permutation: jax.Array) -> LatentInitialModel:
-        return LatentInitialModel(
+    def permute(self, permutation: jax.Array) -> DiscreteInitialModel:
+        return DiscreteInitialModel(
             initial_probs=self.initial_probs[permutation],
         )
 
@@ -66,7 +66,7 @@ class LatentInitialModel(typing.NamedTuple):
         return self.__class__(initial_probs=posterior.state_marginals[0])
 
 
-class LatentTransitionModel(typing.NamedTuple):
+class DiscreteTransitionModel(typing.NamedTuple):
     transition_probs: jax.Array
 
     def sample(
@@ -79,8 +79,8 @@ class LatentTransitionModel(typing.NamedTuple):
             jnp.log(self.transition_probs[previous]),
         )
 
-    def permute(self, permutation: jax.Array) -> LatentTransitionModel:
-        return LatentTransitionModel(
+    def permute(self, permutation: jax.Array) -> DiscreteTransitionModel:
+        return DiscreteTransitionModel(
             transition_probs=self.transition_probs[permutation][:, permutation],
         )
 
@@ -117,8 +117,8 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     * ``emission_log_likelihoods[t, k] = \log p(y_t \mid z_t=k)``
     """
 
-    initial: LatentInitialModel
-    transitions: LatentTransitionModel
+    initial: DiscreteInitialModel
+    transitions: DiscreteTransitionModel
     emissions: EmissionsT
 
     @property

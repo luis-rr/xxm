@@ -4,12 +4,13 @@ from jax import numpy as jnp
 
 from tests.lds.lds_helpers import make_model, make_observations
 from xxm.core.gaussian.emissions import PoissonEmissions
-from xxm.lds.core import LinearGaussianDynamicsModel, GaussianInitialModel, Model
+from xxm.lds.core import GaussianInitialModel, LinearGaussianDynamicsModel, Model
 from xxm.lds.inference import (
     _NewtonSearchModel,
     _NewtonSearchParams,
     inference_exact,
     inference_laplace,
+    to_chain,
 )
 from xxm.newton import NewtonSearch
 
@@ -62,7 +63,7 @@ def test_laplace_newton_steps_do_not_decrease_objective():
     num_time_steps = observations.shape[0]
 
     laplace_model = _NewtonSearchModel(
-        latent_chain=model.to_gaussian_chain(num_time_steps),
+        latent_chain=to_chain(model=model, num_time_steps=num_time_steps),
         emissions=model.emissions,
         observations=observations,
     )
