@@ -42,7 +42,7 @@ def _kmeans(
         )
         assignments = jnp.argmin(distances, axis=1)
 
-        weights = jax.nn.one_hot(assignments, num_states)
+        weights = jax.nn.one_hot(assignments, num_states, dtype=observations.dtype)
         counts = weights.sum(axis=0)
 
         new_centers = weights.T @ observations / jnp.maximum(counts[:, None], 1)
@@ -71,23 +71,33 @@ def _kmeans(
 def _initialize(
     num_states: int,
     emissions: Emissions,
+    dtype: jnp.dtype,
     self_transition_prob: float = 0.9,
 ) -> Model:
-    initial_probs = jnp.ones(num_states) / num_states
-
     if num_states == 1:
-        transition_probs = jnp.array([[1.0]])
-
+        transition_probs = jnp.array(
+            [[1.0]],
+            dtype=dtype,
+        )
     else:
         off_diagonal_prob = (1.0 - self_transition_prob) / (num_states - 1)
 
         transition_probs = jnp.full(
             (num_states, num_states),
             off_diagonal_prob,
+            dtype=dtype,
         )
         transition_probs = transition_probs.at[jnp.diag_indices(num_states)].set(
             self_transition_prob
         )
+
+    initial_probs = (
+        jnp.ones(
+            num_states,
+            dtype=dtype,
+        )
+        / num_states
+    )
 
     return Model(
         initial=DiscreteInitialModel(initial_probs=initial_probs),
@@ -107,7 +117,7 @@ def _initialize_gaussian_emissions(
         key,
     )
 
-    weights = jax.nn.one_hot(assignments, num_states)
+    weights = jax.nn.one_hot(assignments, num_states, dtype=observations.dtype)
     counts = weights.sum(axis=0)
 
     means = weights.T @ observations / jnp.maximum(counts[:, None], 1)
@@ -136,7 +146,12 @@ def initialize_hmm_gaussian(
     self_transition_prob: float = 0.9,
 ) -> Model:
     emissions = _initialize_gaussian_emissions(observations, num_states, key=key)
-    return _initialize(num_states, emissions, self_transition_prob)
+    return _initialize(
+        num_states,
+        emissions,
+        self_transition_prob=self_transition_prob,
+        dtype=observations.dtype,
+    )
 
 
 def _initialize_ar_state_weights(
@@ -157,7 +172,9 @@ def _initialize_ar_state_weights(
         key,
     )
 
-    return jax.nn.one_hot(assignments, num_states)
+    dtype = jnp.result_type(features, jnp.float32)
+
+    return jax.nn.one_hot(assignments, num_states, dtype=dtype)
 
 
 def _initialize_ar_gaussian_emissions(
@@ -227,7 +244,8 @@ def initialize_arhmm_gaussian(
     return _initialize(
         num_states,
         emissions,
-        self_transition_prob,
+        dtype=observations.dtype,
+        self_transition_prob=self_transition_prob,
     )
 
 
@@ -242,7 +260,13 @@ def _initialize_poisson_emissions(
         key,
     )
 
-    weights = jax.nn.one_hot(assignments, num_states)
+    dtype = jnp.result_type(observations, jnp.float32)
+
+    weights = jax.nn.one_hot(
+        assignments,
+        num_states,
+        dtype=dtype,
+    )
     counts = weights.sum(axis=0)
 
     rates = weights.T @ observations / jnp.maximum(counts[:, None], 1)
@@ -259,7 +283,12 @@ def initialize_hmm_poisson(
     self_transition_prob: float = 0.9,
 ) -> Model:
     emissions = _initialize_poisson_emissions(observations, num_states, key=key)
-    return _initialize(num_states, emissions, self_transition_prob)
+    return _initialize(
+        num_states,
+        emissions,
+        self_transition_prob=self_transition_prob,
+        dtype=observations.dtype,
+    )
 
 
 def _initialize_ar_poisson_emissions(
@@ -330,4 +359,9 @@ def initialize_arhmm_poisson(
     self_transition_prob: float = 0.9,
 ) -> Model:
     emissions = _initialize_ar_poisson_emissions(observations, num_states, lag=lag, key=key)
-    return _initialize(num_states, emissions, self_transition_prob)
+    return _initialize(
+        num_states,
+        emissions,
+        self_transition_prob=self_transition_prob,
+        dtype=observations.dtype,
+    )
