@@ -10,7 +10,7 @@ def to_chain(
     num_time_steps: int,
 ) -> Chain:
     transition_probs = jnp.broadcast_to(
-        model.transitions.transition_probs,
+        model.transitions.model.probs,
         (
             num_time_steps - 1,
             model.num_states,
@@ -19,11 +19,11 @@ def to_chain(
     )
 
     return Chain(
-        initial_probs=model.initial.initial_probs,
+        initial_probs=model.initial.model.probs,
         transition_probs=transition_probs,
         state_log_potentials=jnp.zeros(
             (num_time_steps, model.num_states),
-            dtype=model.initial.initial_probs.dtype,
+            dtype=model.initial.model.probs.dtype,
         ),
     )
 

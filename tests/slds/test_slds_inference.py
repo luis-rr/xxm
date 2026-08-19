@@ -23,6 +23,7 @@ from xxm.slds.core import (
     SwitchingLinearGaussianDynamicsModel,
 )
 from xxm.slds.inference import inference_exact
+from xxm.stats.categorical import Categorical
 from xxm.stats.gaussian import Affine, Gaussian, LinearGaussian
 
 ATOL = 1e-5
@@ -130,10 +131,10 @@ class _IdentityGaussianEmissions(typing.NamedTuple):
 def _single_state_model() -> Model:
     return Model(
         state_initial=DiscreteInitialModel(
-            initial_probs=jnp.array([1.0]),
+            Categorical(probs=jnp.array([1.0])),
         ),
         transitions=DiscreteTransitionModel(
-            transition_probs=jnp.array([[1.0]]),
+            Categorical(probs=jnp.array([[1.0]])),
         ),
         latent_initial=GaussianInitialModel(
             model=Gaussian(mean=jnp.array([0.0]), covariance=jnp.array([[1.0]])),
@@ -153,14 +154,16 @@ def _single_state_model() -> Model:
 def _two_state_model() -> Model:
     return Model(
         state_initial=DiscreteInitialModel(
-            initial_probs=jnp.array([0.7, 0.3]),
+            Categorical(probs=jnp.array([0.7, 0.3])),
         ),
         transitions=DiscreteTransitionModel(
-            transition_probs=jnp.array(
-                [
-                    [0.9, 0.1],
-                    [0.2, 0.8],
-                ]
+            Categorical(
+                jnp.array(
+                    [
+                        [0.9, 0.1],
+                        [0.2, 0.8],
+                    ]
+                )
             ),
         ),
         latent_initial=GaussianInitialModel(

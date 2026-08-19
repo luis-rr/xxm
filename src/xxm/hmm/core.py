@@ -8,6 +8,7 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core.discrete.chain import DiscreteChainMarginals as Posterior
+from xxm.stats.categorical import Categorical
 
 
 class Emissions(typing.Protocol):
@@ -35,98 +36,70 @@ EmissionsT = typing.TypeVar('EmissionsT', bound=Emissions)
 
 
 class DiscreteInitialModel(typing.NamedTuple):
-    initial_probs: jax.Array
+    model: Categorical  # no batch
 
     @property
     def num_states(self) -> int:
-        return self.initial_probs.shape[0]
-
-    def sample(self, key: jax.Array) -> jax.Array:
-        return jax.random.categorical(
-            key,
-            jnp.log(self.initial_probs),
-        )
-
-    def permute(self, permutation: jax.Array) -> DiscreteInitialModel:
-        return DiscreteInitialModel(
-            initial_probs=self.initial_probs[permutation],
-        )
-
-    def fit_params(
-        self,
-        posterior: Posterior,
-    ) -> typing.Self:
-        r"""
-        Maximum-likelihood update of the initial-state probabilities.
-
-        .. math::
-
-            \pi_k^{new}
-            = p(z_0 = k \mid y)
-            = \gamma_0(k)
-
-        where ``gamma`` is the smoothed state posterior.
-        """
-        return self.__class__(initial_probs=posterior.state_marginals[0])
-
-
-class DiscreteTransitionModel(typing.NamedTuple):
-    transition_probs: jax.Array
-
-    @property
-    def num_states(self) -> int:
-        return self.transition_probs.shape[0]
+        return self.model.num_categories
 
     def sample(
         self,
         key: jax.Array,
-        previous: jax.Array,
-    ) -> jax.Array:
-        return jax.random.categorical(
-            key,
-            jnp.log(self.transition_probs[previous]),
-        )
+    ) -> jax.Array:  # ()
+        return self.model.sample(key)
 
-    def permute(self, permutation: jax.Array) -> DiscreteTransitionModel:
-        return DiscreteTransitionModel(
-            transition_probs=self.transition_probs[permutation][:, permutation],
+    def permute(
+        self,
+        permutation: jax.Array,  # (K,)
+    ) -> DiscreteInitialModel:
+        return self._replace(
+            model=self.model.permute(permutation),
         )
 
     def fit_params(
         self,
         posterior: Posterior,
     ) -> typing.Self:
-        r"""
-        Maximum-likelihood update of the transition probabilities.
+        """Maximum-likelihood update from expected initial-state counts."""
+        return self._replace(model=Categorical.from_counts(posterior.state_marginals[0]))
 
-        .. math::
 
-            A_{ij}^{new}
-            =
-            \frac{\sum_t \xi_t(i,j)}
-                {\sum_t \sum_j \xi_t(i,j)}
+class DiscreteTransitionModel(typing.NamedTuple):
+    model: Categorical  # K-batched
 
-        where ``xi[t, i, j]`` is the posterior probability of the
-        transition ``i -> j`` at time ``t``.
-        """
-        expected_transitions = posterior.pair_marginals.sum(axis=0)
+    @property
+    def num_states(self) -> int:
+        return self.model.num_categories
 
-        return self.__class__(
-            transition_probs=expected_transitions / expected_transitions.sum(axis=-1, keepdims=True)
-        )
-
-    def broadcast(
+    def conditional(
         self,
-        batch_shape: tuple[int, ...],
-    ) -> jax.Array:
-        return jnp.broadcast_to(
-            self.transition_probs,
-            (
-                *batch_shape,
-                self.num_states,
-                self.num_states,
-            ),
-        )
+        previous: jax.Array,  # (...)
+    ) -> Categorical:
+        """Conditional distribution of the next state."""
+        return self.model.select(previous)
+
+    def sample(
+        self,
+        key: jax.Array,
+        previous: jax.Array,  # (...)
+    ) -> jax.Array:  # (...)
+        """Sample the next state conditional on the previous state."""
+        return self.conditional(previous).sample(key)
+
+    def permute(
+        self,
+        permutation: jax.Array,  # (K,)
+    ) -> DiscreteTransitionModel:
+        return self._replace(model=self.model.select(permutation).permute(permutation))
+
+    def fit_params(
+        self,
+        posterior: Posterior,
+    ) -> typing.Self:
+        """Maximum-likelihood update from expected transition counts."""
+        expected_transitions = posterior.pair_marginals.sum(axis=0)  # (K, K)
+
+        return self._replace(model=Categorical.from_counts(expected_transitions))
 
 
 class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
@@ -144,7 +117,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
     @property
     def num_states(self) -> int:
-        return self.initial.initial_probs.shape[0]
+        return self.initial.num_states
 
     def permute(self, permutation: jax.Array) -> Model:
 

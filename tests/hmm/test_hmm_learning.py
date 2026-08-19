@@ -6,6 +6,7 @@ from xxm.core.discrete.chain import DiscreteChainMarginals
 from xxm.core.discrete.emissions import GaussianEmissions, PoissonEmissions
 from xxm.hmm.core import DiscreteInitialModel, DiscreteTransitionModel, Model
 from xxm.hmm.learning import em_step
+from xxm.stats.categorical import Categorical
 from xxm.stats.gaussian import Gaussian
 from xxm.stats.poisson import Poisson
 
@@ -43,11 +44,11 @@ def test_m_step_initial_probs():
         pair_marginals=jnp.zeros((2, 2, 2)),
     )
 
-    initial = DiscreteInitialModel(initial_probs=jnp.array([0.5, 0.5]))
+    initial = DiscreteInitialModel(Categorical(probs=jnp.array([0.5, 0.5])))
 
     result = initial.fit_params(posterior=posterior)
 
-    np.testing.assert_allclose(result.initial_probs, [0.8, 0.2])
+    np.testing.assert_allclose(result.model.probs, [0.8, 0.2])
 
 
 def test_m_step_transition_probs():
@@ -77,7 +78,7 @@ def test_m_step_transition_probs():
         pair_marginals,
     )
 
-    transitions = DiscreteTransitionModel(transition_probs=jnp.array([[0.5, 0.5], [0.5, 0.5]]))
+    transitions = DiscreteTransitionModel(Categorical(probs=jnp.array([[0.5, 0.5], [0.5, 0.5]])))
 
     result = transitions.fit_params(posterior)
 
@@ -88,8 +89,8 @@ def test_m_step_transition_probs():
         ]
     )
 
-    np.testing.assert_allclose(result.transition_probs, expected)
-    np.testing.assert_allclose(result.transition_probs.sum(axis=1), 1.0)
+    np.testing.assert_allclose(result.model.probs, expected)
+    np.testing.assert_allclose(result.model.probs.sum(axis=1), 1.0)
 
 
 def test_poisson_log_likelihoods():
@@ -261,13 +262,15 @@ def test_gaussian_m_step():
 
 def test_em_step_is_jit_compatible():
     model = Model(
-        initial=DiscreteInitialModel(initial_probs=jnp.array([0.5, 0.5])),
+        initial=DiscreteInitialModel(Categorical(probs=jnp.array([0.5, 0.5]))),
         transitions=DiscreteTransitionModel(
-            transition_probs=jnp.array(
-                [
-                    [0.8, 0.2],
-                    [0.2, 0.8],
-                ]
+            Categorical(
+                probs=jnp.array(
+                    [
+                        [0.8, 0.2],
+                        [0.2, 0.8],
+                    ]
+                )
             )
         ),
         emissions=PoissonEmissions(
@@ -297,13 +300,13 @@ def test_em_step_is_jit_compatible():
     jitted_model, jitted_log_likelihood = jax.jit(em_step)(model, observations)
 
     np.testing.assert_allclose(
-        jitted_model.initial.initial_probs,
-        eager_model.initial.initial_probs,
+        jitted_model.initial.model.probs,
+        eager_model.initial.model.probs,
         atol=1e-6,
     )
     np.testing.assert_allclose(
-        jitted_model.transitions.transition_probs,
-        eager_model.transitions.transition_probs,
+        jitted_model.transitions.model.probs,
+        eager_model.transitions.model.probs,
         atol=1e-6,
     )
     np.testing.assert_allclose(

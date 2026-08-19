@@ -77,8 +77,8 @@ class DiscretePotentials(typing.NamedTuple):
     @classmethod
     def from_model(cls, model: Model, num_time_steps: int) -> 'DiscretePotentials':
         return DiscretePotentials(
-            initial=model.state_initial.initial_probs,
-            transitions=model.transitions.broadcast((num_time_steps - 1,)),
+            initial=model.state_initial.model.probs,
+            transitions=model.transitions.model.broadcast((num_time_steps - 1,)).probs,
         )
 
     def to_chain(
