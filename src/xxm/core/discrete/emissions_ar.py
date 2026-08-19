@@ -31,144 +31,144 @@ import jax.numpy as jnp
 
 from xxm.core.discrete.chain import DiscretePotential
 from xxm.hmm.core import Posterior
-from xxm.stats import gaussian, poisson
+from xxm.stats import gaussian_fit, poisson_fit
+from xxm.stats.gaussian import Gaussian, LinearGaussian
+from xxm.stats.poisson import LinearPoisson, Poisson
 
 
-def lagged_observations(
-    observations: jax.Array,
-    lag: int,
-    num_dims: int,
-) -> jax.Array:
+def lagged_observations(observations: jax.Array, max_lag: int) -> jax.Array:  # (T-L, L, N)
     """Return histories ordered from lag 1 to lag L."""
+
     return jnp.stack(
-        [observations[lag - i - 1 : observations.shape[0] - i - 1] for i in range(lag)],
+        [observations[max_lag - i - 1 : observations.shape[0] - i - 1] for i in range(max_lag)],
         axis=1,
-    )  # (T-L, L, N)
+    )
+
+
+def flatten_ar_coefficients(
+    coefficients: jax.Array,  # (..., L, O, I)
+) -> jax.Array:  # (..., O, L*I)
+    """Flatten lagged AR coefficients into a standard affine input dimension."""
+    coefficients = jnp.swapaxes(
+        coefficients,
+        -3,
+        -2,
+    )  # (..., O, L, I)
+
+    return coefficients.reshape(
+        coefficients.shape[:-2] + (coefficients.shape[-2] * coefficients.shape[-1],)
+    )  # (..., O, L*I)
 
 
 class ARGaussianEmissions(typing.NamedTuple):
-    coefficients: jax.Array  # (K, L, N, N)
-    biases: jax.Array  # (K, N)
-    covariances: jax.Array  # (K, N, N)
+    """State-dependent autoregressive Gaussian emissions."""
 
-    @property
-    def lag(self) -> int:
-        return self.coefficients.shape[1]
+    model: LinearGaussian  # K-batched, input dimension L*N
 
     @property
     def num_states(self) -> int:
-        return self.coefficients.shape[0]
+        return self.model.affine.batch_shape[0]
 
     @property
     def num_dims(self) -> int:
-        return self.coefficients.shape[-1]
+        return self.model.affine.output_dim
 
-    def conditional_means(self, observations: jax.Array) -> jax.Array:
-        history = lagged_observations(
-            observations,
-            lag=self.lag,
-            num_dims=self.num_dims,
-        )  # (T-L, L, N)
+    @property
+    def max_lag(self) -> int:
+        return self.model.affine.input_dim // self.num_dims
 
-        return (
-            jnp.einsum(
-                'klnm,tlm->tkn',
-                self.coefficients,
-                history,
-            )
-            + self.biases
-        )  # (T-L, K, N)
+    def predictors(
+        self,
+        observations: jax.Array,  # (T, N)
+    ) -> jax.Array:  # (T-L, L*N)
+        """Construct flattened autoregressive predictors."""
+        history = lagged_observations(observations, self.max_lag)  # (T-L, L, N)
 
-    def log_likelihoods(self, observations: jax.Array) -> jax.Array:
-        log_likelihoods = gaussian.log_likelihoods(
-            observations=observations[self.lag :],
-            means=self.conditional_means(observations),
-            covariances=self.covariances,
-        )  # (T-L, K)
+        return history.reshape(
+            history.shape[0],
+            self.max_lag * self.num_dims,
+        )  # (T-L, L*N)
 
-        # Pad the first L time steps with zeros to match the shape of the input observations.
-        # An alternative would be to have _to_chain work with a chain with T-L time steps,
-        # but that would require an AR-specific inference instead of using the HMM one.
+    def conditional(
+        self,
+        observations: jax.Array,  # (T, N)
+    ) -> Gaussian:
+        """Conditional Gaussian for each time point and state."""
+        predictors = self.predictors(observations)  # (T-L, L*N)
+
+        return self.model.conditional(predictors[:, None, :])  # (T-L, K)-batched Gaussian
+
+    def log_likelihoods(
+        self,
+        observations: jax.Array,  # (T, N)
+    ) -> jax.Array:  # (T, K)
+        conditional = self.conditional(observations)
+
+        log_probs = conditional.log_prob(observations[self.max_lag :, None, :])  # (T-L, K)
+
         padding = jnp.zeros(
-            (self.lag, log_likelihoods.shape[1]),
-            dtype=log_likelihoods.dtype,
-        )
+            (self.max_lag, self.num_states),
+            dtype=log_probs.dtype,
+        )  # (L, K)
 
-        return jnp.concatenate([padding, log_likelihoods], axis=0)
+        return jnp.concatenate(
+            [padding, log_probs],
+            axis=0,
+        )  # (T, K)
 
-    def get_potential(self, observations: jax.Array) -> DiscretePotential:
+    def get_potential(
+        self,
+        observations: jax.Array,  # (T, N)
+    ) -> DiscretePotential:
         return DiscretePotential(
             log_values=self.log_likelihoods(observations),
         )
 
     def fit_params(
         self,
-        observations: jax.Array,
+        observations: jax.Array,  # (T, N)
         posterior: Posterior,
     ) -> typing.Self:
-        history = lagged_observations(
-            observations,
-            lag=self.lag,
-            num_dims=self.num_dims,
-        )  # (T-L, L, N)
-        current = observations[self.lag :]  # (T-L, N)
+        predictors = self.predictors(observations)  # (T-L, L*N)
+        current = observations[self.max_lag :]  # (T-L, N)
+        weights = posterior.state_marginals[self.max_lag :]  # (T-L, K)
 
-        num_samples, lag, n = history.shape
-
-        predictors = history.reshape(num_samples, lag * n)  # (T-L, L*N)
-
-        # slice to account for the zero-padded log likelihoods (T-L, K)
-        weights = posterior.state_marginals[self.lag :]
-
-        coefficients, biases, covariances = gaussian.fit_weighted_linear(
+        model = gaussian_fit.linear_from_pairs_weighted(
             inputs=predictors,
             outputs=current,
             weights=weights,
             ridge=1e-6,
         )
 
-        # (K, N, L*N) -> (K, N, L, N) -> (K, L, N, N)
-        weights = coefficients.reshape(-1, n, lag, n)
-        weights = jnp.transpose(weights, (0, 2, 1, 3))
-
-        return self.__class__(
-            coefficients=weights,
-            biases=biases,
-            covariances=covariances,
+        return self._replace(
+            model=model,
         )
 
-    def permute(self, permutation: jax.Array) -> typing.Self:
-        """Return a copy with states reordered by ``permutation``."""
-        return self.__class__(
-            coefficients=self.coefficients[permutation],
-            biases=self.biases[permutation],
-            covariances=self.covariances[permutation],
+    def permute(
+        self,
+        permutation: jax.Array,  # (K,)
+    ) -> typing.Self:
+        return self._replace(
+            model=self.model.select(permutation),
         )
 
     def sample(
         self,
         key: jax.Array,
-        states: jax.Array,
-    ) -> jax.Array:
+        states: jax.Array,  # (T,)
+    ) -> jax.Array:  # (T, N)
         def step(carry, state):
-            history, key = carry
+            history, key = carry  # (L, N)
 
             key, key_observation = jax.random.split(key)
 
-            mean = (
-                jnp.einsum(
-                    'lnm,lm->n',
-                    self.coefficients[state],
-                    history,
-                )
-                + self.biases[state]
-            )
+            predictors = history.reshape(
+                self.max_lag * self.num_dims,
+            )  # (L*N,)
 
-            observation = jax.random.multivariate_normal(
-                key_observation,
-                mean=mean,
-                cov=self.covariances[state],
-            )
+            conditional = self.model.select(state).conditional(predictors)
+
+            observation = conditional.sample(key_observation)  # (N,)
 
             new_history = jnp.concatenate(
                 [
@@ -176,14 +176,14 @@ class ARGaussianEmissions(typing.NamedTuple):
                     history[:-1],
                 ],
                 axis=0,
-            )
+            )  # (L, N)
 
             return (new_history, key), observation
 
         initial_history = jnp.zeros(
-            (self.lag, self.num_dims),
-            dtype=self.biases.dtype,
-        )
+            (self.max_lag, self.num_dims),
+            dtype=self.model.affine.bias.dtype,
+        )  # (L, N)
 
         _, observations = jax.lax.scan(
             step,
@@ -195,145 +195,115 @@ class ARGaussianEmissions(typing.NamedTuple):
 
 
 class ARPoissonEmissions(typing.NamedTuple):
-    coefficients: jax.Array  # (K, L, N, N)
-    biases: jax.Array  # (K, N)
+    """State-dependent autoregressive Poisson emissions."""
 
-    @property
-    def lag(self) -> int:
-        return self.coefficients.shape[1]
+    model: LinearPoisson  # K-batched, input dimension L*N
 
     @property
     def num_states(self) -> int:
-        return self.coefficients.shape[0]
+        return self.model.affine.batch_shape[0]
 
     @property
     def num_dims(self) -> int:
-        return self.coefficients.shape[-1]
+        return self.model.affine.output_dim
 
-    def log_rates(self, observations: jax.Array) -> jax.Array:
-        history = lagged_observations(
-            observations,
-            lag=self.lag,
-            num_dims=self.num_dims,
-        )  # (T-L, L, N)
+    @property
+    def max_lag(self) -> int:
+        return self.model.affine.input_dim // self.num_dims
 
-        return (
-            jnp.einsum(
-                'klnm,tlm->tkn',
-                self.coefficients,
-                history,
-            )
-            + self.biases
-        )
+    def predictors(
+        self,
+        observations: jax.Array,  # (T, N)
+    ) -> jax.Array:  # (T-L, L*N)
+        """Construct flattened autoregressive predictors."""
+        history = lagged_observations(observations, max_lag=self.max_lag)  # (T-L, L, N)
 
-    def rates(self, observations: jax.Array) -> jax.Array:
-        return jnp.exp(self.log_rates(observations))
+        return history.reshape(
+            history.shape[0],
+            self.max_lag * self.num_dims,
+        )  # (T-L, L*N)
 
-    def log_likelihoods(self, observations: jax.Array) -> jax.Array:
-        log_likelihoods = poisson.log_likelihoods(
-            observations=observations[self.lag :],
-            log_rates=self.log_rates(observations),
-        )
+    def conditional(
+        self,
+        observations: jax.Array,  # (T, N)
+    ) -> Poisson:
+        """Conditional Poisson distributions for each time point and state."""
+        predictors = self.predictors(observations)  # (T-L, L*N)
+
+        return self.model.conditional(predictors[:, None, :])  # (T-L, K)-batched Poisson
+
+    def log_likelihoods(
+        self,
+        observations: jax.Array,  # (T, N)
+    ) -> jax.Array:  # (T, K)
+        conditional = self.conditional(observations)
+
+        log_probs = conditional.log_prob(observations[self.max_lag :, None, :])  # (T-L, K)
 
         padding = jnp.zeros(
-            (self.lag, self.num_states),
-            dtype=log_likelihoods.dtype,
-        )
+            (self.max_lag, self.num_states),
+            dtype=log_probs.dtype,
+        )  # (L, K)
 
-        return jnp.concatenate([padding, log_likelihoods], axis=0)
+        return jnp.concatenate(
+            [padding, log_probs],
+            axis=0,
+        )  # (T, K)
 
-    def get_potential(self, observations: jax.Array) -> DiscretePotential:
+    def get_potential(
+        self,
+        observations: jax.Array,  # (T, N)
+    ) -> DiscretePotential:
         return DiscretePotential(
             log_values=self.log_likelihoods(observations),
         )
 
     def fit_params(
         self,
-        observations: jax.Array,
+        observations: jax.Array,  # (T, N)
         posterior: Posterior,
     ) -> typing.Self:
-        history = lagged_observations(
-            observations,
-            lag=self.lag,
-            num_dims=self.num_dims,
-        )  # (T-L, L, N)
+        predictors = self.predictors(observations)  # (T-L, L*N)
+        current = observations[self.max_lag :]  # (T-L, N)
+        weights = posterior.state_marginals[self.max_lag :]  # (T-L, K)
 
-        current = observations[self.lag :]  # (T-L, N)
-
-        num_samples, lag, n = history.shape
-
-        predictors = history.reshape(
-            num_samples,
-            lag * n,
-        )  # (T-L, L*N)
-
-        state_weights = posterior.state_marginals[self.lag :]  # (T-L, K)
-
-        # (K, L, N, N) -> (K, N, L, N) -> (K, N, L*N)
-        readout = jnp.transpose(
-            self.coefficients,
-            (0, 2, 1, 3),
-        ).reshape(
-            self.num_states,
-            n,
-            lag * n,
-        )
-
-        coefficients, biases = poisson.fit_weighted_linear(
+        model = poisson_fit.linear_from_pairs_weighted(
             inputs=predictors,
             outputs=current,
-            weights=state_weights,
-            coefficients=readout,
-            bias=self.biases,
+            weights=weights,
+            initial_affine=self.model.affine,
         )
 
-        # (K, N, L*N) -> (K, N, L, N) -> (K, L, N, N)
-        coefficients = coefficients.reshape(
-            self.num_states,
-            n,
-            lag,
-            n,
-        )
-        coefficients = jnp.transpose(
-            coefficients,
-            (0, 2, 1, 3),
+        return self._replace(
+            model=model,
         )
 
-        return self.__class__(
-            coefficients=coefficients,
-            biases=biases,
-        )
-
-    def permute(self, permutation: jax.Array) -> typing.Self:
+    def permute(
+        self,
+        permutation: jax.Array,  # (K,)
+    ) -> typing.Self:
         """Return a copy with states reordered by ``permutation``."""
-        return self.__class__(
-            coefficients=self.coefficients[permutation],
-            biases=self.biases[permutation],
+        return self._replace(
+            model=self.model.select(permutation),
         )
 
     def sample(
         self,
         key: jax.Array,
-        states: jax.Array,
-    ) -> jax.Array:
+        states: jax.Array,  # (T,)
+    ) -> jax.Array:  # (T, N)
         def step(carry, state):
-            history, key = carry
+            history, key = carry  # (L, N)
 
             key, key_observation = jax.random.split(key)
 
-            log_rate = (
-                jnp.einsum(
-                    'lnm,lm->n',
-                    self.coefficients[state],
-                    history,
-                )
-                + self.biases[state]
-            )
+            predictors = history.reshape(
+                self.max_lag * self.num_dims,
+            )  # (L*N,)
 
-            observation = jax.random.poisson(
-                key_observation,
-                jnp.exp(log_rate),
-            )
+            conditional = self.model.select(state).conditional(predictors)
+
+            observation = conditional.sample(key_observation)  # (N,)
 
             new_history = jnp.concatenate(
                 [
@@ -341,14 +311,14 @@ class ARPoissonEmissions(typing.NamedTuple):
                     history[:-1],
                 ],
                 axis=0,
-            )
+            )  # (L, N)
 
             return (new_history, key), observation
 
         initial_history = jnp.zeros(
-            (self.lag, self.num_dims),
-            dtype=self.biases.dtype,
-        )
+            (self.max_lag, self.num_dims),
+            dtype=self.model.affine.bias.dtype,
+        )  # (L, N)
 
         _, observations = jax.lax.scan(
             step,

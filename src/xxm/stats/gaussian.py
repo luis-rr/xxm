@@ -5,168 +5,269 @@ import jax.numpy as jnp
 import jax.scipy as jsp
 
 
-class LinearGaussianFit(typing.NamedTuple):
-    """Parameters of a fitted linear Gaussian model."""
+class Affine(typing.NamedTuple):
+    """A linear operation:
 
-    coefficients: jax.Array
-    bias: jax.Array
-    covariance: jax.Array
+        y = A x + b
 
-
-def log_likelihoods(
-    observations: jax.Array,  # (T, N)
-    means: jax.Array,  # (1 or T, K, N)
-    covariances: jax.Array,  # (K, N, N)
-) -> jax.Array:
-    """Gaussian log likelihood for each time and state."""
-    residuals = observations[:, None, :] - means  # (T, K, N)
-
-    chol = jnp.linalg.cholesky(covariances)  # (K, N, N)
-
-    solved = jsp.linalg.solve_triangular(
-        chol[None, :, :, :],
-        residuals[..., None],
-        lower=True,
-    )[..., 0]  # (T, K, N)
-
-    mahalanobis = jnp.sum(solved**2, axis=-1)  # (T, K)
-
-    log_det = 2 * jnp.sum(
-        jnp.log(jnp.diagonal(chol, axis1=-2, axis2=-1)),
-        axis=-1,
-    )  # (K,)
-
-    n_dims = observations.shape[-1]
-
-    return -0.5 * (n_dims * jnp.log(2 * jnp.pi) + log_det[None, :] + mahalanobis)
-
-
-def fit_weighted(
-    observations: jax.Array,  # (T, N)
-    weights: jax.Array,  # (T, K)
-    eps: float = 1e-8,
-) -> tuple[jax.Array, jax.Array]:
-    """Fit weighted Gaussian distributions."""
-    counts = jnp.maximum(weights.sum(axis=0), eps)  # (K,)
-
-    means = weights.T @ observations / counts[:, None]  # (K, N)
-
-    residuals = observations[:, None, :] - means[None, :, :]  # (T, K, N)
-
-    covariances = (
-        jnp.einsum(
-            'tk,tki,tkj->kij',
-            weights,
-            residuals,
-            residuals,
-        )
-        / counts[:, None, None]
-    )  # (K, N, N)
-
-    return means, covariances
-
-
-def fit_linear_from_moments(
-    input_mean: jax.Array,
-    output_mean: jax.Array,
-    input_second_moment: jax.Array,
-    output_second_moment: jax.Array,
-    output_input_moment: jax.Array,
-    ridge: float = 0.0,
-) -> LinearGaussianFit:
-    r"""Fit the linear Gaussian model
-
-        y = A x + b + \epsilon,    \epsilon ~ N(0, \Sigma),
-
-    from raw moments averaged over samples.
-
-    Parameters are E[x], E[y], E[xxᵀ], E[yyᵀ], and E[yxᵀ],
-    where the expectation includes both posterior uncertainty and
-    averaging over samples. Leading batch dimensions are supported.
+    Leading dimensions are batch dimensions.
     """
-    input_covariance = input_second_moment - input_mean[..., :, None] * input_mean[..., None, :]
 
-    output_input_covariance = (
-        output_input_moment - output_mean[..., :, None] * input_mean[..., None, :]
-    )
+    coefficients: jax.Array  # (..., O, I)
+    bias: jax.Array  # (..., O)
 
-    output_covariance = output_second_moment - output_mean[..., :, None] * output_mean[..., None, :]
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        return jnp.broadcast_shapes(
+            self.coefficients.shape[:-2],
+            self.bias.shape[:-1],
+        )
 
-    identity = jnp.eye(
-        input_covariance.shape[-1],
-        dtype=input_covariance.dtype,
-    )
-    regularized_input_covariance = input_covariance + ridge * identity
+    @property
+    def input_dim(self) -> int:
+        return self.coefficients.shape[-1]
 
-    coefficients = jnp.linalg.solve(
-        regularized_input_covariance,
-        jnp.swapaxes(output_input_covariance, -2, -1),
-    )
-    coefficients = jnp.swapaxes(coefficients, -2, -1)
+    @property
+    def output_dim(self) -> int:
+        return self.coefficients.shape[-2]
 
-    bias = output_mean - jnp.einsum('...np,...p->...n', coefficients, input_mean)
+    def norm(self) -> jax.Array:
+        """Return the parameter norm for each output."""
+        return jnp.sqrt(jnp.sum(self.coefficients**2, axis=-1) + self.bias**2)  # TODO batch?
 
-    noise_covariance = (
-        output_covariance
-        - coefficients @ jnp.swapaxes(output_input_covariance, -2, -1)
-        - output_input_covariance @ jnp.swapaxes(coefficients, -2, -1)
-        + coefficients @ input_covariance @ jnp.swapaxes(coefficients, -2, -1)
-    )
-    noise_covariance = 0.5 * (noise_covariance + jnp.swapaxes(noise_covariance, -2, -1))
+    def shift(self, center: jax.Array) -> 'Affine':
 
-    return LinearGaussianFit(
-        coefficients=coefficients,
-        bias=bias,
-        covariance=noise_covariance,
-    )
+        return self._replace(
+            bias=self.bias + self.coefficients @ center,
+        )
 
+    def apply(self, values: jax.Array) -> jax.Array:
+        return (
+            jnp.einsum(
+                '...oi,...i->...o',
+                self.coefficients,
+                values,
+            )
+            + self.bias
+        )
 
-def fit_linear(
-    inputs: jax.Array,
-    outputs: jax.Array,
-    ridge: float = 0.0,
-) -> LinearGaussianFit:
-    """Fit y = A x + b + noise from paired samples."""
-    n = inputs.shape[0]
+    def astype(self, dtype: jax.typing.DTypeLike) -> 'Affine':
+        return self._replace(
+            coefficients=self.coefficients.astype(dtype),
+            bias=self.bias.astype(dtype),
+        )
 
-    return fit_linear_from_moments(
-        input_mean=jnp.mean(inputs, axis=0),
-        output_mean=jnp.mean(outputs, axis=0),
-        input_second_moment=inputs.T @ inputs / n,
-        output_second_moment=outputs.T @ outputs / n,
-        output_input_moment=outputs.T @ inputs / n,
-        ridge=ridge,
-    )
+    def select(self, index) -> 'Affine':
+        """Index into the batch dimensions."""
+        return self.__class__(
+            coefficients=self.coefficients[index],
+            bias=self.bias[index],
+        )
 
 
-def fit_weighted_linear(
-    inputs: jax.Array,  # (T, P)
-    outputs: jax.Array,  # (T, N)
-    weights: jax.Array,  # (T, K)
-    eps: float = 1e-8,
-    ridge: float = 0.0,
-) -> LinearGaussianFit:
-    """Fit weighted linear Gaussian models y = A x + b + noise."""
-    counts = jnp.maximum(weights.sum(axis=0), eps)  # (K,)
+class Gaussian(typing.NamedTuple):
+    """A multivariate Gaussian distribution in moment form.
 
-    input_means = jnp.einsum('tk,tp->kp', weights, inputs) / counts[:, None]
-    output_means = jnp.einsum('tk,tn->kn', weights, outputs) / counts[:, None]
+    Leading dimensions are batch dimensions.
+    """
 
-    input_second_moments = (
-        jnp.einsum('tk,tp,tq->kpq', weights, inputs, inputs) / counts[:, None, None]
-    )
-    output_second_moments = (
-        jnp.einsum('tk,tn,tm->knm', weights, outputs, outputs) / counts[:, None, None]
-    )
-    output_input_moments = (
-        jnp.einsum('tk,tn,tp->knp', weights, outputs, inputs) / counts[:, None, None]
-    )
+    mean: jax.Array  # (..., N)
+    covariance: jax.Array  # (..., N, N)
 
-    return fit_linear_from_moments(
-        input_mean=input_means,
-        output_mean=output_means,
-        input_second_moment=input_second_moments,
-        output_second_moment=output_second_moments,
-        output_input_moment=output_input_moments,
-        ridge=ridge,
-    )
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        return self.mean.shape[:-1]
+
+    @property
+    def variable_dim(self) -> int:
+        return self.mean.shape[-1]
+
+    def select(self, index) -> 'Gaussian':
+        """Index into the batch dimensions of the distribution."""
+        return Gaussian(
+            mean=self.mean[index],
+            covariance=self.covariance[index],
+        )
+
+    def astype(self, dtype: jax.typing.DTypeLike) -> 'Gaussian':
+        return self._replace(
+            mean=self.mean.astype(dtype),
+            covariance=self.covariance.astype(dtype),
+        )
+
+    @property
+    def variance(self) -> jax.Array:
+        return jnp.diagonal(self.covariance, axis1=-2, axis2=-1)
+
+    def sample(
+        self,
+        key: jax.Array,
+        sample_shape: tuple[int, ...] = (),
+    ) -> jax.Array:
+        return jax.random.multivariate_normal(
+            key,
+            mean=self.mean,
+            cov=self.covariance,
+            shape=sample_shape + self.batch_shape,
+        )
+
+    def affine_mean(
+        self,
+        affine: Affine,
+    ) -> jax.Array:
+        """
+        Calculate the mean of the distribution of y when:
+            y = A x + b, x ~ N(self.mean, self.covariance)
+        """
+        return affine.apply(self.mean)
+
+    def affine_covariance(
+        self,
+        affine: Affine,
+    ) -> jax.Array:
+        """
+        Calculate the covariance of the distribution of y when:
+            y = A x + b, x ~ N(self.mean, self.covariance)
+        """
+
+        covariance = jnp.einsum(
+            '...oi,...ij,...pj->...op',
+            affine.coefficients,
+            self.covariance,
+            affine.coefficients,
+        )
+        return covariance
+
+    def affine_variance(
+        self,
+        affine: Affine,
+    ) -> jax.Array:
+        """
+        Calculate the variance (diagonal of the covariance) of the distribution of y when:
+            y = A x + b, x ~ N(self.mean, self.covariance)
+        """
+        return jnp.einsum(
+            '...oi,...ij,...oj->...o',
+            affine.coefficients,
+            self.covariance,
+            affine.coefficients,
+        )
+
+    def affine(
+        self,
+        affine: Affine,
+    ) -> 'Gaussian':
+        """Distribution of ``y = A x + b`` for ``x ~ self``."""
+
+        return self.__class__(
+            mean=self.affine_mean(affine),
+            covariance=self.affine_covariance(affine),
+        )
+
+    def log_prob(
+        self,
+        values: jax.Array,  # (..., N)
+    ) -> jax.Array:  # (...)
+        """Evaluate log densities with aligned/broadcast-compatible batch dimensions."""
+        residuals = values - self.mean  # (..., N)
+
+        chol = jnp.linalg.cholesky(self.covariance)  # (..., N, N)
+
+        # ``solve_triangular`` requires explicit matching batch dimensions.
+        chol = jnp.broadcast_to(
+            chol,
+            residuals.shape[:-1] + (self.variable_dim, self.variable_dim),
+        )
+
+        solved = jsp.linalg.solve_triangular(
+            chol,
+            residuals[..., None],
+            lower=True,
+        )[..., 0]  # (..., N)
+
+        mahalanobis = jnp.sum(solved**2, axis=-1)  # (...)
+
+        log_det = 2.0 * jnp.sum(
+            jnp.log(jnp.diagonal(chol, axis1=-2, axis2=-1)),
+            axis=-1,
+        )  # (...)
+
+        return -0.5 * (self.variable_dim * jnp.log(2.0 * jnp.pi) + log_det + mahalanobis)
+
+    def log_prob_broadcast(
+        self,
+        values: jax.Array,  # (..., N)
+    ) -> jax.Array:  # (..., *batch_shape)
+        """Evaluate every value against every batched distribution."""
+        values = values.reshape(
+            values.shape[:-1] + (1,) * len(self.batch_shape) + (self.variable_dim,)
+        )  # (..., 1, ..., 1, N)
+
+        return self.log_prob(values)
+
+
+class LinearGaussian(typing.NamedTuple):
+    """A linear Gaussian model:
+
+        y | x ~ N(A x + b, Q)
+
+    Leading dimensions are batch dimensions.
+    """
+
+    affine: Affine
+    covariance: jax.Array  # (..., O, O)
+
+    def select(self, index) -> 'LinearGaussian':
+        """Index into the batch dimensions."""
+        return self.__class__(
+            affine=self.affine.select(index),
+            covariance=self.covariance[index],
+        )
+
+    def astype(self, dtype: jax.typing.DTypeLike) -> 'LinearGaussian':
+        return self._replace(
+            affine=self.affine.astype(dtype),
+            covariance=self.covariance.astype(dtype),
+        )
+
+    def conditional_mean(self, values: jax.Array) -> jax.Array:
+        """Conditional mean for deterministic input values."""
+        return self.affine.apply(values)
+
+    def conditional(
+        self,
+        values: jax.Array,  # (..., I)
+    ) -> Gaussian:
+        """Conditional output distribution for deterministic inputs."""
+        mean = self.conditional_mean(values)  # (..., O)
+
+        covariance = jnp.broadcast_to(
+            self.covariance,
+            mean.shape[:-1] + (self.affine.output_dim, self.affine.output_dim),
+        )  # (..., O, O)
+
+        return Gaussian(
+            mean=mean,
+            covariance=covariance,
+        )
+
+    def sample(
+        self,
+        key: jax.Array,
+        values: jax.Array,
+    ) -> jax.Array:
+        return self.conditional(values).sample(key)
+
+    def add_covariance_jitter(
+        self,
+        jitter: float,
+    ) -> 'LinearGaussian':
+        """Add isotropic jitter to the output covariance."""
+        identity = jnp.eye(
+            self.affine.output_dim,
+            dtype=self.covariance.dtype,
+        )
+
+        return self._replace(
+            covariance=self.covariance + jitter * identity,
+        )

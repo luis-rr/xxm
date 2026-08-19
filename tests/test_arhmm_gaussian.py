@@ -4,25 +4,57 @@ import numpy as np
 
 from xxm.core.discrete.chain import DiscreteChainMarginals
 from xxm.core.discrete.emissions_ar import ARGaussianEmissions, lagged_observations
+from xxm.stats.gaussian import Affine, LinearGaussian
 
 ATOL = 1e-6
 FIT_ATOL = 2e-5
 
 
+def _flatten_lagged_coefficients(coefficients: jax.Array) -> jax.Array:
+    """Reshape per-lag matrices (K, L, N_out, N_in) into (K, N_out, L * N_in).
+
+    The predictor concatenates lag blocks from lag 1 to lag L, so the
+    coefficient columns must be reordered to match.
+    """
+    num_states, max_lag, num_dims_out, num_dims_in = coefficients.shape
+
+    return jnp.moveaxis(coefficients, 1, 2).reshape(
+        num_states,
+        num_dims_out,
+        max_lag * num_dims_in,
+    )
+
+
+def _make_emissions(
+    coefficients: jax.Array,  # (K, L, N, N)
+    biases: jax.Array,  # (K, N)
+    covariances: jax.Array,  # (K, N, N)
+) -> ARGaussianEmissions:
+    return ARGaussianEmissions(
+        model=LinearGaussian(
+            affine=Affine(
+                coefficients=_flatten_lagged_coefficients(coefficients),
+                bias=biases,
+            ),
+            covariance=covariances,
+        ),
+    )
+
+
 def test_ar_gaussian_properties():
-    emissions = ARGaussianEmissions(
+    emissions = _make_emissions(
         coefficients=jnp.zeros((3, 2, 4, 4)),
         biases=jnp.zeros((3, 4)),
         covariances=jnp.tile(jnp.eye(4), (3, 1, 1)),
     )
 
     assert emissions.num_states == 3
-    assert emissions.lag == 2
+    assert emissions.max_lag == 2
     assert emissions.num_dims == 4
 
 
 def test_ar_gaussian_lagged_observations():
-    emissions = ARGaussianEmissions(
+    emissions = _make_emissions(
         coefficients=jnp.zeros((1, 2, 1, 1)),
         biases=jnp.zeros((1, 1)),
         covariances=jnp.ones((1, 1, 1)),
@@ -37,7 +69,7 @@ def test_ar_gaussian_lagged_observations():
         ]
     )
 
-    history = lagged_observations(observations, lag=emissions.lag, num_dims=emissions.num_dims)
+    history = lagged_observations(observations, max_lag=emissions.max_lag)
 
     expected = jnp.array(
         [
@@ -50,7 +82,7 @@ def test_ar_gaussian_lagged_observations():
 
 
 def test_ar_gaussian_conditional_means_known_solution():
-    emissions = ARGaussianEmissions(
+    emissions = _make_emissions(
         coefficients=jnp.array(
             [
                 [
@@ -72,7 +104,7 @@ def test_ar_gaussian_conditional_means_known_solution():
         ]
     )
 
-    means = emissions.conditional_means(observations)
+    means = emissions.conditional(observations).mean
 
     expected = jnp.array(
         [
@@ -85,7 +117,7 @@ def test_ar_gaussian_conditional_means_known_solution():
 
 
 def test_ar_gaussian_log_likelihoods_known_solution():
-    emissions = ARGaussianEmissions(
+    emissions = _make_emissions(
         coefficients=jnp.array([[[[1.0]]]]),
         biases=jnp.array([[0.0]]),
         covariances=jnp.array([[[4.0]]]),
@@ -117,7 +149,7 @@ def test_ar_gaussian_log_likelihoods_known_solution():
 
 
 def test_ar_gaussian_log_likelihoods_shortest_valid_sequence():
-    emissions = ARGaussianEmissions(
+    emissions = _make_emissions(
         coefficients=jnp.array(
             [
                 [
@@ -172,7 +204,7 @@ def test_ar_gaussian_fit_recovers_known_ar2_parameters():
         log_normalizer=jnp.zeros((1,)),
     )
 
-    emissions = ARGaussianEmissions(
+    emissions = _make_emissions(
         coefficients=jnp.zeros((1, 2, 1, 1)),
         biases=jnp.zeros((1, 1)),
         covariances=jnp.ones((1, 1, 1)),
@@ -183,8 +215,7 @@ def test_ar_gaussian_fit_recovers_known_ar2_parameters():
         posterior,
     )
 
-    np.testing.assert_allclose(
-        fitted.coefficients,
+    expected_coefficients = _flatten_lagged_coefficients(
         jnp.array(
             [
                 [
@@ -192,12 +223,17 @@ def test_ar_gaussian_fit_recovers_known_ar2_parameters():
                     [[coefficient_2]],
                 ]
             ]
-        ),
+        )
+    )
+
+    np.testing.assert_allclose(
+        fitted.model.affine.coefficients,
+        expected_coefficients,
         atol=FIT_ATOL,
     )
 
     np.testing.assert_allclose(
-        fitted.biases,
+        fitted.model.affine.bias,
         [[bias]],
         atol=FIT_ATOL,
     )
@@ -205,14 +241,14 @@ def test_ar_gaussian_fit_recovers_known_ar2_parameters():
     # The data are deterministic, so residual variance should be
     # approximately zero.
     np.testing.assert_allclose(
-        fitted.covariances,
+        fitted.model.covariance,
         0.0,
         atol=FIT_ATOL,
     )
 
 
 def test_ar_gaussian_permute():
-    emissions = ARGaussianEmissions(
+    emissions = _make_emissions(
         coefficients=jnp.arange(3.0).reshape(3, 1, 1, 1),
         biases=jnp.array([[10.0], [20.0], [30.0]]),
         covariances=jnp.array([[[1.0]], [[2.0]], [[3.0]]]),
@@ -223,21 +259,21 @@ def test_ar_gaussian_permute():
     permuted = emissions.permute(permutation)
 
     np.testing.assert_array_equal(
-        permuted.coefficients,
-        emissions.coefficients[permutation],
+        permuted.model.affine.coefficients,
+        emissions.model.affine.coefficients[permutation],
     )
     np.testing.assert_array_equal(
-        permuted.biases,
-        emissions.biases[permutation],
+        permuted.model.affine.bias,
+        emissions.model.affine.bias[permutation],
     )
     np.testing.assert_array_equal(
-        permuted.covariances,
-        emissions.covariances[permutation],
+        permuted.model.covariance,
+        emissions.model.covariance[permutation],
     )
 
 
 def test_ar_gaussian_sample_follows_ar_recurrence():
-    emissions = ARGaussianEmissions(
+    emissions = _make_emissions(
         coefficients=jnp.array([[[[0.5]]]]),
         biases=jnp.array([[1.0]]),
         covariances=jnp.array([[[0.25]]]),
@@ -279,7 +315,7 @@ def test_ar_gaussian_sample_follows_ar_recurrence():
 
 
 def test_ar_gaussian_methods_are_jittable():
-    emissions = ARGaussianEmissions(
+    emissions = _make_emissions(
         coefficients=jnp.array(
             [
                 [
@@ -313,7 +349,7 @@ def test_ar_gaussian_methods_are_jittable():
     key = jax.random.key(0)
 
     conditional_means_jit = jax.jit(
-        lambda emissions, observations: emissions.conditional_means(observations)
+        lambda emissions, observations: emissions.conditional(observations).mean
     )
 
     log_likelihoods_jit = jax.jit(
@@ -328,7 +364,7 @@ def test_ar_gaussian_methods_are_jittable():
 
     np.testing.assert_allclose(
         conditional_means_jit(emissions, observations),
-        emissions.conditional_means(observations),
+        emissions.conditional(observations).mean,
         atol=ATOL,
     )
 
@@ -349,18 +385,18 @@ def test_ar_gaussian_methods_are_jittable():
     )
 
     np.testing.assert_allclose(
-        fitted.coefficients,
-        fitted_eager.coefficients,
+        fitted.model.affine.coefficients,
+        fitted_eager.model.affine.coefficients,
         atol=ATOL,
     )
     np.testing.assert_allclose(
-        fitted.biases,
-        fitted_eager.biases,
+        fitted.model.affine.bias,
+        fitted_eager.model.affine.bias,
         atol=ATOL,
     )
     np.testing.assert_allclose(
-        fitted.covariances,
-        fitted_eager.covariances,
+        fitted.model.covariance,
+        fitted_eager.model.covariance,
         atol=ATOL,
     )
 

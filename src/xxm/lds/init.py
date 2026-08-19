@@ -2,9 +2,10 @@ import jax
 from jax import numpy as jnp
 
 from xxm.core.gaussian.emissions import GaussianEmissions, PoissonEmissions
+from xxm.stats import gaussian_fit, poisson_fit
+from xxm.stats.gaussian import Affine, Gaussian
 
 from ..fit import unstack_models
-from ..stats import gaussian, poisson
 from .core import GaussianInitialModel, LinearGaussianDynamicsModel, Model
 
 
@@ -44,30 +45,27 @@ def poisson_emissions_from_latents(
         1e-6,
     )
 
-    readout = jnp.zeros(
-        (observation_dim, latent_dim),
-        dtype=latents.dtype,
+    initial_affine = Affine(
+        coefficients=jnp.zeros(
+            (observation_dim, latent_dim),
+            dtype=latents.dtype,
+        ),
+        bias=jnp.log(mean_rates),
     )
-    bias = jnp.log(mean_rates)
-
     # Known latents have zero posterior uncertainty.
     covariances = jnp.zeros(
         (latents.shape[0], latent_dim, latent_dim),
         dtype=latents.dtype,
     )
 
-    readout, bias = poisson.fit_linear_from_marginals(
+    model = poisson_fit.linear_from_marginals(
         observations=observations,
-        means=latents,
-        covariances=covariances,
-        coefficients=readout,
-        bias=bias,
+        input_means=latents,
+        input_covariances=covariances,
+        initial_affine=initial_affine,
     )
 
-    return PoissonEmissions(
-        readout=readout,
-        bias=bias,
-    )
+    return PoissonEmissions(model)
 
 
 def gaussian_emissions_from_latents(
@@ -76,22 +74,14 @@ def gaussian_emissions_from_latents(
     covariance_floor: float,
 ) -> GaussianEmissions:
     """Fit Gaussian emissions to a known latent trajectory."""
-    emission_matrix, emission_bias, emission_covariance = gaussian.fit_linear(
+    model = gaussian_fit.linear_from_pairs(
         latents,
         observations,
     )
 
-    emission_covariance = _add_covariance_floor(
-        emission_covariance,
-        covariance_floor,
-        reference=observations,
-    )
+    model = model.add_covariance_jitter(covariance_floor)
 
-    return GaussianEmissions(
-        readout=emission_matrix,
-        bias=emission_bias,
-        noise_covariance=emission_covariance,
-    )
+    return GaussianEmissions(model)
 
 
 def dynamics_from_latents(
@@ -99,22 +89,14 @@ def dynamics_from_latents(
     covariance_floor: float,
 ) -> LinearGaussianDynamicsModel:
     """Fit linear dynamics to a known latent trajectory."""
-    dynamics_matrix, dynamics_bias, dynamics_noise_covariance = gaussian.fit_linear(
+    model = gaussian_fit.linear_from_pairs(
         latents[:-1],
         latents[1:],
     )
 
-    dynamics_noise_covariance = _add_covariance_floor(
-        dynamics_noise_covariance,
-        covariance_floor,
-        reference=latents,
-    )
+    model = model.add_covariance_jitter(covariance_floor)
 
-    return LinearGaussianDynamicsModel(
-        matrix=dynamics_matrix,
-        bias=dynamics_bias,
-        noise_covariance=dynamics_noise_covariance,
-    )
+    return LinearGaussianDynamicsModel(model)
 
 
 def initial_from_latents(
@@ -127,12 +109,14 @@ def initial_from_latents(
     # There is only one initial state estimate, so use the overall
     # latent covariance as a reasonable scale for its uncertainty.
     return GaussianInitialModel(
-        mean=latents[0],
-        covariance=_add_covariance_floor(
-            _covariance(latents),
-            covariance_floor,
-            reference=latents,
-        ),
+        Gaussian(
+            mean=latents[0],
+            covariance=_add_covariance_floor(
+                _covariance(latents),
+                covariance_floor,
+                reference=latents,
+            ),
+        )
     )
 
 

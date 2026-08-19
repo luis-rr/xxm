@@ -27,6 +27,8 @@ import jax
 import jax.numpy as jnp
 import jax.scipy.linalg as jsp_linalg
 
+from xxm.stats.gaussian import Gaussian, LinearGaussian
+
 
 def _precision_and_log_det(
     covariance: jax.Array,  # (..., D, D)
@@ -104,36 +106,35 @@ class GaussianPotential(typing.NamedTuple):
     @classmethod
     def from_moments(
         cls,
-        mean: jax.Array,
-        covariance: jax.Array,
+        gaussian: Gaussian,
     ) -> GaussianPotential:
-        if mean.ndim < 1:
+        if gaussian.mean.ndim < 1:
             raise ValueError('mean must have shape (..., D)')
 
-        if covariance.ndim < 2:
+        if gaussian.covariance.ndim < 2:
             raise ValueError('covariance must have shape (..., D, D)')
 
-        d = mean.shape[-1]
-        batch_shape = mean.shape[:-1]
+        d = gaussian.mean.shape[-1]
+        batch_shape = gaussian.mean.shape[:-1]
 
         if d < 1:
             raise ValueError('mean must contain at least one variable dimension')
 
-        if covariance.shape != batch_shape + (d, d):
+        if gaussian.covariance.shape != batch_shape + (d, d):
             raise ValueError(
                 'mean and covariance must have shapes (..., D) and (..., D, D) '
                 'with matching leading dimensions'
             )
 
-        precision, log_det_covariance = _precision_and_log_det(covariance)
+        precision, log_det_covariance = _precision_and_log_det(gaussian.covariance)
 
         information = jnp.einsum(
             '...ij,...j->...i',
             precision,
-            mean,
+            gaussian.mean,
         )
 
-        quadratic = jnp.sum(mean * information, axis=-1)
+        quadratic = jnp.sum(gaussian.mean * information, axis=-1)
 
         return cls(
             precision_blocks=precision,
@@ -209,44 +210,42 @@ class GaussianPairPotential(typing.NamedTuple):
     @classmethod
     def from_linear_conditional(
         cls,
-        matrix: jax.Array,
-        bias: jax.Array,
-        covariance: jax.Array,
+        lin_gaussian: LinearGaussian,
     ) -> GaussianPairPotential:
-        if matrix.ndim < 2:
+        if lin_gaussian.affine.coefficients.ndim < 2:
             raise ValueError('matrix must have shape (..., D, D)')
 
-        if matrix.shape[-2] != matrix.shape[-1]:
+        if lin_gaussian.affine.coefficients.shape[-2] != lin_gaussian.affine.coefficients.shape[-1]:
             raise ValueError('matrix must have shape (..., D, D)')
 
-        d = matrix.shape[-1]
-        batch_shape = matrix.shape[:-2]
+        d = lin_gaussian.affine.coefficients.shape[-1]
+        batch_shape = lin_gaussian.affine.coefficients.shape[:-2]
 
         if d < 1:
             raise ValueError('matrix must contain at least one variable dimension')
 
-        if bias.shape != batch_shape + (d,):
+        if lin_gaussian.affine.bias.shape != batch_shape + (d,):
             raise ValueError(
                 'matrix and bias must have shapes (..., D, D) and (..., D) '
                 'with matching leading dimensions'
             )
 
-        if covariance.shape != batch_shape + (d, d):
+        if lin_gaussian.covariance.shape != batch_shape + (d, d):
             raise ValueError(
                 'matrix and covariance must both have shape (..., D, D) '
                 'with matching leading dimensions'
             )
 
-        precision, log_det_covariance = _precision_and_log_det(covariance)
+        precision, log_det_covariance = _precision_and_log_det(lin_gaussian.covariance)
 
-        matrix_t = jnp.swapaxes(matrix, -1, -2)
+        matrix_t = jnp.swapaxes(lin_gaussian.affine.coefficients, -1, -2)
 
-        precision_matrix = precision @ matrix
+        precision_matrix = precision @ lin_gaussian.affine.coefficients
 
         precision_bias = jnp.einsum(
             '...ij,...j->...i',
             precision,
-            bias,
+            lin_gaussian.affine.bias,
         )
 
         return cls(
@@ -260,7 +259,7 @@ class GaussianPairPotential(typing.NamedTuple):
             ),
             right_information=precision_bias,
             log_constant=(
-                -0.5 * jnp.sum(bias * precision_bias, axis=-1)
+                -0.5 * jnp.sum(lin_gaussian.affine.bias * precision_bias, axis=-1)
                 - 0.5 * log_det_covariance
                 - 0.5 * d * jnp.log(2.0 * jnp.pi)
             ),

@@ -5,20 +5,17 @@ import jax.numpy as jnp
 
 from xxm.core.discrete.chain import DiscretePotential
 from xxm.hmm.core import Posterior
-from xxm.stats import gaussian, poisson
+from xxm.stats import gaussian_fit
+from xxm.stats.gaussian import Gaussian
+from xxm.stats.poisson import Poisson
 
 
 class GaussianEmissions(typing.NamedTuple):
-    means: jax.Array  # (K, N)
-    covariances: jax.Array  # (K, N, N)
+    model: Gaussian  # K-batched
 
     def log_likelihoods(self, observations: jax.Array) -> jax.Array:
 
-        return gaussian.log_likelihoods(
-            observations=observations,
-            means=self.means[None, :, :],
-            covariances=self.covariances,
-        )
+        return self.model.log_prob_broadcast(observations)
 
     def get_potential(self, observations: jax.Array) -> DiscretePotential:
         return DiscretePotential(
@@ -30,45 +27,29 @@ class GaussianEmissions(typing.NamedTuple):
         observations: jax.Array,
         posterior: Posterior,
     ) -> typing.Self:
-        means, covariances = gaussian.fit_weighted(
+        gaussian = gaussian_fit.gaussian_from_pairs_weighted(
             observations,
             posterior.state_marginals,
         )
 
         return self._replace(
-            means=means,
-            covariances=covariances,
+            model=gaussian,
         )
 
-    def sample(
-        self,
-        key: jax.Array,
-        states: jax.Array,
-    ) -> jax.Array:
-        return jax.random.multivariate_normal(
-            key,
-            self.means[states],
-            self.covariances[states],
-        )
+    def sample(self, key: jax.Array, states: jax.Array) -> jax.Array:
+        return self.model.select(states).sample(key)
 
-    def permute(
-        self,
-        permutation: jax.Array,
-    ) -> 'GaussianEmissions':
-        return GaussianEmissions(
-            means=self.means[permutation],
-            covariances=self.covariances[permutation],
+    def permute(self, permutation: jax.Array) -> 'GaussianEmissions':
+        return self._replace(
+            model=self.model.select(permutation),
         )
 
 
 class PoissonEmissions(typing.NamedTuple):
-    rates: jax.Array  # (K, N)
+    model: Poisson  # K-batched
 
     def log_likelihoods(self, observations: jax.Array) -> jax.Array:
-        return poisson.log_likelihoods(
-            observations,
-            jnp.log(self.rates)[None, :, :],
-        )
+        return self.model.log_prob_broadcast(observations)
 
     def get_potential(self, observations: jax.Array) -> DiscretePotential:
         return DiscretePotential(
@@ -78,14 +59,14 @@ class PoissonEmissions(typing.NamedTuple):
     def fit_params(self, observations: jax.Array, posterior: Posterior) -> 'PoissonEmissions':
         rates = posterior.weighted_means(observations)
         rates = jnp.maximum(rates, 1e-8)
-        return self.__class__(rates=rates)
+        return self._replace(model=Poisson(log_rates=jnp.log(rates)))
 
     def permute(
         self,
         permutation: jax.Array,
     ) -> 'PoissonEmissions':
-        return PoissonEmissions(
-            rates=self.rates[permutation],
+        return self._replace(
+            model=self.model.select(permutation),
         )
 
     def sample(
@@ -93,7 +74,4 @@ class PoissonEmissions(typing.NamedTuple):
         key: jax.Array,
         states: jax.Array,
     ) -> jax.Array:
-        return jax.random.poisson(
-            key,
-            self.rates[states],
-        )
+        return self.model.select(states).sample(key)

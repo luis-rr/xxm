@@ -5,9 +5,10 @@ import typing
 import jax
 from jax import numpy as jnp
 from jax.scipy import linalg as jsp_linalg
-from jax.scipy import special as jsp_special
 
-from xxm.stats import gaussian, poisson
+from xxm.stats import gaussian_fit, poisson_fit
+from xxm.stats.gaussian import Gaussian, LinearGaussian
+from xxm.stats.poisson import LinearPoisson, Poisson
 
 from .chain import GaussianPotential
 
@@ -56,51 +57,73 @@ LaplaceEmissionsT = typing.TypeVar(
 
 
 class GaussianEmissions(typing.NamedTuple):
-    readout: jax.Array  # C, shape (N, D)
-    bias: jax.Array  # d, shape (N,)
-    noise_covariance: jax.Array  # R, shape (N, N)
+    """Linear Gaussian emissions for continuous latent variables."""
 
-    def mean(self, latents: jax.Array) -> jax.Array:
-        return latents @ self.readout.T + self.bias
+    model: LinearGaussian  # no batch
+
+    def conditional(
+        self,
+        latents: jax.Array,  # (..., D)
+    ) -> Gaussian:
+        """Conditional observation distribution given latent values."""
+        return self.model.conditional(latents)
+
+    def log_likelihood(
+        self,
+        observations: jax.Array,  # (T, N)
+        latents: jax.Array,  # (T, D)
+    ) -> jax.Array:  # ()
+        """Compute the total conditional log likelihood."""
+        return jnp.sum(self.conditional(latents).log_prob(observations))
 
     def get_potential(
         self,
-        observations: jax.Array,
+        observations: jax.Array,  # (T, N)
     ) -> GaussianPotential:
-        # observations: (T, N)
-        t = observations.shape[0]
-        n = observations.shape[1]
+        """Convert the Gaussian likelihood into a potential over latents."""
+        coefficients = self.model.affine.coefficients  # (N, D)
+        bias = self.model.affine.bias  # (N,)
+        covariance = self.model.covariance  # (N, N)
 
-        cholesky = jnp.linalg.cholesky(self.noise_covariance)
+        num_samples = observations.shape[0]
+        latent_dim = self.model.affine.input_dim
+
+        cholesky = jnp.linalg.cholesky(covariance)  # (N, N)
 
         precision = jsp_linalg.cho_solve(
             (cholesky, True),
-            jnp.eye(n, dtype=self.noise_covariance.dtype),
-        )
+            jnp.eye(
+                self.model.affine.output_dim,
+                dtype=covariance.dtype,
+            ),
+        )  # (N, N)
 
-        centered_observations = observations - self.bias
+        centered = observations - bias  # (T, N)
 
-        precision_matrix = precision @ self.readout
+        precision_coefficients = precision @ coefficients  # (N, D)
 
+        precision_block = coefficients.T @ precision_coefficients  # (D, D)
         precision_blocks = jnp.broadcast_to(
-            self.readout.T @ precision_matrix,
-            (t, self.readout.shape[1], self.readout.shape[1]),
-        )
+            precision_block,
+            (num_samples, latent_dim, latent_dim),
+        )  # (T, D, D)
 
-        information_vectors = centered_observations @ precision_matrix
-
-        log_det_covariance = 2.0 * jnp.sum(jnp.log(jnp.diag(cholesky)))
+        information_vectors = centered @ precision_coefficients  # (T, D)
 
         quadratic_terms = jnp.einsum(
-            'ti,ij,tj->t',
-            centered_observations,
+            'tn,nm,tm->t',
+            centered,
             precision,
-            centered_observations,
-        )
+            centered,
+        )  # (T,)
 
-        log_constant = (
-            -0.5 * quadratic_terms - 0.5 * log_det_covariance - 0.5 * n * jnp.log(2.0 * jnp.pi)
-        )
+        log_det_covariance = 2.0 * jnp.sum(jnp.log(jnp.diagonal(cholesky)))  # ()
+
+        log_constant = -0.5 * (
+            quadratic_terms
+            + log_det_covariance
+            + self.model.affine.output_dim * jnp.log(2.0 * jnp.pi)
+        )  # (T,)
 
         return GaussianPotential(
             precision_blocks=precision_blocks,
@@ -111,170 +134,104 @@ class GaussianEmissions(typing.NamedTuple):
     def sample(
         self,
         key: jax.Array,
-        latents: jax.Array,
-    ) -> jax.Array:
-        """Sample an observation conditional on a latent."""
-        means = latents @ self.readout.T + self.bias
-
-        return jax.random.multivariate_normal(
-            key,
-            mean=means,
-            cov=self.noise_covariance,
-        )
+        latents: jax.Array,  # (..., D)
+    ) -> jax.Array:  # (..., N)
+        """Sample observations conditional on latent values."""
+        return self.conditional(latents).sample(key)
 
     def fit_params(
         self,
-        observations: jax.Array,
+        observations: jax.Array,  # (T, N)
         posterior: typing.Any,
-    ) -> GaussianEmissions:
-        """Fit the parameters of the emissions model given a posterior over latents."""
-
-        means = posterior.means
-        second = posterior.raw_second_moments()
+    ) -> typing.Self:
+        """Fit the emission parameters from Gaussian latent marginals."""
+        means = posterior.means  # (T, D)
+        second_moments = posterior.raw_second_moments()  # (T, D, D)
 
         num_samples = observations.shape[0]
 
-        readout, bias, noise_covariance = gaussian.fit_linear_from_moments(
+        model = gaussian_fit.linear_from_moments(
             input_mean=jnp.mean(means, axis=0),
             output_mean=jnp.mean(observations, axis=0),
-            input_second_moment=jnp.mean(second, axis=0),
-            output_second_moment=observations.T @ observations / num_samples,
-            output_input_moment=observations.T @ means / num_samples,
+            input_second_moment=jnp.mean(second_moments, axis=0),
+            output_second_moment=(observations.T @ observations / num_samples),
+            output_input_moment=(observations.T @ means / num_samples),
         )
 
-        return GaussianEmissions(
-            readout=readout,
-            bias=bias,
-            noise_covariance=noise_covariance,
+        return self._replace(
+            model=model,
         )
-
-    def log_likelihood(
-        self,
-        observations: jax.Array,
-        latents: jax.Array,
-    ) -> jax.Array:
-        """Compute log p(observations | latents)."""
-        means = latents @ self.readout.T + self.bias
-        residuals = observations - means
-
-        cholesky = jsp_linalg.cholesky(
-            self.noise_covariance,
-            lower=True,
-        )
-
-        whitened = jsp_linalg.solve_triangular(
-            cholesky,
-            residuals.T,
-            lower=True,
-        ).T
-
-        quadratic = jnp.sum(whitened**2, axis=1)
-
-        log_det = 2.0 * jnp.sum(jnp.log(jnp.diag(cholesky)))
-
-        observation_dim = observations.shape[1]
-
-        return jnp.sum(-0.5 * (quadratic + log_det + observation_dim * jnp.log(2.0 * jnp.pi)))
 
 
 class PoissonEmissions(typing.NamedTuple):
-    readout: jax.Array  # C, shape (N, D)
-    bias: jax.Array  # d, shape (N,)
+    """Linear Poisson emissions for continuous latent variables."""
+
+    model: LinearPoisson  # no batch
+
+    def conditional(
+        self,
+        latents: jax.Array,  # (..., D)
+    ) -> Poisson:
+        """Conditional observation distribution given latent values."""
+        return self.model.conditional(latents)
 
     def rates(
         self,
-        latents: jax.Array,
-    ) -> jax.Array:
-        """Compute Poisson rates for a latent trajectory."""
-        linear_predictors = latents @ self.readout.T + self.bias
-        return jnp.exp(linear_predictors)
+        latents: jax.Array,  # (..., D)
+    ) -> jax.Array:  # (..., N)
+        """Compute conditional Poisson rates."""
+        return self.conditional(latents).rates
 
     def log_likelihood(
         self,
-        observations: jax.Array,
-        latents: jax.Array,
-    ) -> jax.Array:
-        """Compute log p(observations | latents)."""
-        linear_predictors = latents @ self.readout.T + self.bias
-        rates = jnp.exp(linear_predictors)
+        observations: jax.Array,  # (T, N)
+        latents: jax.Array,  # (T, D)
+    ) -> jax.Array:  # ()
+        """Compute the total conditional log likelihood."""
+        return jnp.sum(self.conditional(latents).log_prob(observations))
 
-        return jnp.sum(
-            observations * linear_predictors - rates - jsp_special.gammaln(observations + 1.0)
-        )
+    def get_local_potential(
+        self,
+        observations: jax.Array,  # (T, N)
+        latents: jax.Array,  # (T, D)
+    ) -> GaussianPotential:
+        """Quadratic approximation of the likelihood around ``latents``."""
+        coefficients = self.model.affine.coefficients  # (N, D)
 
-    def get_local_potential(self, observations: jax.Array, latents: jax.Array) -> GaussianPotential:
-        r"""
-        Quadratic Taylor approximation of the Poisson log likelihood.
+        conditional = self.conditional(latents)
+        rates = conditional.rates  # (T, N)
 
-        For
+        gradients = (observations - rates) @ coefficients  # (T, D)
 
-            y_t ~ Poisson(exp(C x_t + d)),
-
-        approximate log p(y_t | x_t) around ``reference_latents[t]`` as
-
-            -1/2 x_t.T @ J_t @ x_t + h_t.T @ x_t + c_t.
-
-        The approximation matches the value, gradient, and Hessian of the
-        true Poisson log likelihood at each reference state.
-        """
-        linear_predictors = latents @ self.readout.T + self.bias
-        rates = jnp.exp(linear_predictors)
-
-        # Gradient of log p(y_t | x_t) at the reference state:
-        #
-        #     g_t = C.T @ (y_t - lambda_t)
-        #
-        gradients = (observations - rates) @ self.readout
-
-        # Negative Hessian:
-        #
-        #     J_t = C.T @ diag(lambda_t) @ C
-        #
-        # shape: (T, D, D)
         precision_blocks = jnp.einsum(
             'tn,ni,nj->tij',
             rates,
-            self.readout,
-            self.readout,
-        )
+            coefficients,
+            coefficients,
+        )  # (T, D, D)
 
-        # Expanding
-        #
-        #   l(x) ~= l(x0)
-        #            + g.T (x - x0)
-        #            - 1/2 (x - x0).T J (x - x0)
-        #
-        # into canonical Gaussian-potential form gives
-        #
-        #   h = g + J x0.
-        #
         information_vectors = gradients + jnp.einsum(
             'tij,tj->ti',
             precision_blocks,
             latents,
-        )
+        )  # (T, D)
 
-        log_likelihoods = jnp.sum(
-            observations * linear_predictors - rates - jsp_special.gammaln(observations + 1.0),
-            axis=1,
-        )
+        log_likelihoods = conditional.log_prob(observations)  # (T,)
 
         gradient_terms = jnp.einsum(
             'ti,ti->t',
             gradients,
             latents,
-        )
+        )  # (T,)
 
         quadratic_terms = jnp.einsum(
             'ti,tij,tj->t',
             latents,
             precision_blocks,
             latents,
-        )
+        )  # (T,)
 
-        # Constant chosen so that the quadratic approximation has exactly
-        # the true likelihood value at the reference state.
-        log_constant = log_likelihoods - gradient_terms - 0.5 * quadratic_terms
+        log_constant = log_likelihoods - gradient_terms - 0.5 * quadratic_terms  # (T,)
 
         return GaussianPotential(
             precision_blocks=precision_blocks,
@@ -285,31 +242,24 @@ class PoissonEmissions(typing.NamedTuple):
     def sample(
         self,
         key: jax.Array,
-        latents: jax.Array,
-    ) -> jax.Array:
-        """Sample an observation conditional on a latent."""
-        rate = jnp.exp(latents @ self.readout.T + self.bias)
-
-        return jax.random.poisson(
-            key,
-            lam=rate,
-        )
+        latents: jax.Array,  # (..., D)
+    ) -> jax.Array:  # (..., N)
+        """Sample observations conditional on latent values."""
+        return self.conditional(latents).sample(key)
 
     def fit_params(
         self,
-        observations: jax.Array,
+        observations: jax.Array,  # (T, N)
         posterior: typing.Any,
-    ) -> PoissonEmissions:
-        """Fit the parameters of the emissions model given a posterior over latents."""
-        readout, bias = poisson.fit_linear_from_marginals(
+    ) -> typing.Self:
+        """Fit the emission parameters from Gaussian latent marginals."""
+        model = poisson_fit.linear_from_marginals(
             observations=observations,
-            means=posterior.means,
-            covariances=posterior.covariances,
-            coefficients=self.readout,
-            bias=self.bias,
+            input_means=posterior.means,
+            input_covariances=posterior.covariances,
+            initial_affine=self.model.affine,
         )
 
-        return self.__class__(
-            readout=readout,
-            bias=bias,
+        return self._replace(
+            model=model,
         )

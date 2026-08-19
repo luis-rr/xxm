@@ -23,15 +23,17 @@ from xxm.slds.core import (
     SwitchingLinearGaussianDynamicsModel,
 )
 from xxm.slds.inference import inference_exact
+from xxm.stats.gaussian import Affine, Gaussian, LinearGaussian
 
 ATOL = 1e-5
 
 
 def _mock_gaussian_emissions(noise_covariance: jax.Array) -> GaussianEmissions:
     return GaussianEmissions(
-        readout=jnp.eye(1),
-        bias=jnp.zeros(1),
-        noise_covariance=noise_covariance,
+        model=LinearGaussian(
+            affine=Affine(coefficients=jnp.eye(1), bias=jnp.zeros(1)),
+            covariance=noise_covariance,
+        ),
     )
 
 
@@ -62,16 +64,17 @@ def test_switching_dynamics_fit_recovers_known_linear_gaussian_model():
     )
 
     dynamics = SwitchingLinearGaussianDynamicsModel(
-        coefficients=jnp.zeros((1, 1, 1)),
-        bias=jnp.zeros((1, 1)),
-        noise_covariance=jnp.ones((1, 1, 1)),
+        model=LinearGaussian(
+            affine=Affine(coefficients=jnp.zeros((1, 1, 1)), bias=jnp.zeros((1, 1))),
+            covariance=jnp.ones((1, 1, 1)),
+        ),
     )
 
     fitted = dynamics.fit_params(posterior)
 
-    np.testing.assert_allclose(fitted.coefficients, [[[2.0]]], atol=ATOL)
-    np.testing.assert_allclose(fitted.bias, [[1.0]], atol=ATOL)
-    np.testing.assert_allclose(fitted.noise_covariance, [[[0.5]]], atol=ATOL)
+    np.testing.assert_allclose(fitted.model.affine.coefficients, [[[2.0]]], atol=ATOL)
+    np.testing.assert_allclose(fitted.model.affine.bias, [[1.0]], atol=ATOL)
+    np.testing.assert_allclose(fitted.model.covariance, [[[0.5]]], atol=ATOL)
 
 
 def test_switching_dynamics_fit_is_jittable():
@@ -91,9 +94,10 @@ def test_switching_dynamics_fit_is_jittable():
     posterior = Posterior(discrete, continuous)
 
     dynamics = SwitchingLinearGaussianDynamicsModel(
-        coefficients=jnp.zeros((1, 1, 1)),
-        bias=jnp.zeros((1, 1)),
-        noise_covariance=jnp.ones((1, 1, 1)),
+        model=LinearGaussian(
+            affine=Affine(coefficients=jnp.zeros((1, 1, 1)), bias=jnp.zeros((1, 1))),
+            covariance=jnp.ones((1, 1, 1)),
+        ),
     )
 
     fitted = jax.jit(lambda dynamics, posterior: dynamics.fit_params(posterior))(
@@ -102,9 +106,9 @@ def test_switching_dynamics_fit_is_jittable():
 
     jax.block_until_ready(fitted)
 
-    np.testing.assert_allclose(fitted.coefficients, [[[2.0]]], atol=ATOL)
-    np.testing.assert_allclose(fitted.bias, [[1.0]], atol=ATOL)
-    np.testing.assert_allclose(fitted.noise_covariance, [[[0.5]]], atol=ATOL)
+    np.testing.assert_allclose(fitted.model.affine.coefficients, [[[2.0]]], atol=ATOL)
+    np.testing.assert_allclose(fitted.model.affine.bias, [[1.0]], atol=ATOL)
+    np.testing.assert_allclose(fitted.model.covariance, [[[0.5]]], atol=ATOL)
 
 
 class _IdentityGaussianEmissions(typing.NamedTuple):
@@ -119,8 +123,7 @@ class _IdentityGaussianEmissions(typing.NamedTuple):
             (observations.shape[0],) + self.covariance.shape,
         )
         return GaussianPotential.from_moments(
-            observations,
-            covariances,
+            Gaussian(mean=observations, covariance=covariances),
         )
 
 
@@ -133,13 +136,13 @@ def _single_state_model() -> Model:
             transition_probs=jnp.array([[1.0]]),
         ),
         latent_initial=GaussianInitialModel(
-            mean=jnp.array([0.0]),
-            covariance=jnp.array([[1.0]]),
+            model=Gaussian(mean=jnp.array([0.0]), covariance=jnp.array([[1.0]])),
         ),
         dynamics=SwitchingLinearGaussianDynamicsModel(
-            coefficients=jnp.array([[[0.8]]]),
-            bias=jnp.array([[0.2]]),
-            noise_covariance=jnp.array([[[0.5]]]),
+            model=LinearGaussian(
+                affine=Affine(coefficients=jnp.array([[[0.8]]]), bias=jnp.array([[0.2]])),
+                covariance=jnp.array([[[0.5]]]),
+            ),
         ),
         emissions=_mock_gaussian_emissions(
             noise_covariance=jnp.array([[0.25]]),
@@ -161,13 +164,16 @@ def _two_state_model() -> Model:
             ),
         ),
         latent_initial=GaussianInitialModel(
-            mean=jnp.array([0.0]),
-            covariance=jnp.array([[1.0]]),
+            model=Gaussian(mean=jnp.array([0.0]), covariance=jnp.array([[1.0]])),
         ),
         dynamics=SwitchingLinearGaussianDynamicsModel(
-            coefficients=jnp.array([[[0.8]], [[-0.5]]]),
-            bias=jnp.array([[0.0], [1.0]]),
-            noise_covariance=jnp.array([[[0.5]], [[0.5]]]),
+            model=LinearGaussian(
+                affine=Affine(
+                    coefficients=jnp.array([[[0.8]], [[-0.5]]]),
+                    bias=jnp.array([[0.0], [1.0]]),
+                ),
+                covariance=jnp.array([[[0.5]], [[0.5]]]),
+            ),
         ),
         emissions=_mock_gaussian_emissions(
             noise_covariance=jnp.array([[0.25]]),
@@ -190,8 +196,9 @@ def test_single_state_slds_matches_gaussian_chain():
 
     pair_potentials = model.dynamics.get_pair_potentials().expected(state_probs)
     initial_potential = GaussianPotential.from_moments(
-        model.latent_initial.mean,
-        model.latent_initial.covariance,
+        Gaussian(
+            mean=model.latent_initial.model.mean, covariance=model.latent_initial.model.covariance
+        ),
     )
     observation_potential = model.emissions.get_potential(observations)
 

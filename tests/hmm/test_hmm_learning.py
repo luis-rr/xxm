@@ -6,6 +6,8 @@ from xxm.core.discrete.chain import DiscreteChainMarginals
 from xxm.core.discrete.emissions import GaussianEmissions, PoissonEmissions
 from xxm.hmm.core import DiscreteInitialModel, DiscreteTransitionModel, Model
 from xxm.hmm.learning import em_step
+from xxm.stats.gaussian import Gaussian
+from xxm.stats.poisson import Poisson
 
 jax.config.update('jax_enable_x64', True)
 
@@ -92,11 +94,15 @@ def test_m_step_transition_probs():
 
 def test_poisson_log_likelihoods():
     emissions = PoissonEmissions(
-        rates=jnp.array(
-            [
-                [1.0],
-                [2.0],
-            ]
+        model=Poisson(
+            log_rates=jnp.log(
+                jnp.array(
+                    [
+                        [1.0],
+                        [2.0],
+                    ]
+                )
+            )
         )
     )
 
@@ -143,7 +149,7 @@ def test_poisson_m_step():
     )
 
     emissions = PoissonEmissions(
-        rates=jnp.ones((2, 1)),
+        model=Poisson(log_rates=jnp.zeros((2, 1))),
     )
 
     result = emissions.fit_params(observations, posterior)
@@ -155,23 +161,25 @@ def test_poisson_m_step():
         ]
     )
 
-    np.testing.assert_allclose(result.rates, expected)
+    np.testing.assert_allclose(result.model.rates, expected)
 
 
 def test_gaussian_log_likelihoods():
     emissions = GaussianEmissions(
-        means=jnp.array(
-            [
-                [0.0],
-                [2.0],
-            ]
-        ),
-        covariances=jnp.array(
-            [
-                [[1.0]],
-                [[1.0]],
-            ]
-        ),
+        model=Gaussian(
+            mean=jnp.array(
+                [
+                    [0.0],
+                    [2.0],
+                ]
+            ),
+            covariance=jnp.array(
+                [
+                    [[1.0]],
+                    [[1.0]],
+                ]
+            ),
+        )
     )
 
     observations = jnp.array(
@@ -216,8 +224,7 @@ def test_gaussian_m_step():
     )
 
     emissions = GaussianEmissions(
-        means=jnp.zeros((2, 1)),
-        covariances=jnp.ones((2, 1, 1)),
+        model=Gaussian(mean=jnp.zeros((2, 1)), covariance=jnp.ones((2, 1, 1))),
     )
 
     result = emissions.fit_params(observations, posterior)
@@ -230,7 +237,7 @@ def test_gaussian_m_step():
     )
 
     np.testing.assert_allclose(
-        result.means,
+        result.model.mean,
         expected_means,
         atol=1e-6,
     )
@@ -246,7 +253,7 @@ def test_gaussian_m_step():
         expected_variances.append([[variance]])
 
     np.testing.assert_allclose(
-        result.covariances,
+        result.model.covariance,
         expected_variances,
         atol=1e-6,
     )
@@ -264,11 +271,15 @@ def test_em_step_is_jit_compatible():
             )
         ),
         emissions=PoissonEmissions(
-            rates=jnp.array(
-                [
-                    [1.0],
-                    [5.0],
-                ]
+            model=Poisson(
+                log_rates=jnp.log(
+                    jnp.array(
+                        [
+                            [1.0],
+                            [5.0],
+                        ]
+                    )
+                )
             ),
         ),
     )
@@ -296,8 +307,8 @@ def test_em_step_is_jit_compatible():
         atol=1e-6,
     )
     np.testing.assert_allclose(
-        jitted_model.emissions.rates,
-        eager_model.emissions.rates,
+        jitted_model.emissions.model.rates,
+        eager_model.emissions.model.rates,
         atol=1e-6,
     )
     np.testing.assert_allclose(

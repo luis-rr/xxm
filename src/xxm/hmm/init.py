@@ -10,7 +10,7 @@ from xxm.core.discrete.emissions_ar import (
     ARPoissonEmissions,
     lagged_observations,
 )
-from xxm.stats import gaussian, poisson
+from xxm.stats import gaussian_fit, poisson_fit
 
 from .core import DiscreteInitialModel, DiscreteTransitionModel, Emissions, Model
 
@@ -107,7 +107,7 @@ def _initialize(
 
 
 def _initialize_gaussian_emissions(
-    observations: jax.Array,
+    observations: jax.Array,  # (T, N)
     num_states: int,
     key: jax.Array,
 ) -> GaussianEmissions:
@@ -115,27 +115,27 @@ def _initialize_gaussian_emissions(
         observations,
         num_states,
         key,
+    )  # (T,)
+
+    gaussian = gaussian_fit.gaussian_from_pairs_grouped(
+        observations=observations,
+        assignments=assignments,
+        num_groups=num_states,
     )
 
-    weights = jax.nn.one_hot(assignments, num_states, dtype=observations.dtype)
-    counts = weights.sum(axis=0)
-
-    means = weights.T @ observations / jnp.maximum(counts[:, None], 1)
-
-    residuals = observations[:, None, :] - means[None, :, :]
-
-    covariances = jnp.einsum(
-        'tk,tki,tkj->kij',
-        weights,
-        residuals,
-        residuals,
-    ) / jnp.maximum(counts[:, None, None], 1)
-
-    covariances += 1e-6 * jnp.eye(observations.shape[-1])[None, :, :]
+    covariance = (
+        gaussian.covariance
+        + 1e-6
+        * jnp.eye(
+            observations.shape[-1],
+            dtype=gaussian.covariance.dtype,
+        )[None]
+    )  # (K, N, N)
 
     return GaussianEmissions(
-        means=means,
-        covariances=covariances,
+        model=gaussian._replace(
+            covariance=covariance,
+        )
     )
 
 
@@ -154,77 +154,63 @@ def initialize_hmm_gaussian(
     )
 
 
-def _initialize_ar_state_weights(
-    predictors: jax.Array,
-    current: jax.Array,
+def _initialize_ar_state_assignments(
+    predictors: jax.Array,  # (T-L, L*N)
+    current: jax.Array,  # (T-L, N)
     num_states: int,
     key: jax.Array,
-) -> jax.Array:
-    """Initialize AR states by clustering histories together with current observations."""
+) -> jax.Array:  # (T-L,)
+    """Initialize AR states by clustering predictors and current observations."""
     features = jnp.concatenate(
         [predictors, current],
         axis=-1,
-    )
+    )  # (T-L, (L+1)*N)
 
-    assignments = _kmeans(
+    return _kmeans(
         features,
         num_states,
         key,
     )
 
-    dtype = jnp.result_type(features, jnp.float32)
-
-    return jax.nn.one_hot(assignments, num_states, dtype=dtype)
-
 
 def _initialize_ar_gaussian_emissions(
-    observations: jax.Array,
+    observations: jax.Array,  # (T, N)
     num_states: int,
-    lag: int,
+    max_lag: int,
     key: jax.Array,
 ) -> ARGaussianEmissions:
     history = lagged_observations(
         observations,
-        lag=lag,
-        num_dims=observations.shape[-1],
-    )
-    current = observations[lag:]
+        max_lag=max_lag,
+    )  # (T-L, L, N)
+
+    current = observations[max_lag:]  # (T-L, N)
 
     num_samples, _, num_dims = history.shape
-    predictors = history.reshape(num_samples, lag * num_dims)
 
-    state_weights = _initialize_ar_state_weights(
+    predictors = history.reshape(
+        num_samples,
+        max_lag * num_dims,
+    )  # (T-L, L*N)
+
+    assignments = _initialize_ar_state_assignments(
         predictors,
         current,
         num_states,
         key,
-    )
+    )  # (T-L,)
 
-    coefficients, biases, covariances = gaussian.fit_weighted_linear(
+    model = gaussian_fit.linear_from_pairs_grouped(
         inputs=predictors,
         outputs=current,
-        weights=state_weights,
+        assignments=assignments,
+        num_groups=num_states,
         ridge=1e-6,
     )
 
-    coefficients = coefficients.reshape(
-        num_states,
-        num_dims,
-        lag,
-        num_dims,
-    )
-    coefficients = jnp.transpose(
-        coefficients,
-        (0, 2, 1, 3),
-    )
+    model = model.add_covariance_jitter(1e-6)
 
-    covariances += 1e-6 * jnp.eye(num_dims)[None, :, :]
-
-    return ARGaussianEmissions(
-        coefficients=coefficients,
-        biases=biases,
-        covariances=covariances,
-    )
+    return ARGaussianEmissions(model)
 
 
 def initialize_arhmm_gaussian(
@@ -250,30 +236,25 @@ def initialize_arhmm_gaussian(
 
 
 def _initialize_poisson_emissions(
-    observations: jax.Array,
+    observations: jax.Array,  # (T, N)
     num_states: int,
     key: jax.Array,
-) -> 'PoissonEmissions':
+) -> PoissonEmissions:
     assignments = _kmeans(
         observations,
         num_states,
         key,
+    )  # (T,)
+
+    poisson = poisson_fit.poisson_from_pairs_grouped(
+        observations=observations,
+        assignments=assignments,
+        num_groups=num_states,
     )
 
-    dtype = jnp.result_type(observations, jnp.float32)
-
-    weights = jax.nn.one_hot(
-        assignments,
-        num_states,
-        dtype=dtype,
+    return PoissonEmissions(
+        model=poisson,
     )
-    counts = weights.sum(axis=0)
-
-    rates = weights.T @ observations / jnp.maximum(counts[:, None], 1)
-
-    rates = jnp.maximum(rates, 1e-8)
-
-    return PoissonEmissions(rates=rates)
 
 
 def initialize_hmm_poisson(
@@ -292,76 +273,54 @@ def initialize_hmm_poisson(
 
 
 def _initialize_ar_poisson_emissions(
-    observations: jax.Array,
+    observations: jax.Array,  # (T, N)
     num_states: int,
-    lag: int,
+    max_lag: int,
     key: jax.Array,
 ) -> ARPoissonEmissions:
     history = lagged_observations(
         observations,
-        lag=lag,
-        num_dims=observations.shape[-1],
-    )
-    current = observations[lag:]
+        max_lag=max_lag,
+    )  # (T-L, L, N)
+
+    current = observations[max_lag:]  # (T-L, N)
 
     num_samples, _, num_dims = history.shape
-    predictors = history.reshape(num_samples, lag * num_dims)
 
-    state_weights = _initialize_ar_state_weights(
+    predictors = history.reshape(
+        num_samples,
+        max_lag * num_dims,
+    )  # (T-L, L*N)
+
+    assignments = _initialize_ar_state_assignments(
         predictors,
         current,
         num_states,
         key,
-    )
+    )  # (T-L,)
 
-    counts = state_weights.sum(axis=0)
-    rates = state_weights.T @ current / jnp.maximum(counts[:, None], 1)
-    rates = jnp.maximum(rates, 1e-8)
-
-    dtype = jnp.result_type(observations, jnp.float32)
-
-    initial_readout = jnp.zeros(
-        (num_states, num_dims, lag * num_dims),
-        dtype=dtype,
-    )
-    initial_bias = jnp.log(rates.astype(dtype))
-
-    readout, biases = poisson.fit_weighted_linear(
+    model = poisson_fit.linear_from_pairs_grouped(
         inputs=predictors,
         outputs=current,
-        weights=state_weights,
-        coefficients=initial_readout,
-        bias=initial_bias,
+        assignments=assignments,
+        num_groups=num_states,
     )
 
-    coefficients = readout.reshape(
-        num_states,
-        num_dims,
-        lag,
-        num_dims,
-    )
-    coefficients = jnp.transpose(
-        coefficients,
-        (0, 2, 1, 3),
-    )
-
-    return ARPoissonEmissions(
-        coefficients=coefficients,
-        biases=biases,
-    )
+    return ARPoissonEmissions(model)
 
 
 def initialize_arhmm_poisson(
     num_states: int,
     observations: jax.Array,
-    lag: int,
+    max_lag: int,
     key: jax.Array,
     self_transition_prob: float = 0.9,
 ) -> Model:
-    emissions = _initialize_ar_poisson_emissions(observations, num_states, lag=lag, key=key)
+
+    emissions = _initialize_ar_poisson_emissions(observations, num_states, max_lag=max_lag, key=key)
     return _initialize(
         num_states,
         emissions,
         self_transition_prob=self_transition_prob,
-        dtype=observations.dtype,
+        dtype=jnp.result_type(observations, jnp.float32),
     )

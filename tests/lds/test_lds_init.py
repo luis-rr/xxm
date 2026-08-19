@@ -10,9 +10,9 @@ def test_init_pca_gaussian_returns_model_with_requested_state_dimension():
 
     model = init_pca_gaussian(observations, state_dim=2)
 
-    assert model.initial.mean.shape == (2,)
-    assert model.dynamics.matrix.shape == (2, 2)
-    assert model.emissions.readout.shape == (3, 2)
+    assert model.initial.model.mean.shape == (2,)
+    assert model.dynamics.model.affine.coefficients.shape == (2, 2)
+    assert model.emissions.model.affine.coefficients.shape == (3, 2)
 
 
 def test_init_pca_gaussian_rejects_too_few_time_steps():
@@ -28,7 +28,7 @@ def test_init_pca_gaussian_many_returns_one_model_per_floor():
     )
 
     assert len(models) == 2
-    assert all(model.initial.mean.shape == (2,) for model in models)
+    assert all(model.initial.model.mean.shape == (2,) for model in models)
 
 
 def test_init_pca_gaussian_is_jittable():
@@ -36,4 +36,4 @@ def test_init_pca_gaussian_is_jittable():
 
     model = jax.jit(init_pca_gaussian, static_argnames='state_dim')(observations, state_dim=2)
 
-    assert model.emissions.noise_covariance.shape == (3, 3)
+    assert model.emissions.model.covariance.shape == (3, 3)

@@ -5,6 +5,8 @@ import numpy as np
 from jax import numpy as jnp
 
 from xxm.core.gaussian.emissions import GaussianEmissions, PoissonEmissions
+from xxm.stats.gaussian import Affine, LinearGaussian
+from xxm.stats.poisson import LinearPoisson
 
 
 class MockPosterior(typing.NamedTuple):
@@ -26,14 +28,18 @@ class MockPosterior(typing.NamedTuple):
 
 def test_gaussian_potential_matches_known_value():
     emissions = GaussianEmissions(
-        readout=jnp.array(
-            [
-                [1.0, 2.0],
-                [0.0, 1.0],
-            ]
+        model=LinearGaussian(
+            affine=Affine(
+                coefficients=jnp.array(
+                    [
+                        [1.0, 2.0],
+                        [0.0, 1.0],
+                    ]
+                ),
+                bias=jnp.array([1.0, -1.0]),
+            ),
+            covariance=jnp.diag(jnp.array([1.0, 4.0])),
         ),
-        bias=jnp.array([1.0, -1.0]),
-        noise_covariance=jnp.diag(jnp.array([1.0, 4.0])),
     )
 
     potential = emissions.get_potential(jnp.array([[2.0, 3.0]]))
@@ -62,14 +68,18 @@ def test_gaussian_potential_matches_known_value():
 
 def test_gaussian_log_likelihood_matches_known_value():
     emissions = GaussianEmissions(
-        readout=jnp.array(
-            [
-                [1.0, 2.0],
-                [0.0, 1.0],
-            ]
+        model=LinearGaussian(
+            affine=Affine(
+                coefficients=jnp.array(
+                    [
+                        [1.0, 2.0],
+                        [0.0, 1.0],
+                    ]
+                ),
+                bias=jnp.array([1.0, -1.0]),
+            ),
+            covariance=jnp.diag(jnp.array([1.0, 4.0])),
         ),
-        bias=jnp.array([1.0, -1.0]),
-        noise_covariance=jnp.diag(jnp.array([1.0, 4.0])),
     )
 
     value = emissions.log_likelihood(
@@ -113,17 +123,18 @@ def test_gaussian_fit_recovers_known_parameters():
     )
 
     emissions = GaussianEmissions(
-        readout=jnp.zeros((1, 1)),
-        bias=jnp.zeros(1),
-        noise_covariance=jnp.eye(1),
+        model=LinearGaussian(
+            affine=Affine(coefficients=jnp.zeros((1, 1)), bias=jnp.zeros(1)),
+            covariance=jnp.eye(1),
+        ),
     )
 
     fitted = emissions.fit_params(observations, posterior)
 
-    np.testing.assert_allclose(fitted.readout, [[2.0]], atol=1e-6)
-    np.testing.assert_allclose(fitted.bias, [1.0], atol=1e-6)
+    np.testing.assert_allclose(fitted.model.affine.coefficients, [[2.0]], atol=1e-6)
+    np.testing.assert_allclose(fitted.model.affine.bias, [1.0], atol=1e-6)
     np.testing.assert_allclose(
-        fitted.noise_covariance,
+        fitted.model.covariance,
         [[0.25]],
         atol=1e-6,
     )
@@ -131,9 +142,10 @@ def test_gaussian_fit_recovers_known_parameters():
 
 def test_gaussian_sample_has_expected_shape():
     emissions = GaussianEmissions(
-        readout=jnp.ones((3, 2)),
-        bias=jnp.zeros(3),
-        noise_covariance=jnp.eye(3),
+        model=LinearGaussian(
+            affine=Affine(coefficients=jnp.ones((3, 2)), bias=jnp.zeros(3)),
+            covariance=jnp.eye(3),
+        ),
     )
 
     sample = emissions.sample(
@@ -148,9 +160,10 @@ def test_gaussian_sample_has_expected_shape():
 def test_gaussian_emissions_potential_has_one_factor_per_observation():
     # y_t | x_t ~ N(2 x_t + 1, 4)
     emissions = GaussianEmissions(
-        readout=jnp.array([[2.0]]),
-        bias=jnp.array([1.0]),
-        noise_covariance=jnp.array([[4.0]]),
+        model=LinearGaussian(
+            affine=Affine(coefficients=jnp.array([[2.0]]), bias=jnp.array([1.0])),
+            covariance=jnp.array([[4.0]]),
+        ),
     )
 
     observations = jnp.array(
@@ -205,8 +218,9 @@ def test_gaussian_emissions_potential_has_one_factor_per_observation():
 
 def test_poisson_rates_match_known_values():
     emissions = PoissonEmissions(
-        readout=jnp.array([[jnp.log(2.0)]]),
-        bias=jnp.zeros(1),
+        model=LinearPoisson(
+            affine=Affine(coefficients=jnp.array([[jnp.log(2.0)]]), bias=jnp.zeros(1)),
+        ),
     )
 
     rates = emissions.rates(jnp.array([[0.0], [1.0], [2.0]]))
@@ -220,8 +234,9 @@ def test_poisson_rates_match_known_values():
 
 def test_poisson_log_likelihood_matches_known_scalar_value():
     emissions = PoissonEmissions(
-        readout=jnp.zeros((1, 1)),
-        bias=jnp.zeros(1),
+        model=LinearPoisson(
+            affine=Affine(coefficients=jnp.zeros((1, 1)), bias=jnp.zeros(1)),
+        ),
     )
 
     value = emissions.log_likelihood(
@@ -238,8 +253,9 @@ def test_poisson_log_likelihood_matches_known_scalar_value():
 
 def test_poisson_log_likelihood_handles_zero_count():
     emissions = PoissonEmissions(
-        readout=jnp.zeros((1, 1)),
-        bias=jnp.array([jnp.log(2.0)]),
+        model=LinearPoisson(
+            affine=Affine(coefficients=jnp.zeros((1, 1)), bias=jnp.array([jnp.log(2.0)])),
+        ),
     )
 
     value = emissions.log_likelihood(
@@ -252,8 +268,9 @@ def test_poisson_log_likelihood_handles_zero_count():
 
 def test_poisson_local_potential_matches_value_gradient_and_hessian():
     emissions = PoissonEmissions(
-        readout=jnp.array([[2.0]]),
-        bias=jnp.zeros(1),
+        model=LinearPoisson(
+            affine=Affine(coefficients=jnp.array([[2.0]]), bias=jnp.zeros(1)),
+        ),
     )
 
     observations = jnp.array([[3.0]])
@@ -295,8 +312,9 @@ def test_poisson_fit_recovers_known_parameters():
     )
 
     true_emissions = PoissonEmissions(
-        readout=jnp.array([[jnp.log(2.0)]]),
-        bias=jnp.array([jnp.log(2.0)]),
+        model=LinearPoisson(
+            affine=Affine(coefficients=jnp.array([[jnp.log(2.0)]]), bias=jnp.array([jnp.log(2.0)])),
+        ),
     )
 
     observations = true_emissions.rates(latents)
@@ -307,28 +325,30 @@ def test_poisson_fit_recovers_known_parameters():
     )
 
     initial_emissions = PoissonEmissions(
-        readout=jnp.zeros((1, 1)),
-        bias=jnp.zeros(1),
+        model=LinearPoisson(
+            affine=Affine(coefficients=jnp.zeros((1, 1)), bias=jnp.zeros(1)),
+        ),
     )
 
     fitted = initial_emissions.fit_params(observations, posterior)
 
     np.testing.assert_allclose(
-        fitted.readout,
-        true_emissions.readout,
+        fitted.model.affine.coefficients,
+        true_emissions.model.affine.coefficients,
         atol=1e-3,
     )
     np.testing.assert_allclose(
-        fitted.bias,
-        true_emissions.bias,
+        fitted.model.affine.bias,
+        true_emissions.model.affine.bias,
         atol=1e-3,
     )
 
 
 def test_poisson_sample_has_expected_shape_and_values():
     emissions = PoissonEmissions(
-        readout=jnp.ones((3, 2)),
-        bias=jnp.zeros(3),
+        model=LinearPoisson(
+            affine=Affine(coefficients=jnp.ones((3, 2)), bias=jnp.zeros(3)),
+        ),
     )
 
     sample = emissions.sample(
@@ -348,9 +368,10 @@ def test_poisson_sample_has_expected_shape_and_values():
 
 def test_gaussian_methods_are_jittable():
     emissions = GaussianEmissions(
-        readout=jnp.eye(2),
-        bias=jnp.zeros(2),
-        noise_covariance=jnp.eye(2),
+        model=LinearGaussian(
+            affine=Affine(coefficients=jnp.eye(2), bias=jnp.zeros(2)),
+            covariance=jnp.eye(2),
+        ),
     )
 
     observations = jnp.ones((3, 2))
@@ -368,8 +389,9 @@ def test_gaussian_methods_are_jittable():
 
 def test_poisson_methods_are_jittable():
     emissions = PoissonEmissions(
-        readout=jnp.eye(2),
-        bias=jnp.zeros(2),
+        model=LinearPoisson(
+            affine=Affine(coefficients=jnp.eye(2), bias=jnp.zeros(2)),
+        ),
     )
 
     observations = jnp.ones((3, 2))

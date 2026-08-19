@@ -14,8 +14,8 @@ from xxm.core.gaussian.chain import (
     GaussianPotential,
 )
 from xxm.core.gaussian.emissions import Emissions
-
-from ..stats import gaussian
+from xxm.stats import gaussian_fit
+from xxm.stats.gaussian import Gaussian, LinearGaussian
 
 EmissionsT = typing.TypeVar('EmissionsT', bound=Emissions)
 
@@ -46,8 +46,7 @@ def _gaussian_log_prob_residuals(
 
 
 class GaussianInitialModel(typing.NamedTuple):
-    mean: jax.Array
-    covariance: jax.Array
+    model: Gaussian  # no batch
 
     def fit_params(
         self,
@@ -59,27 +58,18 @@ class GaussianInitialModel(typing.NamedTuple):
         mean = posterior.means[0]
         covariance = posterior.covariances[0]
 
-        return self.__class__(
-            mean=mean,
-            covariance=covariance,
-        )
+        return self._replace(model=Gaussian(mean=mean, covariance=covariance))
 
     def sample(
         self,
         key: jax.Array,
     ) -> jax.Array:
 
-        return jax.random.multivariate_normal(
-            key,
-            mean=self.mean,
-            cov=self.covariance,
-        )
+        return self.model.sample(key)
 
 
 class LinearGaussianDynamicsModel(typing.NamedTuple):
-    matrix: jax.Array
-    bias: jax.Array
-    noise_covariance: jax.Array
+    model: LinearGaussian  # no batch
 
     def fit_params(
         self,
@@ -92,7 +82,7 @@ class LinearGaussianDynamicsModel(typing.NamedTuple):
         second = posterior.raw_second_moments()
         cross = posterior.raw_cross_moments()
 
-        matrix, bias, noise_covariance = gaussian.fit_linear_from_moments(
+        model = gaussian_fit.linear_from_moments(
             input_mean=jnp.mean(means[:-1], axis=0),
             output_mean=jnp.mean(means[1:], axis=0),
             input_second_moment=jnp.mean(second[:-1], axis=0),
@@ -100,33 +90,15 @@ class LinearGaussianDynamicsModel(typing.NamedTuple):
             output_input_moment=jnp.mean(cross, axis=0).T,
         )
 
-        return self.__class__(
-            matrix=matrix,
-            bias=bias,
-            noise_covariance=noise_covariance,
-        )
-
-    def next_mean(
-        self,
-        latent: jax.Array,
-    ) -> jax.Array:
-
-        return latent @ self.matrix.T + self.bias
+        return self._replace(model=model)
 
     def sample(
         self,
         key: jax.Array,
         previous: jax.Array,
     ) -> jax.Array:
-        latent_mean = self.next_mean(previous)
 
-        latent = jax.random.multivariate_normal(
-            key,
-            mean=latent_mean,
-            cov=self.noise_covariance,
-        )
-
-        return latent
+        return self.model.conditional(previous).sample(key=key)
 
 
 class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
@@ -139,20 +111,13 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     emissions: EmissionsT
 
     def get_initial_potential(self) -> GaussianPotential:
-        return GaussianPotential.from_moments(
-            self.initial.mean,
-            self.initial.covariance,
-        )
+        return GaussianPotential.from_moments(self.initial.model)
 
     def get_pair_potentials(
         self,
         num_time_steps: int,
     ) -> GaussianPairPotential:
-        potential = GaussianPairPotential.from_linear_conditional(
-            self.dynamics.matrix,
-            self.dynamics.bias,
-            self.dynamics.noise_covariance,
-        )
+        potential = GaussianPairPotential.from_linear_conditional(self.dynamics.model)
 
         return potential.broadcast(batch_shape=(num_time_steps - 1,))
 
@@ -208,20 +173,20 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
             _: None,
         ) -> tuple[jax.Array, jax.Array]:
 
-            next_state = self.dynamics.next_mean(latent)
+            next_state = self.dynamics.model.conditional(latent).mean
 
             return next_state, next_state
 
         _, remaining_latents = jax.lax.scan(
             step,
-            self.initial.mean,
+            self.initial.model.mean,
             None,
             length=num_time_steps - 1,
         )
 
         return jnp.concatenate(
             [
-                self.initial.mean[None],
+                self.initial.model.mean[None],
                 remaining_latents,
             ],
             axis=0,
@@ -234,20 +199,20 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     ) -> jax.Array:
         """Compute log p(x, y) for a latentsstrajectory."""
 
-        initial_residual = (latents[0] - self.initial.mean)[None]
+        initial_residual = (latents[0] - self.initial.model.mean)[None]
 
         initial_log_prob = _gaussian_log_prob_residuals(
             initial_residual,
-            self.initial.covariance,
+            self.initial.model.covariance,
         )
 
-        dynamics_means = self.dynamics.next_mean(latents[:-1])
+        dynamics_means = self.dynamics.model.conditional(latents[:-1]).mean
 
         dynamics_residuals = latents[1:] - dynamics_means
 
         dynamics_log_prob = _gaussian_log_prob_residuals(
             dynamics_residuals,
-            self.dynamics.noise_covariance,
+            self.dynamics.model.covariance,
         )
 
         emission_log_prob = self.emissions.log_likelihood(

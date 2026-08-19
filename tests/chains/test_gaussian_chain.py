@@ -8,6 +8,7 @@ from xxm.core.gaussian.chain import (
     GaussianPairPotential,
     GaussianPotential,
 )
+from xxm.stats.gaussian import Affine, Gaussian, LinearGaussian
 
 jax.config.update('jax_enable_x64', True)
 
@@ -218,7 +219,7 @@ def test_gaussian_potential_from_moments_fields():
     mean = jnp.array([1.0, -0.5])
     covariance = jnp.array([[2.0, 0.3], [0.3, 1.5]])
 
-    potential = GaussianPotential.from_moments(mean, covariance)
+    potential = GaussianPotential.from_moments(Gaussian(mean, covariance))
 
     expected_precision = np.linalg.inv(np.array(covariance))
     expected_information = expected_precision @ np.array(mean)
@@ -235,7 +236,7 @@ def test_gaussian_potential_from_moments_log_density():
     covariance = jnp.array([[2.0, 0.3], [0.3, 1.5]])
     x = jnp.array([0.5, 0.2])
 
-    potential = GaussianPotential.from_moments(mean, covariance)
+    potential = GaussianPotential.from_moments(Gaussian(mean, covariance))
 
     log_f = (
         -0.5 * x @ potential.precision_blocks @ x
@@ -259,7 +260,7 @@ def test_gaussian_potential_from_moments_is_normalized():
     mean = jnp.array([1.0, -0.5])
     covariance = jnp.array([[2.0, 0.3], [0.3, 1.5]])
 
-    potential = GaussianPotential.from_moments(mean, covariance)
+    potential = GaussianPotential.from_moments(Gaussian(mean, covariance))
 
     J = np.array(potential.precision_blocks)
     h = np.array(potential.information_vectors)
@@ -284,7 +285,9 @@ def test_gaussian_pair_potential_from_linear_conditional_fields():
     b = jnp.array([0.5, -0.3])
     Q = jnp.array([[1.5, 0.2], [0.2, 1.0]])
 
-    potential = GaussianPairPotential.from_linear_conditional(A, b, Q)
+    potential = GaussianPairPotential.from_linear_conditional(
+        LinearGaussian(affine=Affine(coefficients=A, bias=b), covariance=Q)
+    )
 
     Q_inv = np.linalg.inv(np.array(Q))
 
@@ -308,7 +311,9 @@ def test_gaussian_pair_potential_log_constant():
     b = jnp.array([0.5, -0.3])
     Q = jnp.array([[1.5, 0.2], [0.2, 1.0]])
 
-    potential = GaussianPairPotential.from_linear_conditional(A, b, Q)
+    potential = GaussianPairPotential.from_linear_conditional(
+        LinearGaussian(affine=Affine(coefficients=A, bias=b), covariance=Q)
+    )
 
     Q_inv = np.linalg.inv(np.array(Q))
     d = b.shape[0]
@@ -329,7 +334,9 @@ def test_gaussian_pair_potential_log_density():
     x0 = jnp.array([1.0, 0.5])
     x1 = jnp.array([0.2, 0.8])
 
-    potential = GaussianPairPotential.from_linear_conditional(A, b, Q)
+    potential = GaussianPairPotential.from_linear_conditional(
+        LinearGaussian(affine=Affine(coefficients=A, bias=b), covariance=Q)
+    )
 
     log_f = (
         -0.5 * x0 @ potential.left_precision @ x0
@@ -377,10 +384,12 @@ def test_gaussian_potential_from_moments_batched():
         ]
     )  # (2, 2, D, D)
 
-    result = GaussianPotential.from_moments(means, covariances)
+    result = GaussianPotential.from_moments(Gaussian(means, covariances))
 
     expected = jax.vmap(
-        jax.vmap(lambda mean, covariance: GaussianPotential.from_moments(mean, covariance))
+        jax.vmap(
+            lambda mean, covariance: GaussianPotential.from_moments(Gaussian(mean, covariance))
+        )
     )(means, covariances)
 
     np.testing.assert_allclose(
@@ -421,10 +430,10 @@ def test_gaussian_potential_from_moments_batched_jit():
         ]
     )
 
-    eager = GaussianPotential.from_moments(means, covariances)
-    jitted = jax.jit(lambda mean, covariance: GaussianPotential.from_moments(mean, covariance))(
-        means, covariances
-    )
+    eager = GaussianPotential.from_moments(Gaussian(means, covariances))
+    jitted = jax.jit(
+        lambda mean, covariance: GaussianPotential.from_moments(Gaussian(mean, covariance))
+    )(means, covariances)
 
     np.testing.assert_allclose(jitted.precision_blocks, eager.precision_blocks)
     np.testing.assert_allclose(jitted.information_vectors, eager.information_vectors)
@@ -458,16 +467,12 @@ def test_gaussian_pair_potential_from_linear_conditional_batched():
     )
 
     result = GaussianPairPotential.from_linear_conditional(
-        matrices,
-        biases,
-        covariances,
+        LinearGaussian(affine=Affine(coefficients=matrices, bias=biases), covariance=covariances)
     )
 
     expected = jax.vmap(
         lambda matrix, bias, covariance: GaussianPairPotential.from_linear_conditional(
-            matrix,
-            bias,
-            covariance,
+            LinearGaussian(affine=Affine(coefficients=matrix, bias=bias), covariance=covariance)
         )
     )(matrices, biases, covariances)
 
@@ -512,15 +517,11 @@ def test_gaussian_pair_potential_from_linear_conditional_batched_jit():
     )
 
     eager = GaussianPairPotential.from_linear_conditional(
-        matrices,
-        biases,
-        covariances,
+        LinearGaussian(affine=Affine(coefficients=matrices, bias=biases), covariance=covariances)
     )
     jitted = jax.jit(
         lambda matrix, bias, covariance: GaussianPairPotential.from_linear_conditional(
-            matrix,
-            bias,
-            covariance,
+            LinearGaussian(affine=Affine(coefficients=matrix, bias=bias), covariance=covariance)
         )
     )(matrices, biases, covariances)
 
@@ -543,7 +544,7 @@ def test_gaussian_chain_add_time_indexed_local_potential():
     )
     covariances = jnp.broadcast_to(jnp.eye(2), (3, 2, 2))
 
-    potential = GaussianPotential.from_moments(means, covariances)
+    potential = GaussianPotential.from_moments(Gaussian(means, covariances))
 
     result = chain.add_local_potential(potential)
 
@@ -569,8 +570,7 @@ def test_gaussian_chain_add_local_potential_does_not_broadcast_over_time():
     chain = make_chain()
 
     potential = GaussianPotential.from_moments(
-        mean=jnp.zeros(2),
-        covariance=jnp.eye(2),
+        Gaussian(mean=jnp.zeros(2), covariance=jnp.eye(2)),
     )
 
     with pytest.raises(ValueError):
@@ -581,8 +581,7 @@ def test_gaussian_chain_add_local_potential_requires_matching_variable_dim():
     chain = make_chain()
 
     potential = GaussianPotential.from_moments(
-        mean=jnp.zeros((3, 1)),
-        covariance=jnp.ones((3, 1, 1)),
+        Gaussian(mean=jnp.zeros((3, 1)), covariance=jnp.ones((3, 1, 1))),
     )
 
     with pytest.raises(ValueError):
@@ -593,8 +592,7 @@ def test_gaussian_chain_add_local_potential_jit():
     chain = make_chain()
 
     potential = GaussianPotential.from_moments(
-        mean=jnp.zeros((3, 2)),
-        covariance=jnp.broadcast_to(jnp.eye(2), (3, 2, 2)),
+        Gaussian(mean=jnp.zeros((3, 2)), covariance=jnp.broadcast_to(jnp.eye(2), (3, 2, 2))),
     )
 
     eager = chain.add_local_potential(potential)

@@ -7,7 +7,8 @@ from xxm.core.discrete.chain import DiscreteChainMarginals
 from xxm.core.gaussian.chain import GaussianChainMarginals, GaussianPairPotential
 from xxm.hmm.core import DiscreteInitialModel, DiscreteTransitionModel
 from xxm.lds.core import EmissionsT, GaussianInitialModel
-from xxm.stats import gaussian
+from xxm.stats import gaussian_fit
+from xxm.stats.gaussian import LinearGaussian
 
 
 class Posterior(typing.NamedTuple):
@@ -16,21 +17,15 @@ class Posterior(typing.NamedTuple):
 
 
 class SwitchingLinearGaussianDynamicsModel(typing.NamedTuple):
-    coefficients: jax.Array  # (K, D, D)
-    bias: jax.Array  # (K, D)
-    noise_covariance: jax.Array  # (K, D, D)
+    model: LinearGaussian  # K-batched, input dimension D, output dimension D
 
     @property
     def num_states(self) -> int:
-        return self.coefficients.shape[0]
+        return self.model.covariance.shape[0]
 
     def get_pair_potentials(self) -> GaussianPairPotential:
         """Return one Gaussian pair potential for each discrete state."""
-        return GaussianPairPotential.from_linear_conditional(
-            self.coefficients,
-            self.bias,
-            self.noise_covariance,
-        )
+        return GaussianPairPotential.from_linear_conditional(self.model)
 
     def fit_params(
         self,
@@ -63,7 +58,7 @@ class SwitchingLinearGaussianDynamicsModel(typing.NamedTuple):
                 / total
             )
 
-            return gaussian.fit_linear_from_moments(
+            return gaussian_fit.linear_from_moments(
                 input_mean=input_mean,
                 output_mean=output_mean,
                 input_second_moment=input_second,
@@ -71,15 +66,13 @@ class SwitchingLinearGaussianDynamicsModel(typing.NamedTuple):
                 output_input_moment=output_input,
             )
 
-        coefficients, bias, noise_covariance = jax.vmap(
+        linear_gaussian = jax.vmap(
             fit_state,
             in_axes=1,
         )(weights)
 
-        return self.__class__(
-            coefficients=coefficients,
-            bias=bias,
-            noise_covariance=noise_covariance,
+        return self._replace(
+            model=linear_gaussian,
         )
 
 

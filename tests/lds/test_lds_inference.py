@@ -13,17 +13,22 @@ from xxm.lds.inference import (
     to_chain,
 )
 from xxm.newton import NewtonSearch
+from xxm.stats.gaussian import Affine, Gaussian, LinearGaussian
+from xxm.stats.poisson import LinearPoisson
 
 
 def make_scalar_poisson_model() -> Model[PoissonEmissions]:
     return Model(
-        initial=GaussianInitialModel(mean=jnp.zeros(1), covariance=jnp.eye(1)),
+        initial=GaussianInitialModel(model=Gaussian(mean=jnp.zeros(1), covariance=jnp.eye(1))),
         dynamics=LinearGaussianDynamicsModel(
-            matrix=jnp.eye(1),
-            bias=jnp.zeros(1),
-            noise_covariance=jnp.eye(1),
+            model=LinearGaussian(
+                affine=Affine(coefficients=jnp.eye(1), bias=jnp.zeros(1)),
+                covariance=jnp.eye(1),
+            ),
         ),
-        emissions=PoissonEmissions(readout=jnp.ones((1, 1)), bias=jnp.zeros(1)),
+        emissions=PoissonEmissions(
+            model=LinearPoisson(affine=Affine(coefficients=jnp.ones((1, 1)), bias=jnp.zeros(1))),
+        ),
     )
 
 

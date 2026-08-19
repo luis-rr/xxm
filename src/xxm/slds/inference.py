@@ -24,10 +24,7 @@ class ContinuousPotentials(typing.NamedTuple):
 
         dynamics_potentials = model.dynamics.get_pair_potentials()
         observation_potentials = model.emissions.get_potential(observations)
-        initial_potential = GaussianPotential.from_moments(
-            model.latent_initial.mean,
-            model.latent_initial.covariance,
-        )
+        initial_potential = GaussianPotential.from_moments(model.latent_initial.model)
 
         return ContinuousPotentials(
             dynamics=dynamics_potentials,

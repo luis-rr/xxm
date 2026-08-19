@@ -7,7 +7,7 @@ from tests.lds.lds_helpers import make_model
 def test_dynamics_next_mean_applies_matrix_and_bias():
     dynamics = make_model().dynamics
 
-    result = dynamics.next_mean(jnp.array([1.0, 2.0]))
+    result = dynamics.model.conditional(jnp.array([1.0, 2.0])).mean
 
     assert jnp.allclose(result, jnp.array([1.15, 1.55]))
 
@@ -17,8 +17,8 @@ def test_prior_mean_starts_at_initial_mean():
 
     means = model.get_prior_mean_latents(num_time_steps=3)
 
-    assert jnp.allclose(means[0], model.initial.mean)
-    assert jnp.allclose(means[1], model.dynamics.next_mean(means[0]))
+    assert jnp.allclose(means[0], model.initial.model.mean)
+    assert jnp.allclose(means[1], model.dynamics.model.conditional(means[0]).mean)
 
 
 def test_sample_returns_one_latent_and_observation_per_time_step():
