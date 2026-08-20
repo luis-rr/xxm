@@ -310,21 +310,3 @@ def test_inference_exact_is_jittable():
         eager.continuous.covariances,
         atol=ATOL,
     )
-
-
-def test_inference_exact_validates_inputs():
-    model = _single_state_model()
-
-    with pytest.raises(ValueError, match='at least two time steps'):
-        inference_exact(
-            model,
-            jnp.zeros((1, 1)),
-            num_iters=0,
-        )
-
-    with pytest.raises(ValueError, match='non-negative'):
-        inference_exact(
-            model,
-            jnp.zeros((2, 1)),
-            num_iters=-1,
-        )

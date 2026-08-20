@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from xxm.stats import gaussian_fit
-from xxm.stats.gaussian import Gaussian
+from xxm.stats.gaussian import Affine, Gaussian, LinearGaussian
 
 ATOL = 1e-5
 
@@ -148,3 +148,46 @@ def test_public_routines_are_jittable():
     assert result[0].shape == (4, 2)
     assert result[2].affine.coefficients.shape == (1, 1)
     assert result[3].affine.coefficients.shape == (2, 1, 1)
+
+
+def test_linear_gaussian_conditional_broadcasts_covariance():
+    num_time_steps = 5
+    num_models = 3
+    input_dim = 2
+    output_dim = 4
+
+    model = LinearGaussian(
+        affine=Affine(
+            coefficients=jnp.zeros((num_models, output_dim, input_dim)),
+            bias=jnp.zeros((num_models, output_dim)),
+        ),
+        covariance=jnp.broadcast_to(
+            jnp.eye(output_dim),
+            (num_models, output_dim, output_dim),
+        ),
+    )
+
+    inputs = jnp.zeros(
+        (num_time_steps, num_models, input_dim),
+    )
+
+    conditional = model.conditional(inputs)
+
+    assert model.covariance.shape == (
+        num_models,
+        output_dim,
+        output_dim,
+    )
+
+    assert conditional.mean.shape == (
+        num_time_steps,
+        num_models,
+        output_dim,
+    )
+
+    assert conditional.covariance.shape == (
+        num_time_steps,
+        num_models,
+        output_dim,
+        output_dim,
+    )

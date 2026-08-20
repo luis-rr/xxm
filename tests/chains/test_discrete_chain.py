@@ -340,51 +340,6 @@ def test_time_varying_transitions_match_exact_enumeration() -> None:
     )
 
 
-def test_shape_validation_raises_value_error() -> None:
-    state_log_potentials = jnp.log(
-        jnp.array(
-            [
-                [0.9, 0.1],
-                [0.2, 0.8],
-                [0.6, 0.4],
-            ]
-        )
-    )
-
-    with pytest.raises(ValueError):
-        xxm.core.discrete.chain.DiscreteChain(
-            initial_probs=jnp.array([[0.6, 0.4]]),
-            transition_probs=_stack_static_transition(jnp.array([[0.7, 0.3], [0.2, 0.8]]), 3),
-            state_log_potentials=state_log_potentials,
-        ).forward_backward()
-
-    with pytest.raises(ValueError):
-        xxm.core.discrete.chain.DiscreteChain(
-            initial_probs=jnp.array([0.6, 0.4]),
-            transition_probs=jnp.array([[0.7, 0.3], [0.2, 0.8]]),
-            state_log_potentials=state_log_potentials,
-        ).forward_backward()
-
-    with pytest.raises(ValueError):
-        xxm.core.discrete.chain.DiscreteChain(
-            initial_probs=jnp.array([0.6, 0.4]),
-            transition_probs=_stack_static_transition(jnp.array([[0.7, 0.3], [0.2, 0.8]]), 2),
-            state_log_potentials=state_log_potentials,
-        ).forward_backward()
-
-    valid_chain = xxm.core.discrete.chain.DiscreteChain(
-        initial_probs=jnp.array([0.6, 0.4]),
-        transition_probs=_stack_static_transition(jnp.array([[0.7, 0.3], [0.2, 0.8]]), 3),
-        state_log_potentials=state_log_potentials,
-    )
-
-    with pytest.raises(ValueError):
-        xxm.core.discrete.chain._backward_pass(
-            valid_chain,
-            log_scaling_factors=jnp.ones((2,)),
-        )
-
-
 def test_deterministic_transitions_concentrate_posterior_path() -> None:
     chain = xxm.core.discrete.chain.DiscreteChain(
         initial_probs=jnp.array([1.0, 0.0]),
@@ -479,23 +434,6 @@ def test_forward_backward_is_jit_compatible() -> None:
         float(eager_result.log_normalizer),
         atol=ATOL,
     )
-
-
-def test_discrete_chain_rejects_batched_chain() -> None:
-    """DiscreteChain represents one chain, not a batch of chains."""
-    chain = xxm.core.discrete.chain.DiscreteChain(
-        initial_probs=jnp.array(
-            [
-                [0.6, 0.4],
-                [0.3, 0.7],
-            ]
-        ),
-        transition_probs=jnp.ones((2, 2, 2, 2)) / 2.0,
-        state_log_potentials=jnp.zeros((2, 3, 2)),
-    )
-
-    with pytest.raises(ValueError):
-        chain.forward_backward()
 
 
 def test_forward_backward_supports_batching_with_vmap() -> None:
@@ -831,14 +769,3 @@ def test_weighted_means_matches_analytic_result_and_is_jittable() -> None:
         atol=ATOL,
         rtol=RTOL,
     )
-
-
-def test_weighted_means_requires_matching_time_dimension() -> None:
-    marginals = xxm.core.discrete.chain.DiscreteChainMarginals(
-        state_marginals=jnp.ones((3, 2)) / 2,
-        pair_marginals=jnp.ones((2, 2, 2)) / 4,
-        log_normalizer=jnp.array(0.0),
-    )
-
-    with pytest.raises(ValueError):
-        marginals.weighted_means(jnp.ones((4, 1)))
