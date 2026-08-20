@@ -27,7 +27,7 @@ import jax
 import jax.numpy as jnp
 import jax.scipy.linalg as jsp_linalg
 
-from xxm.stats.gaussian import Gaussian, LinearGaussian
+from xxm.stats.gaussian import Affine, Gaussian, LinearGaussian
 
 
 def _precision_and_log_det(
@@ -627,64 +627,51 @@ class GaussianChain(typing.NamedTuple):
 
         return dense
 
-    def _factorize(
+    def _forward_elimination(
         self,
     ) -> _GaussianChainFactorization:
-        """Perform sequential block elimination for a Gaussian chain.
+        """Perform forward block elimination for a Gaussian chain."""
 
-        Each effective diagonal precision block is factorized once with Cholesky
-        and reused for subsequent solves.
-        """
-        diagonal_blocks = self.diagonal_precision_blocks
-        lower_blocks = self.lower_precision_blocks
-        information_vectors = self.information_vectors
+        initial_carry = _ForwardEliminationCarry.from_canonical(
+            self.diagonal_precision_blocks[0],
+            self.information_vectors[0],
+        )
 
-        first_cholesky = jnp.linalg.cholesky(diagonal_blocks[0])
+        def step(
+            carry: _ForwardEliminationCarry,
+            inputs: tuple[jax.Array, jax.Array, jax.Array],
+        ):
+            lower_precision, next_precision, next_information = inputs
 
-        def step(carry, x):
-            prev_cholesky, prev_eff_info = carry
-            lower_block, diag_block, info_vec = x
-
-            solved_lower_transpose = _solve_from_cholesky(
-                prev_cholesky,
-                lower_block.T,
-            )
-            effective_precision = diag_block - lower_block @ solved_lower_transpose
-            current_cholesky = jnp.linalg.cholesky(effective_precision)
-
-            solved_prev_info = _solve_from_cholesky(
-                prev_cholesky,
-                prev_eff_info,
-            )
-            current_eff_info = info_vec - lower_block @ solved_prev_info
-
-            return (
-                current_cholesky,
-                current_eff_info,
-            ), (
-                current_cholesky,
-                current_eff_info,
+            result = carry.eliminate_next(
+                lower_precision,
+                next_precision,
+                next_information,
             )
 
-        _, (rest_cholesky, rest_eff_info) = jax.lax.scan(
+            return result.next_carry, result
+
+        final_carry, results = jax.lax.scan(
             step,
-            (first_cholesky, information_vectors[0]),
+            initial_carry,
             (
-                lower_blocks,
-                diagonal_blocks[1:],
-                information_vectors[1:],
+                self.lower_precision_blocks,
+                self.diagonal_precision_blocks[1:],
+                self.information_vectors[1:],
             ),
         )
 
-        precision_cholesky_factors = jnp.concatenate([first_cholesky[None], rest_cholesky])
-        effective_information_vectors = jnp.concatenate(
-            [information_vectors[0][None], rest_eff_info]
+        precision_cholesky_factors = jnp.concatenate(
+            [
+                initial_carry.cholesky[None],
+                results.next_carry.cholesky,
+            ],
         )
 
         return _GaussianChainFactorization(
             precision_cholesky_factors=precision_cholesky_factors,
-            lower_precision_blocks=lower_blocks,
-            effective_information_vectors=effective_information_vectors,
+            conditional_mean=results.conditional_mean,
+            terminal_mean=final_carry.mean_offset,
         )
 
     def forward_backward(
@@ -693,93 +680,32 @@ class GaussianChain(typing.NamedTuple):
         """Compute moments and log normalizer for a Gaussian chain."""
         self.validate()
 
-        factorization = self._factorize()
+        factorization = self._forward_elimination()
 
-        precision_cholesky_factors = factorization.precision_cholesky_factors
-        lower_blocks = factorization.lower_precision_blocks
-        effective_information_vectors = factorization.effective_information_vectors
+        means = factorization.backward_means()
 
-        time_steps, variable_dim, _ = self.diagonal_precision_blocks.shape
-        dtype = self.diagonal_precision_blocks.dtype
+        covariances, cross_covariances = factorization.backward_covariances()
 
-        # Backward mean recursion.
-        last_mean = _solve_from_cholesky(
-            precision_cholesky_factors[-1],
-            effective_information_vectors[-1],
+        log_det_precision = jnp.sum(
+            jax.vmap(_log_det_from_cholesky)(factorization.precision_cholesky_factors)
         )
-
-        def backward_mean_step(carry, x):
-            next_mean = carry
-            lower_block, cholesky, eff_info = x
-
-            mean = _solve_from_cholesky(
-                cholesky,
-                eff_info - lower_block.T @ next_mean,
-            )
-
-            return mean, mean
-
-        _, means_rest = jax.lax.scan(
-            backward_mean_step,
-            last_mean,
-            (
-                lower_blocks,
-                precision_cholesky_factors[:-1],
-                effective_information_vectors[:-1],
-            ),
-            reverse=True,
-        )
-
-        means = jnp.concatenate([means_rest, last_mean[None]])
-
-        # Backward covariance recursion.
-        last_covariance = _inverse_from_cholesky(precision_cholesky_factors[-1])
-
-        def backward_cov_step(carry, x):
-            next_covariance = carry
-            lower_block, cholesky = x
-
-            conditional_covariance = _inverse_from_cholesky(cholesky)
-            mean_coefficient = -_solve_from_cholesky(
-                cholesky,
-                lower_block.T,
-            )
-
-            covariance = (
-                conditional_covariance + mean_coefficient @ next_covariance @ mean_coefficient.T
-            )
-            cross_covariance = mean_coefficient @ next_covariance
-
-            return covariance, (
-                covariance,
-                cross_covariance,
-            )
-
-        _, (covs_rest, cross_covariances) = jax.lax.scan(
-            backward_cov_step,
-            last_covariance,
-            (
-                lower_blocks,
-                precision_cholesky_factors[:-1],
-            ),
-            reverse=True,
-        )
-
-        covariances = jnp.concatenate([covs_rest, last_covariance[None]])
-
-        # det(J) is the product of the determinants of the effective
-        # precision blocks produced during sequential elimination.
-        log_det_precision = jnp.sum(jax.vmap(_log_det_from_cholesky)(precision_cholesky_factors))
 
         quadratic_term = jnp.sum(self.information_vectors * means)
 
-        total_dimension = time_steps * variable_dim
+        total_dimension = self.num_time_steps * self.variable_dim
 
         log_normalizer = (
             self.log_constant
             + 0.5 * quadratic_term
             - 0.5 * log_det_precision
-            + 0.5 * total_dimension * jnp.log(jnp.array(2.0 * jnp.pi, dtype=dtype))
+            + 0.5
+            * total_dimension
+            * jnp.log(
+                jnp.array(
+                    2.0 * jnp.pi,
+                    dtype=self.diagonal_precision_blocks.dtype,
+                )
+            )
         )
 
         return GaussianChainMarginals(
@@ -790,12 +716,131 @@ class GaussianChain(typing.NamedTuple):
         )
 
 
+class _ForwardEliminationCarry(typing.NamedTuple):
+    cholesky: jax.Array
+    mean_offset: jax.Array
+
+    @classmethod
+    def from_canonical(
+        cls,
+        precision: jax.Array,
+        information: jax.Array,
+    ) -> typing.Self:
+        cholesky = jnp.linalg.cholesky(precision)
+
+        return cls(
+            cholesky=cholesky,
+            mean_offset=_solve_from_cholesky(
+                cholesky,
+                information,
+            ),
+        )
+
+    def eliminate_next(
+        self,
+        lower_precision: jax.Array,
+        next_precision: jax.Array,
+        next_information: jax.Array,
+    ) -> _ForwardEliminationResult:
+        mean_coefficient = -_solve_from_cholesky(
+            self.cholesky,
+            lower_precision.T,
+        )
+
+        conditional_mean = Affine(
+            coefficients=mean_coefficient,
+            bias=self.mean_offset,
+        )
+
+        effective_precision = next_precision + lower_precision @ mean_coefficient
+
+        effective_information = next_information - lower_precision @ self.mean_offset
+
+        next_carry = self.__class__.from_canonical(
+            effective_precision,
+            effective_information,
+        )
+
+        return _ForwardEliminationResult(
+            next_carry=next_carry,
+            conditional_mean=conditional_mean,
+        )
+
+
+class _ForwardEliminationResult(typing.NamedTuple):
+    next_carry: _ForwardEliminationCarry
+    conditional_mean: Affine
+
+
 class _GaussianChainFactorization(typing.NamedTuple):
     """State produced by sequential Gaussian-chain block elimination."""
 
     precision_cholesky_factors: jax.Array
-    lower_precision_blocks: jax.Array
-    effective_information_vectors: jax.Array
+    conditional_mean: Affine
+    terminal_mean: jax.Array  # (D,)
+
+    def backward_means(self) -> jax.Array:
+        """Compute marginal means by backward recursion."""
+
+        def step(next_mean, conditional_mean):
+            mean = conditional_mean.apply(next_mean)
+            return mean, mean
+
+        _, means_rest = jax.lax.scan(
+            step,
+            self.terminal_mean,
+            self.conditional_mean,
+            reverse=True,
+        )
+
+        return jnp.concatenate(
+            [
+                means_rest,
+                self.terminal_mean[None],
+            ],
+        )
+
+    def backward_covariances(
+        self,
+    ) -> tuple[jax.Array, jax.Array]:
+        """Compute marginal and adjacent cross-covariances by backward recursion."""
+        cholesky_factors = self.precision_cholesky_factors
+        coefficients = self.conditional_mean.coefficients
+
+        last_covariance = _inverse_from_cholesky(cholesky_factors[-1])
+
+        def step(next_covariance, inputs):
+            cholesky, coefficient = inputs
+
+            conditional_covariance = _inverse_from_cholesky(cholesky)
+
+            covariance = conditional_covariance + coefficient @ next_covariance @ coefficient.T
+
+            cross_covariance = coefficient @ next_covariance
+
+            return covariance, (
+                covariance,
+                cross_covariance,
+            )
+
+        _, (covariances_rest, cross_covariances) = jax.lax.scan(
+            step,
+            last_covariance,
+            (
+                cholesky_factors[:-1],
+                coefficients,
+            ),
+            reverse=True,
+        )
+
+        covariances = jnp.concatenate(
+            [
+                covariances_rest,
+                last_covariance[None],
+            ],
+        )
+
+        return covariances, cross_covariances
 
 
 class GaussianChainMarginals(typing.NamedTuple):
