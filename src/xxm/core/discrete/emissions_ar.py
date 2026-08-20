@@ -70,12 +70,12 @@ class ARGaussianEmissions(typing.NamedTuple):
         return self.model.affine.batch_shape[0]
 
     @property
-    def num_dims(self) -> int:
+    def output_dim(self) -> int:
         return self.model.affine.output_dim
 
     @property
     def max_lag(self) -> int:
-        return self.model.affine.input_dim // self.num_dims
+        return self.model.affine.input_dim // self.output_dim
 
     def predictors(
         self,
@@ -86,7 +86,7 @@ class ARGaussianEmissions(typing.NamedTuple):
 
         return history.reshape(
             history.shape[0],
-            self.max_lag * self.num_dims,
+            self.max_lag * self.output_dim,
         )  # (T-L, L*N)
 
     def conditional(
@@ -163,7 +163,7 @@ class ARGaussianEmissions(typing.NamedTuple):
             key, key_observation = jax.random.split(key)
 
             predictors = history.reshape(
-                self.max_lag * self.num_dims,
+                self.max_lag * self.output_dim,
             )  # (L*N,)
 
             conditional = self.model.select(state).conditional(predictors)
@@ -181,7 +181,7 @@ class ARGaussianEmissions(typing.NamedTuple):
             return (new_history, key), observation
 
         initial_history = jnp.zeros(
-            (self.max_lag, self.num_dims),
+            (self.max_lag, self.output_dim),
             dtype=self.model.affine.bias.dtype,
         )  # (L, N)
 
@@ -204,12 +204,12 @@ class ARPoissonEmissions(typing.NamedTuple):
         return self.model.affine.batch_shape[0]
 
     @property
-    def num_dims(self) -> int:
+    def output_dim(self) -> int:
         return self.model.affine.output_dim
 
     @property
     def max_lag(self) -> int:
-        return self.model.affine.input_dim // self.num_dims
+        return self.model.affine.input_dim // self.output_dim
 
     def predictors(
         self,
@@ -220,7 +220,7 @@ class ARPoissonEmissions(typing.NamedTuple):
 
         return history.reshape(
             history.shape[0],
-            self.max_lag * self.num_dims,
+            self.max_lag * self.output_dim,
         )  # (T-L, L*N)
 
     def conditional(
@@ -298,7 +298,7 @@ class ARPoissonEmissions(typing.NamedTuple):
             key, key_observation = jax.random.split(key)
 
             predictors = history.reshape(
-                self.max_lag * self.num_dims,
+                self.max_lag * self.output_dim,
             )  # (L*N,)
 
             conditional = self.model.select(state).conditional(predictors)
@@ -316,7 +316,7 @@ class ARPoissonEmissions(typing.NamedTuple):
             return (new_history, key), observation
 
         initial_history = jnp.zeros(
-            (self.max_lag, self.num_dims),
+            (self.max_lag, self.output_dim),
             dtype=self.model.affine.bias.dtype,
         )  # (L, N)
 

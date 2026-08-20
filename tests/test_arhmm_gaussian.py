@@ -50,7 +50,7 @@ def test_ar_gaussian_properties():
 
     assert emissions.num_states == 3
     assert emissions.max_lag == 2
-    assert emissions.num_dims == 4
+    assert emissions.output_dim == 4
 
 
 def test_ar_gaussian_lagged_observations():
