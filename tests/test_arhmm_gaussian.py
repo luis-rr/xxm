@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from xxm.core.discrete.chain import DiscreteChainMarginals
-from xxm.core.discrete.emissions_ar import ARGaussianEmissions, lagged_observations
+from xxm.core.discrete.emissions_ar import AREmissions, lagged_observations
 from xxm.stats.gaussian import Affine, LinearGaussian
 
 ATOL = 1e-6
@@ -29,8 +29,8 @@ def _make_emissions(
     coefficients: jax.Array,  # (K, L, N, N)
     biases: jax.Array,  # (K, N)
     covariances: jax.Array,  # (K, N, N)
-) -> ARGaussianEmissions:
-    return ARGaussianEmissions(
+) -> AREmissions[LinearGaussian]:
+    return AREmissions(
         model=LinearGaussian(
             affine=Affine(
                 coefficients=_flatten_lagged_coefficients(coefficients),

@@ -60,22 +60,54 @@ def flatten_ar_coefficients(
     )  # (..., O, L*I)
 
 
-class ARGaussianEmissions(typing.NamedTuple):
-    """State-dependent autoregressive Gaussian emissions."""
+ConditionalModelT = typing.TypeVar(
+    'ConditionalModelT',
+    LinearGaussian,
+    LinearPoisson,
+)
 
-    model: LinearGaussian  # K-batched, input dimension L*N
+
+def _fit_ar_model(
+    model: ConditionalModelT,
+    inputs: jax.Array,
+    outputs: jax.Array,
+    weights: jax.Array,
+) -> ConditionalModelT:
+    if isinstance(model, LinearGaussian):
+        return gaussian_fit.linear_from_pairs_weighted(
+            inputs=inputs,
+            outputs=outputs,
+            weights=weights,
+            ridge=1e-6,
+        )
+
+    if isinstance(model, LinearPoisson):
+        return poisson_fit.linear_from_pairs_weighted(
+            inputs=inputs,
+            outputs=outputs,
+            weights=weights,
+            initial_affine=model.affine,
+        )
+
+    typing.assert_never(model)
+
+
+class AREmissions(typing.NamedTuple, typing.Generic[ConditionalModelT]):
+    """State-dependent autoregressive emissions."""
+
+    model: ConditionalModelT  # K-batched, input dimension L*N
 
     @property
     def num_states(self) -> int:
-        return self.model.affine.batch_shape[0]
+        return self.model.batch_shape[0]
 
     @property
     def output_dim(self) -> int:
-        return self.model.affine.output_dim
+        return self.model.output_dim
 
     @property
     def max_lag(self) -> int:
-        return self.model.affine.input_dim // self.output_dim
+        return self.model.input_dim // self.output_dim
 
     def predictors(
         self,
@@ -89,14 +121,31 @@ class ARGaussianEmissions(typing.NamedTuple):
             self.max_lag * self.output_dim,
         )  # (T-L, L*N)
 
+    @typing.overload
+    def conditional(
+        self: 'AREmissions[LinearGaussian]',
+        observations: jax.Array,
+    ) -> Gaussian: ...
+
+    @typing.overload
+    def conditional(
+        self: 'AREmissions[LinearPoisson]',
+        observations: jax.Array,
+    ) -> Poisson: ...
+
+    @typing.overload
+    def conditional(
+        self: 'AREmissions[ConditionalModelT]',
+        observations: jax.Array,
+    ) -> Gaussian | Poisson: ...
+
     def conditional(
         self,
-        observations: jax.Array,  # (T, N)
-    ) -> Gaussian:
-        """Conditional Gaussian for each time point and state."""
-        predictors = self.predictors(observations)  # (T-L, L*N)
-
-        return self.model.conditional(predictors[:, None, :])  # (T-L, K)-batched Gaussian
+        observations: jax.Array,
+    ) -> Gaussian | Poisson:
+        """Conditional distribution for each time point and state."""
+        predictors = self.predictors(observations)
+        return self.model.conditional(predictors[:, None, :])
 
     def log_likelihoods(
         self,
@@ -133,16 +182,13 @@ class ARGaussianEmissions(typing.NamedTuple):
         current = observations[self.max_lag :]  # (T-L, N)
         weights = posterior.state_marginals[self.max_lag :]  # (T-L, K)
 
-        model = gaussian_fit.linear_from_pairs_weighted(
+        model = _fit_ar_model(
+            model=self.model,
             inputs=predictors,
             outputs=current,
             weights=weights,
-            ridge=1e-6,
         )
-
-        return self._replace(
-            model=model,
-        )
+        return self._replace(model=model)
 
     def permute(
         self,
@@ -182,142 +228,7 @@ class ARGaussianEmissions(typing.NamedTuple):
 
         initial_history = jnp.zeros(
             (self.max_lag, self.output_dim),
-            dtype=self.model.affine.bias.dtype,
-        )  # (L, N)
-
-        _, observations = jax.lax.scan(
-            step,
-            (initial_history, key),
-            states,
-        )
-
-        return observations
-
-
-class ARPoissonEmissions(typing.NamedTuple):
-    """State-dependent autoregressive Poisson emissions."""
-
-    model: LinearPoisson  # K-batched, input dimension L*N
-
-    @property
-    def num_states(self) -> int:
-        return self.model.affine.batch_shape[0]
-
-    @property
-    def output_dim(self) -> int:
-        return self.model.affine.output_dim
-
-    @property
-    def max_lag(self) -> int:
-        return self.model.affine.input_dim // self.output_dim
-
-    def predictors(
-        self,
-        observations: jax.Array,  # (T, N)
-    ) -> jax.Array:  # (T-L, L*N)
-        """Construct flattened autoregressive predictors."""
-        history = lagged_observations(observations, max_lag=self.max_lag)  # (T-L, L, N)
-
-        return history.reshape(
-            history.shape[0],
-            self.max_lag * self.output_dim,
-        )  # (T-L, L*N)
-
-    def conditional(
-        self,
-        observations: jax.Array,  # (T, N)
-    ) -> Poisson:
-        """Conditional Poisson distributions for each time point and state."""
-        predictors = self.predictors(observations)  # (T-L, L*N)
-
-        return self.model.conditional(predictors[:, None, :])  # (T-L, K)-batched Poisson
-
-    def log_likelihoods(
-        self,
-        observations: jax.Array,  # (T, N)
-    ) -> jax.Array:  # (T, K)
-        conditional = self.conditional(observations)
-
-        log_probs = conditional.log_prob(observations[self.max_lag :, None, :])  # (T-L, K)
-
-        padding = jnp.zeros(
-            (self.max_lag, self.num_states),
-            dtype=log_probs.dtype,
-        )  # (L, K)
-
-        return jnp.concatenate(
-            [padding, log_probs],
-            axis=0,
-        )  # (T, K)
-
-    def get_potential(
-        self,
-        observations: jax.Array,  # (T, N)
-    ) -> DiscretePotential:
-        return DiscretePotential(
-            log_values=self.log_likelihoods(observations),
-        )
-
-    def fit_params(
-        self,
-        observations: jax.Array,  # (T, N)
-        posterior: Posterior,
-    ) -> typing.Self:
-        predictors = self.predictors(observations)  # (T-L, L*N)
-        current = observations[self.max_lag :]  # (T-L, N)
-        weights = posterior.state_marginals[self.max_lag :]  # (T-L, K)
-
-        model = poisson_fit.linear_from_pairs_weighted(
-            inputs=predictors,
-            outputs=current,
-            weights=weights,
-            initial_affine=self.model.affine,
-        )
-
-        return self._replace(
-            model=model,
-        )
-
-    def permute(
-        self,
-        permutation: jax.Array,  # (K,)
-    ) -> typing.Self:
-        """Return a copy with states reordered by ``permutation``."""
-        return self._replace(
-            model=self.model.select(permutation),
-        )
-
-    def sample(
-        self,
-        key: jax.Array,
-        states: jax.Array,  # (T,)
-    ) -> jax.Array:  # (T, N)
-        def step(carry, state):
-            history, key = carry  # (L, N)
-
-            key, key_observation = jax.random.split(key)
-
-            predictors = history.reshape(
-                self.max_lag * self.output_dim,
-            )  # (L*N,)
-
-            conditional = self.model.select(state).conditional(predictors)
-
-            observation = conditional.sample(key_observation)  # (N,)
-
-            new_history = jnp.concatenate(
-                [
-                    observation[None, :],
-                    history[:-1],
-                ],
-                axis=0,
-            )  # (L, N)
-
-            return (new_history, key), observation
-
-        initial_history = jnp.zeros(
-            (self.max_lag, self.output_dim),
-            dtype=self.model.affine.bias.dtype,
+            dtype=self.model.dtype,
         )  # (L, N)
 
         _, observations = jax.lax.scan(

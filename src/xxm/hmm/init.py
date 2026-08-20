@@ -6,12 +6,13 @@ from xxm.core.discrete.emissions import (
     PoissonEmissions,
 )
 from xxm.core.discrete.emissions_ar import (
-    ARGaussianEmissions,
-    ARPoissonEmissions,
+    AREmissions,
     lagged_observations,
 )
 from xxm.stats import gaussian_fit, poisson_fit
 from xxm.stats.categorical import Categorical
+from xxm.stats.gaussian import LinearGaussian
+from xxm.stats.poisson import LinearPoisson
 
 from .core import DiscreteInitialModel, DiscreteTransitionModel, Emissions, Model
 
@@ -179,7 +180,7 @@ def _initialize_ar_gaussian_emissions(
     num_states: int,
     max_lag: int,
     key: jax.Array,
-) -> ARGaussianEmissions:
+) -> AREmissions[LinearGaussian]:
     history = lagged_observations(
         observations,
         max_lag=max_lag,
@@ -211,7 +212,7 @@ def _initialize_ar_gaussian_emissions(
 
     model = model.add_covariance_jitter(1e-6)
 
-    return ARGaussianEmissions(model)
+    return AREmissions(model)
 
 
 def initialize_arhmm_gaussian(
@@ -278,7 +279,7 @@ def _initialize_ar_poisson_emissions(
     num_states: int,
     max_lag: int,
     key: jax.Array,
-) -> ARPoissonEmissions:
+) -> AREmissions[LinearPoisson]:
     history = lagged_observations(
         observations,
         max_lag=max_lag,
@@ -307,7 +308,7 @@ def _initialize_ar_poisson_emissions(
         num_groups=num_states,
     )
 
-    return ARPoissonEmissions(model)
+    return AREmissions(model)
 
 
 def initialize_arhmm_poisson(

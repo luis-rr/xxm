@@ -35,6 +35,10 @@ class Poisson(typing.NamedTuple):
         )
 
     @property
+    def dtype(self) -> jax.typing.DTypeLike:
+        return self.log_rates.dtype
+
+    @property
     def rates(self) -> jax.Array:
         return jnp.exp(self.log_rates)
 
@@ -89,6 +93,18 @@ class LinearPoisson(typing.NamedTuple):
     @property
     def batch_shape(self) -> tuple[int, ...]:
         return self.affine.batch_shape
+
+    @property
+    def input_dim(self) -> int:
+        return self.affine.input_dim
+
+    @property
+    def output_dim(self) -> int:
+        return self.affine.output_dim
+
+    @property
+    def dtype(self) -> jax.typing.DTypeLike:
+        return jnp.result_type(self.affine.dtype, self.affine.bias.dtype)
 
     def select(self, index) -> 'LinearPoisson':
         """Index into the batch dimensions."""

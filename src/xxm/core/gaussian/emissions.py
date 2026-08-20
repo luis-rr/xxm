@@ -4,7 +4,6 @@ import typing
 
 import jax
 from jax import numpy as jnp
-from jax.scipy import linalg as jsp_linalg
 
 from xxm.stats import gaussian_fit, poisson_fit
 from xxm.stats.gaussian import Gaussian, LinearGaussian

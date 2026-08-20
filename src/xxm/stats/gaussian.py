@@ -31,6 +31,10 @@ class Affine(typing.NamedTuple):
     def output_dim(self) -> int:
         return self.coefficients.shape[-2]
 
+    @property
+    def dtype(self) -> jax.typing.DTypeLike:
+        return jnp.result_type(self.coefficients, self.bias)
+
     def norm(self) -> jax.Array:
         """Return the parameter norm for each output."""
         return jnp.sqrt(jnp.sum(self.coefficients**2, axis=-1) + self.bias**2)  # TODO batch?
@@ -84,6 +88,10 @@ class Gaussian(typing.NamedTuple):
     @property
     def variable_dim(self) -> int:
         return self.mean.shape[-1]
+
+    @property
+    def dtype(self) -> jax.typing.DTypeLike:
+        return jnp.result_type(self.mean, self.covariance)
 
     def select(self, index) -> 'Gaussian':
         """Index into the batch dimensions of the distribution."""
@@ -226,6 +234,18 @@ class LinearGaussian(typing.NamedTuple):
         affine_shape = self.affine.batch_shape
         assert covariance_shape == affine_shape
         return affine_shape
+
+    @property
+    def input_dim(self) -> int:
+        return self.affine.input_dim
+
+    @property
+    def output_dim(self) -> int:
+        return self.affine.output_dim
+
+    @property
+    def dtype(self) -> jax.typing.DTypeLike:
+        return jnp.result_type(self.affine.dtype, self.covariance)
 
     def select(self, index) -> 'LinearGaussian':
         """Index into the batch dimensions."""
