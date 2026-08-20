@@ -186,6 +186,49 @@ class GaussianPotential(typing.NamedTuple):
             ),
         )
 
+    @classmethod
+    def from_local_quadratic(
+        cls,
+        point: jax.Array,  # (..., D)
+        log_value: jax.Array,  # (...)
+        gradient: jax.Array,  # (..., D)
+        precision: jax.Array,  # (..., D, D)
+    ) -> GaussianPotential:
+        r"""Construct a local quadratic potential around ``point``.
+
+        Represents the approximation
+
+            log f(x)
+            ≈ log f(x0)
+            + g.T (x - x0)
+            - 1/2 (x - x0).T J (x - x0),
+
+        where ``J`` is the negative Hessian at ``x0``.
+        """
+        information = gradient + jnp.einsum(
+            '...ij,...j->...i',
+            precision,
+            point,
+        )
+
+        log_constant = (
+            log_value
+            - jnp.sum(gradient * point, axis=-1)
+            - 0.5
+            * jnp.einsum(
+                '...i,...ij,...j->...',
+                point,
+                precision,
+                point,
+            )
+        )
+
+        return cls(
+            precision_blocks=precision,
+            information_vectors=information,
+            log_constant=log_constant,
+        )
+
 
 class GaussianPairPotential(typing.NamedTuple):
     r"""Pairwise Gaussian potential in canonical form.

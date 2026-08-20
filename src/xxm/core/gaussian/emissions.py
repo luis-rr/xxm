@@ -156,42 +156,20 @@ class PoissonEmissions(typing.NamedTuple):
         conditional = self.conditional(latents)
         rates = conditional.rates  # (T, N)
 
-        gradients = (observations - rates) @ coefficients  # (T, D)
+        gradient = (observations - rates) @ coefficients  # (T, D)
 
-        precision_blocks = jnp.einsum(
+        precision = jnp.einsum(
             'tn,ni,nj->tij',
             rates,
             coefficients,
             coefficients,
         )  # (T, D, D)
 
-        information_vectors = gradients + jnp.einsum(
-            'tij,tj->ti',
-            precision_blocks,
-            latents,
-        )  # (T, D)
-
-        log_likelihoods = conditional.log_prob(observations)  # (T,)
-
-        gradient_terms = jnp.einsum(
-            'ti,ti->t',
-            gradients,
-            latents,
-        )  # (T,)
-
-        quadratic_terms = jnp.einsum(
-            'ti,tij,tj->t',
-            latents,
-            precision_blocks,
-            latents,
-        )  # (T,)
-
-        log_constant = log_likelihoods - gradient_terms - 0.5 * quadratic_terms  # (T,)
-
-        return GaussianPotential(
-            precision_blocks=precision_blocks,
-            information_vectors=information_vectors,
-            log_constant=log_constant,
+        return GaussianPotential.from_local_quadratic(
+            point=latents,
+            log_value=conditional.log_prob(observations),
+            gradient=gradient,
+            precision=precision,
         )
 
     def sample(
@@ -210,7 +188,10 @@ class PoissonEmissions(typing.NamedTuple):
         """Fit the emission parameters from Gaussian latent marginals."""
         model = poisson_fit.linear_from_marginals(
             outputs=observations,
-            inputs=Gaussian(mean=posterior.means, covariance=posterior.covariances),
+            inputs=Gaussian(
+                mean=posterior.means,
+                covariance=posterior.covariances,
+            ),
             initial_affine=self.model.affine,
         )
 
