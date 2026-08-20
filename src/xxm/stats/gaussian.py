@@ -10,7 +10,7 @@ class Affine(typing.NamedTuple):
 
         y = A x + b
 
-    Leading dimensions are batch dimensions.
+    Leading dimensions are batch dimensions and must be shared between attributes.
     """
 
     coefficients: jax.Array  # (..., O, I)
@@ -18,10 +18,10 @@ class Affine(typing.NamedTuple):
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
-        return jnp.broadcast_shapes(
-            self.coefficients.shape[:-2],
-            self.bias.shape[:-1],
-        )
+        coefficients_shape = self.coefficients.shape[:-2]
+        bias_shape = self.bias.shape[:-1]
+        assert bias_shape == coefficients_shape
+        return coefficients_shape
 
     @property
     def input_dim(self) -> int:
@@ -68,7 +68,7 @@ class Affine(typing.NamedTuple):
 class Gaussian(typing.NamedTuple):
     """A multivariate Gaussian distribution in moment form.
 
-    Leading dimensions are batch dimensions.
+    Leading dimensions are batch dimensions and must be shared between attributes.
     """
 
     mean: jax.Array  # (..., N)
@@ -76,7 +76,10 @@ class Gaussian(typing.NamedTuple):
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
-        return self.mean.shape[:-1]
+        mean_shape = self.mean.shape[:-1]
+        covariance_shape = self.covariance.shape[:-2]
+        assert mean_shape == covariance_shape
+        return mean_shape
 
     @property
     def variable_dim(self) -> int:
@@ -211,11 +214,18 @@ class LinearGaussian(typing.NamedTuple):
 
         y | x ~ N(A x + b, Q)
 
-    Leading dimensions are batch dimensions.
+    Leading dimensions are batch dimensions and must be shared between attributes.
     """
 
     affine: Affine
     covariance: jax.Array  # (..., O, O)
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        covariance_shape = self.covariance.shape[:-2]
+        affine_shape = self.affine.batch_shape
+        assert covariance_shape == affine_shape
+        return affine_shape
 
     def select(self, index) -> 'LinearGaussian':
         """Index into the batch dimensions."""

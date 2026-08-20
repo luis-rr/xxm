@@ -31,12 +31,12 @@ from xxm.stats.gaussian import Gaussian, LinearGaussian
 
 
 def _precision_and_log_det(
-    covariance: jax.Array,  # (..., D, D)
+    covariance: jax.Array,  # (..., N, N)
 ) -> tuple[jax.Array, jax.Array]:
     """Compute precision matrices and covariance log determinants."""
 
     if covariance.shape[-2] != covariance.shape[-1]:
-        raise ValueError('covariance must have shape (..., D, D)')
+        raise ValueError('covariance must have shape (..., N, N)')
 
     variable_dim = covariance.shape[-1]
 
@@ -73,13 +73,17 @@ class GaussianPotential(typing.NamedTuple):
     Leading dimensions are treated as batch dimensions for independent potentials.
     """
 
-    precision_blocks: jax.Array  # (..., D, D)
-    information_vectors: jax.Array  # (..., D)
+    precision_blocks: jax.Array  # (..., N, N)
+    information_vectors: jax.Array  # (..., N)
     log_constant: jax.Array  # (...)
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
-        return self.precision_blocks.shape[:-2]
+        precision_shape = self.precision_blocks.shape[:-2]
+        information_shape = self.information_vectors.shape[:-1]
+        log_constant_shape = self.log_constant.shape
+        assert precision_shape == information_shape == log_constant_shape
+        return precision_shape
 
     @property
     def variable_dim(self) -> int:
@@ -87,17 +91,17 @@ class GaussianPotential(typing.NamedTuple):
 
     def validate(self) -> None:
         if self.precision_blocks.ndim < 2:
-            raise ValueError('precision_blocks must have shape (..., D, D)')
+            raise ValueError('precision_blocks must have shape (..., N, N)')
 
         if self.precision_blocks.shape[-2] != self.precision_blocks.shape[-1]:
-            raise ValueError('precision_blocks must have shape (..., D, D)')
+            raise ValueError('precision_blocks must have shape (..., N, N)')
 
         if self.variable_dim < 1:
             raise ValueError('Potential must contain at least one variable dimension')
 
         if self.information_vectors.shape != self.batch_shape + (self.variable_dim,):
             raise ValueError(
-                'information_vectors must have shape (..., D) matching precision_blocks'
+                'information_vectors must have shape (..., N) matching precision_blocks'
             )
 
         if self.log_constant.shape != self.batch_shape:
@@ -109,10 +113,10 @@ class GaussianPotential(typing.NamedTuple):
         gaussian: Gaussian,
     ) -> GaussianPotential:
         if gaussian.mean.ndim < 1:
-            raise ValueError('mean must have shape (..., D)')
+            raise ValueError('mean must have shape (..., N)')
 
         if gaussian.covariance.ndim < 2:
-            raise ValueError('covariance must have shape (..., D, D)')
+            raise ValueError('covariance must have shape (..., N, N)')
 
         d = gaussian.mean.shape[-1]
         batch_shape = gaussian.mean.shape[:-1]
@@ -122,7 +126,7 @@ class GaussianPotential(typing.NamedTuple):
 
         if gaussian.covariance.shape != batch_shape + (d, d):
             raise ValueError(
-                'mean and covariance must have shapes (..., D) and (..., D, D) '
+                'mean and covariance must have shapes (..., N) and (..., N, N) '
                 'with matching leading dimensions'
             )
 
@@ -161,16 +165,30 @@ class GaussianPairPotential(typing.NamedTuple):
     Leading dimensions are treated as batch dimensions for independent potentials.
     """
 
-    left_precision: jax.Array  # (..., D, D)
-    right_precision: jax.Array  # (..., D, D)
-    lower_precision: jax.Array  # (..., D, D)
-    left_information: jax.Array  # (..., D)
-    right_information: jax.Array  # (..., D)
+    left_precision: jax.Array  # (..., N, N)
+    right_precision: jax.Array  # (..., N, N)
+    lower_precision: jax.Array  # (..., N, N)
+    left_information: jax.Array  # (..., N)
+    right_information: jax.Array  # (..., N)
     log_constant: jax.Array  # (...)
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
-        return self.left_precision.shape[:-2]
+        left_precision_shape = self.left_precision.shape[:-2]
+        right_precision_shape = self.right_precision.shape[:-2]
+        lower_precision_shape = self.lower_precision.shape[:-2]
+        left_information_shape = self.left_information.shape[:-1]
+        right_information_shape = self.right_information.shape[:-1]
+        log_constant_shape = self.log_constant.shape
+        assert (
+            left_precision_shape
+            == right_precision_shape
+            == lower_precision_shape
+            == left_information_shape
+            == right_information_shape
+            == log_constant_shape
+        )
+        return left_precision_shape
 
     @property
     def variable_dim(self) -> int:
@@ -178,10 +196,10 @@ class GaussianPairPotential(typing.NamedTuple):
 
     def validate(self) -> None:
         if self.left_precision.ndim < 2:
-            raise ValueError('left_precision must have shape (..., D, D)')
+            raise ValueError('left_precision must have shape (..., N, N)')
 
         if self.left_precision.shape[-2] != self.left_precision.shape[-1]:
-            raise ValueError('left_precision must have shape (..., D, D)')
+            raise ValueError('left_precision must have shape (..., N, N)')
 
         if self.variable_dim < 1:
             raise ValueError('Potential must contain at least one variable dimension')
@@ -193,16 +211,16 @@ class GaussianPairPotential(typing.NamedTuple):
         vector_shape = self.batch_shape + (self.variable_dim,)
 
         if self.right_precision.shape != matrix_shape:
-            raise ValueError('right_precision must have shape (..., D, D) matching left_precision')
+            raise ValueError('right_precision must have shape (..., N, N) matching left_precision')
 
         if self.lower_precision.shape != matrix_shape:
-            raise ValueError('lower_precision must have shape (..., D, D) matching left_precision')
+            raise ValueError('lower_precision must have shape (..., N, N) matching left_precision')
 
         if self.left_information.shape != vector_shape:
-            raise ValueError('left_information must have shape (..., D) matching left_precision')
+            raise ValueError('left_information must have shape (..., N) matching left_precision')
 
         if self.right_information.shape != vector_shape:
-            raise ValueError('right_information must have shape (..., D) matching left_precision')
+            raise ValueError('right_information must have shape (..., N) matching left_precision')
 
         if self.log_constant.shape != self.batch_shape:
             raise ValueError('log_constant must have the same leading shape as left_precision')
@@ -213,26 +231,26 @@ class GaussianPairPotential(typing.NamedTuple):
         lin_gaussian: LinearGaussian,
     ) -> GaussianPairPotential:
         if lin_gaussian.affine.coefficients.ndim < 2:
-            raise ValueError('matrix must have shape (..., D, D)')
+            raise ValueError('matrix must have shape (..., N, N)')
 
         if lin_gaussian.affine.coefficients.shape[-2] != lin_gaussian.affine.coefficients.shape[-1]:
-            raise ValueError('matrix must have shape (..., D, D)')
+            raise ValueError('matrix must have shape (..., N, N)')
 
-        d = lin_gaussian.affine.coefficients.shape[-1]
+        n = lin_gaussian.affine.coefficients.shape[-1]
         batch_shape = lin_gaussian.affine.coefficients.shape[:-2]
 
-        if d < 1:
+        if n < 1:
             raise ValueError('matrix must contain at least one variable dimension')
 
-        if lin_gaussian.affine.bias.shape != batch_shape + (d,):
+        if lin_gaussian.affine.bias.shape != batch_shape + (n,):
             raise ValueError(
-                'matrix and bias must have shapes (..., D, D) and (..., D) '
+                'matrix and bias must have shapes (..., N, N) and (..., N) '
                 'with matching leading dimensions'
             )
 
-        if lin_gaussian.covariance.shape != batch_shape + (d, d):
+        if lin_gaussian.covariance.shape != batch_shape + (n, n):
             raise ValueError(
-                'matrix and covariance must both have shape (..., D, D) '
+                'matrix and covariance must both have shape (..., N, N) '
                 'with matching leading dimensions'
             )
 
@@ -261,7 +279,7 @@ class GaussianPairPotential(typing.NamedTuple):
             log_constant=(
                 -0.5 * jnp.sum(lin_gaussian.affine.bias * precision_bias, axis=-1)
                 - 0.5 * log_det_covariance
-                - 0.5 * d * jnp.log(2.0 * jnp.pi)
+                - 0.5 * n * jnp.log(2.0 * jnp.pi)
             ),
         )
 
@@ -411,16 +429,16 @@ class GaussianChain(typing.NamedTuple):
     intentionally not supported; use ``jax.vmap`` over chains instead.
     """
 
-    diagonal_precision_blocks: jax.Array  # (T, D, D)
-    lower_precision_blocks: jax.Array  # (T - 1, D, D)
-    information_vectors: jax.Array  # (T, D)
+    diagonal_precision_blocks: jax.Array  # (T, N, N)
+    lower_precision_blocks: jax.Array  # (T - 1, N, N)
+    information_vectors: jax.Array  # (T, N)
     log_constant: jax.Array  # scalar
 
     @classmethod
     def from_pair_potentials(
         cls,
-        initial_potential: GaussianPotential,  # (D, D)
-        pair_potentials: GaussianPairPotential,  # (T-1, D, D)
+        initial_potential: GaussianPotential,  # (N, N)
+        pair_potentials: GaussianPairPotential,  # (T-1, N, N)
     ) -> GaussianChain:
         """Construct a Gaussian chain from initial and time-indexed pair potentials."""
 
@@ -463,13 +481,13 @@ class GaussianChain(typing.NamedTuple):
 
     def validate(self) -> None:
         if self.diagonal_precision_blocks.ndim != 3:
-            raise ValueError('diagonal_precision_blocks must have shape (T, D, D)')
+            raise ValueError('diagonal_precision_blocks must have shape (T, N, N)')
 
         if self.lower_precision_blocks.ndim != 3:
-            raise ValueError('lower_precision_blocks must have shape (T - 1, D, D)')
+            raise ValueError('lower_precision_blocks must have shape (T - 1, N, N)')
 
         if self.information_vectors.ndim != 2:
-            raise ValueError('information_vectors must have shape (T, D)')
+            raise ValueError('information_vectors must have shape (T, N)')
 
         if self.log_constant.ndim != 0:
             raise ValueError('log_constant must be scalar')
@@ -478,7 +496,7 @@ class GaussianChain(typing.NamedTuple):
         d = self.variable_dim
 
         if self.diagonal_precision_blocks.shape[2] != d:
-            raise ValueError('diagonal_precision_blocks must have shape (T, D, D)')
+            raise ValueError('diagonal_precision_blocks must have shape (T, N, N)')
 
         if t < 1:
             raise ValueError('Chain must contain at least one time step')
@@ -487,10 +505,10 @@ class GaussianChain(typing.NamedTuple):
             raise ValueError('Chain must contain at least one variable dimension')
 
         if self.information_vectors.shape != (t, d):
-            raise ValueError('information_vectors must have shape (T, D)')
+            raise ValueError('information_vectors must have shape (T, N)')
 
         if self.lower_precision_blocks.shape != (t - 1, d, d):
-            raise ValueError('lower_precision_blocks must have shape (T - 1, D, D)')
+            raise ValueError('lower_precision_blocks must have shape (T - 1, N, N)')
 
     def add_local_potential(
         self,
@@ -780,7 +798,7 @@ class GaussianChainMarginals(typing.NamedTuple):
     log_normalizer: jax.Array
 
     def raw_second_moments(self) -> jax.Array:
-        """Return E[x_t x_t.T], shape (T, D, D)."""
+        """Return E[x_t x_t.T], shape (T, N, N)."""
         extra = jnp.einsum(
             'ti,tj->tij',
             self.means,
@@ -790,7 +808,7 @@ class GaussianChainMarginals(typing.NamedTuple):
         return self.covariances + extra
 
     def raw_cross_moments(self) -> jax.Array:
-        """Return E[x_t x_{t+1}.T], shape (T - 1, D, D)."""
+        """Return E[x_t x_{t+1}.T], shape (T - 1, N, N)."""
         extra = jnp.einsum(
             'ti,tj->tij',
             self.means[:-1],

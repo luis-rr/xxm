@@ -10,7 +10,7 @@ from .gaussian import Affine, Gaussian
 class Poisson(typing.NamedTuple):
     """Independent Poisson variables parameterized by log rates.
 
-    Leading dimensions are batch dimensions.
+    Leading dimensions are batch dimensions and must be shared between attributes.
     """
 
     log_rates: jax.Array  # (..., N)
@@ -81,10 +81,14 @@ class Poisson(typing.NamedTuple):
 class LinearPoisson(typing.NamedTuple):
     """A linear Poisson model ``y | x ~ Poisson(exp(A x + b))``.
 
-    Leading dimensions are batch dimensions.
+    Leading dimensions are batch dimensions and must be shared between attributes.
     """
 
     affine: Affine
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        return self.affine.batch_shape
 
     def select(self, index) -> 'LinearPoisson':
         """Index into the batch dimensions."""

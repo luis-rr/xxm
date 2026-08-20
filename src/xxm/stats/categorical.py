@@ -7,7 +7,7 @@ import jax.numpy as jnp
 class Categorical(typing.NamedTuple):
     """A categorical distribution.
 
-    Leading dimensions are batch dimensions.
+    Leading dimensions are batch dimensions and must be shared between attributes.
     """
 
     probs: jax.Array  # (..., K)
