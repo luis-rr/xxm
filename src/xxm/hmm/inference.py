@@ -31,7 +31,7 @@ def to_chain(
 def inference_exact(
     model: Model,
     observations: jax.Array,
-) -> Posterior:
+) -> tuple[Posterior, jax.Array]:
     """Compute the exact posterior over latents."""
 
     latent_chain = to_chain(

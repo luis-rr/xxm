@@ -697,7 +697,7 @@ class GaussianChain(typing.NamedTuple):
 
     def forward_backward(
         self,
-    ) -> GaussianChainMarginals:
+    ) -> tuple[GaussianChainMarginals, jax.Array]:
         """Compute moments and log normalizer for a Gaussian chain."""
 
         factorization = self._forward_elimination()
@@ -728,12 +728,13 @@ class GaussianChain(typing.NamedTuple):
             )
         )
 
-        return GaussianChainMarginals(
+        posterior = GaussianChainMarginals(
             means=means,
             covariances=covariances,
             cross_covariances=cross_covariances,
-            log_normalizer=log_normalizer,
         )
+
+        return posterior, log_normalizer
 
 
 class _ForwardEliminationCarry(typing.NamedTuple):
@@ -864,18 +865,16 @@ class _GaussianChainFactorization(typing.NamedTuple):
 
 
 class GaussianChainMarginals(typing.NamedTuple):
-    r"""Marginal central moments and log normalizer of a Gaussian chain.
+    r"""Marginal central moments of a Gaussian chain.
 
     * ``means[t] = E[x_t]``.
     * ``covariances[t] = Cov(x_t, x_t)``.
     * ``cross_covariances[t] = Cov(x_t, x_{t+1})``.
-    * ``log_normalizer = log ∫ f(x) dx``.
     """
 
     means: jax.Array
     covariances: jax.Array
     cross_covariances: jax.Array
-    log_normalizer: jax.Array
 
     def raw_second_moments(self) -> jax.Array:
         """Return E[x_t x_t.T], shape (T, N, N)."""

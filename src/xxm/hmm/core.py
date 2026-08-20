@@ -61,7 +61,7 @@ class DiscreteInitialModel(typing.NamedTuple):
         posterior: Posterior,
     ) -> typing.Self:
         """Maximum-likelihood update from expected initial-state counts."""
-        return self._replace(model=Categorical.from_counts(posterior.state_marginals[0]))
+        return self._replace(model=Categorical.from_counts(posterior.state_probs[0]))
 
 
 class DiscreteTransitionModel(typing.NamedTuple):
@@ -97,7 +97,7 @@ class DiscreteTransitionModel(typing.NamedTuple):
         posterior: Posterior,
     ) -> typing.Self:
         """Maximum-likelihood update from expected transition counts."""
-        expected_transitions = posterior.pair_marginals.sum(axis=0)  # (K, K)
+        expected_transitions = posterior.pair_probs.sum(axis=0)  # (K, K)
 
         return self._replace(model=Categorical.from_counts(expected_transitions))
 

@@ -66,7 +66,7 @@ def test_dense_precision_matches_block_representation():
 def test_gaussian_chain_mean_matches_dense_reference():
     chain = make_chain()
 
-    marginals = chain.forward_backward()
+    marginals, log_normalizer = chain.forward_backward()
 
     result = marginals.means
 
@@ -81,7 +81,7 @@ def test_gaussian_chain_mean_matches_dense_reference():
 def test_gaussian_chain_covariances_match_dense_inverse():
     chain = make_chain()
 
-    marginals = chain.forward_backward()
+    marginals, log_normalizer = chain.forward_backward()
     result = marginals.covariances
 
     dense_precision_matrix = np.asarray(chain.dense_precision())
@@ -98,7 +98,7 @@ def test_gaussian_chain_covariances_match_dense_inverse():
 def test_gaussian_chain_cross_covariances_match_dense_inverse():
     chain = make_chain()
 
-    marginals = chain.forward_backward()
+    marginals, log_normalizer = chain.forward_backward()
     result = marginals.cross_covariances
 
     dense_precision_matrix = np.asarray(chain.dense_precision())
@@ -122,7 +122,7 @@ def test_gaussian_chain_single_time_step():
         log_constant=jnp.array(0.0),
     )
 
-    marginals = chain.forward_backward()
+    marginals, log_normalizer = chain.forward_backward()
     posterior = marginals
 
     dense_precision_matrix = np.asarray(chain.dense_precision())
@@ -144,7 +144,7 @@ def test_gaussian_chain_scalar_latent():
         log_constant=jnp.array(0.0),
     )
 
-    marginals = chain.forward_backward()
+    marginals, log_normalizer = chain.forward_backward()
     posterior = marginals
     dense_precision_matrix = np.asarray(chain.dense_precision())
     dense_information_vectors = np.asarray(chain.information_vectors).reshape(-1)
@@ -163,7 +163,7 @@ def test_gaussian_chain_scalar_latent():
 def test_gaussian_chain_covariances_are_symmetric_and_positive_definite():
     chain = make_chain()
 
-    marginals = chain.forward_backward()
+    marginals, log_normalizer = chain.forward_backward()
     posterior = marginals
 
     for covariance in posterior.covariances:
@@ -175,8 +175,8 @@ def test_gaussian_chain_covariances_are_symmetric_and_positive_definite():
 def test_gaussian_chain_log_normalizer_matches_dense_reference():
     chain = make_chain()
 
-    marginals = chain.forward_backward()
-    posterior = marginals
+    marginals, log_normalizer = chain.forward_backward()
+
     dense_precision_matrix = np.asarray(chain.dense_precision())
     h = np.asarray(chain.information_vectors).reshape(-1)
 
@@ -192,14 +192,14 @@ def test_gaussian_chain_log_normalizer_matches_dense_reference():
 
     expected = dense_quadratic - 0.5 * dense_log_det + 0.5 * h.size * np.log(2.0 * np.pi)
 
-    np.testing.assert_allclose(posterior.log_normalizer, expected, atol=ATOL, rtol=RTOL)
+    np.testing.assert_allclose(log_normalizer, expected, atol=ATOL, rtol=RTOL)
 
 
 def test_gaussian_chain_jit():
     chain = make_chain()
 
-    eager = chain.forward_backward()
-    jitted = jax.jit(lambda c: c.forward_backward())(chain)
+    eager, eager_log_normalizer = chain.forward_backward()
+    jitted, jitted_log_normalizer = jax.jit(lambda c: c.forward_backward())(chain)
 
     np.testing.assert_allclose(
         np.asarray(jitted.means), np.asarray(eager.means), atol=ATOL, rtol=RTOL
@@ -208,7 +208,7 @@ def test_gaussian_chain_jit():
     np.testing.assert_allclose(
         np.asarray(jitted.cross_covariances), np.asarray(eager.cross_covariances)
     )
-    np.testing.assert_allclose(jitted.log_normalizer, eager.log_normalizer)
+    np.testing.assert_allclose(jitted_log_normalizer, eager_log_normalizer)
 
 
 # --- GaussianPotential ---

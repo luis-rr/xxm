@@ -198,11 +198,11 @@ def test_ar_gaussian_fit_recovers_known_ar2_parameters():
     posterior = DiscreteChainMarginals(
         # Important: posterior has length T, including the padded
         # first L time points.
-        state_marginals=jnp.ones((observations.shape[0], 1)),
+        state_probs=jnp.ones((observations.shape[0], 1)),
         # Mock pair marginals and log normalizer, since they are not used in the fit.
-        pair_marginals=jnp.ones((observations.shape[0] - 1, 1, 1)),
-        log_normalizer=jnp.zeros((1,)),
+        pair_probs=jnp.ones((observations.shape[0] - 1, 1, 1)),
     )
+    log_normalizer = jnp.zeros((1,))
 
     emissions = _make_emissions(
         coefficients=jnp.zeros((1, 2, 1, 1)),
@@ -339,10 +339,9 @@ def test_ar_gaussian_methods_are_jittable():
     )
 
     posterior = DiscreteChainMarginals(
-        state_marginals=jnp.ones((observations.shape[0], 1)),
+        state_probs=jnp.ones((observations.shape[0], 1)),
         # Mock pair marginals and log normalizer, since they are not used in the fit.
-        pair_marginals=jnp.ones((observations.shape[0] - 1, 1, 1)),
-        log_normalizer=jnp.zeros((1,)),
+        pair_probs=jnp.ones((observations.shape[0] - 1, 1, 1)),
     )
 
     states = jnp.zeros(5, dtype=int)

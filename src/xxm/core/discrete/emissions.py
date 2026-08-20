@@ -28,7 +28,7 @@ class GaussianEmissions(typing.NamedTuple):
     ) -> typing.Self:
         gaussian = gaussian_fit.gaussian_from_samples_weighted(
             observations,
-            posterior.state_marginals,
+            posterior.state_probs,
         )
 
         return self._replace(
@@ -59,7 +59,7 @@ class PoissonEmissions(typing.NamedTuple):
         return self._replace(
             model=poisson_fit.poisson_from_samples_weighted(
                 observations=observations,
-                weights=posterior.state_marginals,
+                weights=posterior.state_probs,
             ),
         )
 

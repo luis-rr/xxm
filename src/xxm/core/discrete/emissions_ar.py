@@ -180,7 +180,7 @@ class AREmissions(typing.NamedTuple, typing.Generic[ConditionalModelT]):
     ) -> typing.Self:
         predictors = self.predictors(observations)  # (T-L, L*N)
         current = observations[self.max_lag :]  # (T-L, N)
-        weights = posterior.state_marginals[self.max_lag :]  # (T-L, K)
+        weights = posterior.state_probs[self.max_lag :]  # (T-L, K)
 
         model = _fit_ar_model(
             model=self.model,

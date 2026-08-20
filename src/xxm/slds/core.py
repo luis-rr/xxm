@@ -33,7 +33,7 @@ class SwitchingLinearGaussianDynamicsModel(typing.NamedTuple):
     ) -> typing.Self:
         """Fit one linear-Gaussian dynamics model per discrete state."""
 
-        weights = posterior.discrete.state_marginals  # (T-1, K)
+        weights = posterior.discrete.state_probs  # (T-1, K)
 
         means = posterior.continuous.means
         second = posterior.continuous.raw_second_moments()

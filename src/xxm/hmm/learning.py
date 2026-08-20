@@ -13,7 +13,7 @@ def em_step(
     observations: jax.Array,
 ) -> tuple[Model, jax.Array]:
 
-    posterior = inference_exact(
+    posterior, log_normalizer = inference_exact(
         model,
         observations,
     )
@@ -23,7 +23,7 @@ def em_step(
         posterior,
     )
 
-    return new_model, posterior.log_normalizer
+    return new_model, log_normalizer
 
 
 def fit_em(
@@ -37,5 +37,5 @@ def fit_em(
         observations,
         num_iters,
         step=em_step,
-        objective=lambda m, o: inference_exact(m, o).log_normalizer,
+        objective=lambda m, o: inference_exact(m, o)[1],
     )

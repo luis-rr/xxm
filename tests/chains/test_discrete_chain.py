@@ -97,7 +97,7 @@ def test_forward_backward_matches_exact_enumeration() -> None:
         ),
     )
 
-    result = chain.forward_backward()
+    result, log_normalizer = chain.forward_backward()
     exact_state_posterior_probs, exact_pair_posterior_probs, exact_log_marginal_likelihood = (
         _enumerate_exact_posterior(
             initial_probs=np.asarray(chain.initial_probs),
@@ -107,13 +107,11 @@ def test_forward_backward_matches_exact_enumeration() -> None:
     )
 
     np.testing.assert_allclose(
-        np.asarray(result.state_marginals), exact_state_posterior_probs, atol=ATOL
+        np.asarray(result.state_probs), exact_state_posterior_probs, atol=ATOL
     )
+    np.testing.assert_allclose(np.asarray(result.pair_probs), exact_pair_posterior_probs, atol=ATOL)
     np.testing.assert_allclose(
-        np.asarray(result.pair_marginals), exact_pair_posterior_probs, atol=ATOL
-    )
-    np.testing.assert_allclose(
-        float(result.log_normalizer),
+        float(log_normalizer),
         exact_log_marginal_likelihood,
         atol=ATOL,
     )
@@ -163,24 +161,24 @@ def test_normalization_and_finiteness_invariants() -> None:
     assert np.isfinite(np.asarray(messages.log_scaling_factors)).all()
     assert (np.asarray(messages.forward_messages) >= 0.0).all()
 
-    marginals = messages.calculate_marginals(chain)
+    marginals, log_normalizer = messages.calculate_marginals(chain)
 
     np.testing.assert_allclose(
-        np.asarray(marginals.state_marginals.sum(axis=1)),
+        np.asarray(marginals.state_probs.sum(axis=1)),
         np.ones(4),
         atol=ATOL,
     )
     np.testing.assert_allclose(
-        np.asarray(marginals.pair_marginals.sum(axis=(1, 2))),
+        np.asarray(marginals.pair_probs.sum(axis=(1, 2))),
         np.ones(3),
         atol=ATOL,
     )
-    assert np.isfinite(np.asarray(marginals.state_marginals)).all()
-    assert np.isfinite(np.asarray(marginals.pair_marginals)).all()
-    assert np.isfinite(float(marginals.log_normalizer))
+    assert np.isfinite(np.asarray(marginals.state_probs)).all()
+    assert np.isfinite(np.asarray(marginals.pair_probs)).all()
+    assert np.isfinite(float(log_normalizer))
 
-    assert (np.asarray(marginals.state_marginals) >= 0.0).all()
-    assert (np.asarray(marginals.pair_marginals) >= 0.0).all()
+    assert (np.asarray(marginals.state_probs) >= 0.0).all()
+    assert (np.asarray(marginals.pair_probs) >= 0.0).all()
 
 
 def test_marginal_consistency_between_state_and_pair_posteriors() -> None:
@@ -209,17 +207,17 @@ def test_marginal_consistency_between_state_and_pair_posteriors() -> None:
         transition_probs=transition_probs,
         state_log_potentials=state_log_potentials,
     )
-    result = chain.forward_backward()
+    result, log_normalizer = chain.forward_backward()
 
     for time_index in range(chain.state_log_potentials.shape[0] - 1):
         np.testing.assert_allclose(
-            np.asarray(result.state_marginals[time_index]),
-            np.asarray(result.pair_marginals[time_index].sum(axis=1)),
+            np.asarray(result.state_probs[time_index]),
+            np.asarray(result.pair_probs[time_index].sum(axis=1)),
             atol=ATOL,
         )
         np.testing.assert_allclose(
-            np.asarray(result.state_marginals[time_index + 1]),
-            np.asarray(result.pair_marginals[time_index].sum(axis=0)),
+            np.asarray(result.state_probs[time_index + 1]),
+            np.asarray(result.pair_probs[time_index].sum(axis=0)),
             atol=ATOL,
         )
 
@@ -250,7 +248,7 @@ def test_log_normalizer_matches_scaling_and_exact_enumeration() -> None:
     )
 
     messages = xxm.core.discrete.chain._forward_backward(chain)
-    result = chain.forward_backward()
+    result, log_normalizer = chain.forward_backward()
     exact_state_posterior_probs, exact_pair_posterior_probs, exact_log_marginal_likelihood = (
         _enumerate_exact_posterior(
             initial_probs=np.asarray(chain.initial_probs),
@@ -260,25 +258,25 @@ def test_log_normalizer_matches_scaling_and_exact_enumeration() -> None:
     )
 
     np.testing.assert_allclose(
-        float(result.log_normalizer),
+        float(log_normalizer),
         float(np.sum(messages.log_scaling_factors)),
         atol=ATOL,
         rtol=RTOL,
     )
     np.testing.assert_allclose(
-        float(result.log_normalizer),
+        float(log_normalizer),
         exact_log_marginal_likelihood,
         atol=ATOL,
         rtol=RTOL,
     )
     np.testing.assert_allclose(
-        np.asarray(result.state_marginals),
+        np.asarray(result.state_probs),
         exact_state_posterior_probs,
         atol=ATOL,
         rtol=RTOL,
     )
     np.testing.assert_allclose(
-        np.asarray(result.pair_marginals),
+        np.asarray(result.pair_probs),
         exact_pair_posterior_probs,
         atol=ATOL,
         rtol=RTOL,
@@ -310,7 +308,7 @@ def test_time_varying_transitions_match_exact_enumeration() -> None:
         transition_probs=transition_probs,
         state_log_potentials=state_log_potentials,
     )
-    result = chain.forward_backward()
+    result, log_normalizer = chain.forward_backward()
     exact_state_posterior_probs, exact_pair_posterior_probs, exact_log_marginal_likelihood = (
         _enumerate_exact_posterior(
             initial_probs=np.asarray(chain.initial_probs),
@@ -320,19 +318,19 @@ def test_time_varying_transitions_match_exact_enumeration() -> None:
     )
 
     np.testing.assert_allclose(
-        np.asarray(result.state_marginals),
+        np.asarray(result.state_probs),
         exact_state_posterior_probs,
         atol=ATOL,
         rtol=RTOL,
     )
     np.testing.assert_allclose(
-        np.asarray(result.pair_marginals),
+        np.asarray(result.pair_probs),
         exact_pair_posterior_probs,
         atol=ATOL,
         rtol=RTOL,
     )
     np.testing.assert_allclose(
-        float(result.log_normalizer),
+        float(log_normalizer),
         exact_log_marginal_likelihood,
         atol=ATOL,
         rtol=RTOL,
@@ -352,7 +350,7 @@ def test_deterministic_transitions_concentrate_posterior_path() -> None:
         state_log_potentials=jnp.zeros((4, 2)),
     )
 
-    result = chain.forward_backward()
+    result, log_normalizer = chain.forward_backward()
 
     expected_state_posterior_probs = np.array(
         [
@@ -371,12 +369,12 @@ def test_deterministic_transitions_concentrate_posterior_path() -> None:
     )
 
     np.testing.assert_allclose(
-        np.asarray(result.state_marginals),
+        np.asarray(result.state_probs),
         expected_state_posterior_probs,
         atol=ATOL,
     )
     np.testing.assert_allclose(
-        np.asarray(result.pair_marginals),
+        np.asarray(result.pair_probs),
         expected_pair_posterior_probs,
         atol=ATOL,
     )
@@ -407,30 +405,34 @@ def test_forward_backward_is_jit_compatible() -> None:
         initial_probs: jax.Array,
         transition_probs: jax.Array,
         state_log_potentials: jax.Array,
-    ) -> xxm.core.discrete.chain.DiscreteChainMarginals:
+    ) -> tuple[xxm.core.discrete.chain.DiscreteChainMarginals, jax.Array]:
         return xxm.core.discrete.chain.DiscreteChain(
             initial_probs=initial_probs,
             transition_probs=transition_probs,
             state_log_potentials=state_log_potentials,
         ).forward_backward()
 
-    eager_result = run_forward_backward(initial_probs, transition_probs, state_log_potentials)
+    eager_result, eager_log_normalizer = run_forward_backward(
+        initial_probs, transition_probs, state_log_potentials
+    )
     jitted_forward_backward = jax.jit(run_forward_backward)
-    jitted_result = jitted_forward_backward(initial_probs, transition_probs, state_log_potentials)
+    jitted_result, jitted_log_normalizer = jitted_forward_backward(
+        initial_probs, transition_probs, state_log_potentials
+    )
 
     np.testing.assert_allclose(
-        np.asarray(jitted_result.state_marginals),
-        np.asarray(eager_result.state_marginals),
+        np.asarray(jitted_result.state_probs),
+        np.asarray(eager_result.state_probs),
         atol=ATOL,
     )
     np.testing.assert_allclose(
-        np.asarray(jitted_result.pair_marginals),
-        np.asarray(eager_result.pair_marginals),
+        np.asarray(jitted_result.pair_probs),
+        np.asarray(eager_result.pair_probs),
         atol=ATOL,
     )
     np.testing.assert_allclose(
-        float(jitted_result.log_normalizer),
-        float(eager_result.log_normalizer),
+        float(jitted_log_normalizer),
+        float(eager_log_normalizer),
         atol=ATOL,
     )
 
@@ -478,48 +480,48 @@ def test_forward_backward_supports_batching_with_vmap() -> None:
         initial_probs: jax.Array,
         transition_probs: jax.Array,
         state_log_potentials: jax.Array,
-    ) -> xxm.core.discrete.chain.DiscreteChainMarginals:
+    ) -> tuple[xxm.core.discrete.chain.DiscreteChainMarginals, jax.Array]:
         return xxm.core.discrete.chain.DiscreteChain(
             initial_probs=initial_probs,
             transition_probs=transition_probs,
             state_log_potentials=state_log_potentials,
         ).forward_backward()
 
-    batched_result = jax.vmap(run)(
+    batched_result, batched_log_normalizer = jax.vmap(run)(
         initial_probs,
         transition_probs,
         state_log_potentials,
     )
 
     for batch_index in range(2):
-        expected = run(
+        expected, log_normalizer = run(
             initial_probs[batch_index],
             transition_probs[batch_index],
             state_log_potentials[batch_index],
         )
 
         np.testing.assert_allclose(
-            batched_result.state_marginals[batch_index],
-            expected.state_marginals,
+            batched_result.state_probs[batch_index],
+            expected.state_probs,
             atol=ATOL,
             rtol=RTOL,
         )
         np.testing.assert_allclose(
-            batched_result.pair_marginals[batch_index],
-            expected.pair_marginals,
+            batched_result.pair_probs[batch_index],
+            expected.pair_probs,
             atol=ATOL,
             rtol=RTOL,
         )
         np.testing.assert_allclose(
-            batched_result.log_normalizer[batch_index],
-            expected.log_normalizer,
+            batched_log_normalizer[batch_index],
+            log_normalizer,
             atol=ATOL,
             rtol=RTOL,
         )
 
-    assert batched_result.state_marginals.shape == (2, 3, 2)
-    assert batched_result.pair_marginals.shape == (2, 2, 2, 2)
-    assert batched_result.log_normalizer.shape == (2,)
+    assert batched_result.state_probs.shape == (2, 3, 2)
+    assert batched_result.pair_probs.shape == (2, 2, 2, 2)
+    assert batched_log_normalizer.shape == (2,)
 
 
 def test_vmapped_forward_backward_is_jit_compatible() -> None:
@@ -564,7 +566,7 @@ def test_vmapped_forward_backward_is_jit_compatible() -> None:
         initial_probs: jax.Array,
         transition_probs: jax.Array,
         state_log_potentials: jax.Array,
-    ) -> xxm.core.discrete.chain.DiscreteChainMarginals:
+    ) -> tuple[xxm.core.discrete.chain.DiscreteChainMarginals, jax.Array]:
         return xxm.core.discrete.chain.DiscreteChain(
             initial_probs=initial_probs,
             transition_probs=transition_probs,
@@ -573,32 +575,32 @@ def test_vmapped_forward_backward_is_jit_compatible() -> None:
 
     batched_run = jax.vmap(run)
 
-    eager = batched_run(
+    eager, eager_log_normalizer = batched_run(
         initial_probs,
         transition_probs,
         state_log_potentials,
     )
-    jitted = jax.jit(batched_run)(
+    jitted, jitted_log_normalizer = jax.jit(batched_run)(
         initial_probs,
         transition_probs,
         state_log_potentials,
     )
 
     np.testing.assert_allclose(
-        jitted.state_marginals,
-        eager.state_marginals,
+        jitted.state_probs,
+        eager.state_probs,
         atol=ATOL,
         rtol=RTOL,
     )
     np.testing.assert_allclose(
-        jitted.pair_marginals,
-        eager.pair_marginals,
+        jitted.pair_probs,
+        eager.pair_probs,
         atol=ATOL,
         rtol=RTOL,
     )
     np.testing.assert_allclose(
-        jitted.log_normalizer,
-        eager.log_normalizer,
+        jitted_log_normalizer,
+        eager_log_normalizer,
         atol=ATOL,
         rtol=RTOL,
     )
@@ -620,26 +622,26 @@ def test_single_time_step_matches_direct_normalization() -> None:
         state_log_potentials=state_log_potentials,
     )
 
-    result = chain.forward_backward()
+    result, log_normalizer = chain.forward_backward()
 
     unnormalized = np.array([0.6 * 0.2, 0.4 * 0.8])
     normalizer = unnormalized.sum()
     expected = unnormalized / normalizer
 
     np.testing.assert_allclose(
-        result.state_marginals[0],
+        result.state_probs[0],
         expected,
         atol=ATOL,
         rtol=RTOL,
     )
     np.testing.assert_allclose(
-        result.log_normalizer,
+        log_normalizer,
         np.log(normalizer),
         atol=ATOL,
         rtol=RTOL,
     )
 
-    assert result.pair_marginals.shape == (0, 2, 2)
+    assert result.pair_probs.shape == (0, 2, 2)
 
 
 def test_single_state_chain() -> None:
@@ -657,20 +659,20 @@ def test_single_state_chain() -> None:
         state_log_potentials=state_log_potentials,
     )
 
-    result = chain.forward_backward()
+    result, log_normalizer = chain.forward_backward()
 
     np.testing.assert_allclose(
-        result.state_marginals,
+        result.state_probs,
         np.ones((3, 1)),
         atol=ATOL,
     )
     np.testing.assert_allclose(
-        result.pair_marginals,
+        result.pair_probs,
         np.ones((2, 1, 1)),
         atol=ATOL,
     )
     np.testing.assert_allclose(
-        result.log_normalizer,
+        log_normalizer,
         np.sum(state_log_potentials),
         atol=ATOL,
     )
@@ -702,24 +704,24 @@ def test_state_log_potential_offsets_only_shift_log_normalizer() -> None:
         state_log_potentials=(chain.state_log_potentials + offsets[:, None])
     )
 
-    original = chain.forward_backward()
-    shifted = shifted_chain.forward_backward()
+    original, original_log_normalizer = chain.forward_backward()
+    shifted, shifted_log_normalizer = shifted_chain.forward_backward()
 
     np.testing.assert_allclose(
-        shifted.state_marginals,
-        original.state_marginals,
+        shifted.state_probs,
+        original.state_probs,
         atol=ATOL,
         rtol=RTOL,
     )
     np.testing.assert_allclose(
-        shifted.pair_marginals,
-        original.pair_marginals,
+        shifted.pair_probs,
+        original.pair_probs,
         atol=ATOL,
         rtol=RTOL,
     )
     np.testing.assert_allclose(
-        shifted.log_normalizer,
-        original.log_normalizer + offsets.sum(),
+        shifted_log_normalizer,
+        original_log_normalizer + offsets.sum(),
         atol=ATOL,
         rtol=RTOL,
     )

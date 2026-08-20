@@ -24,7 +24,7 @@ def em_step(
     observations: jax.Array,
 ) -> tuple[Model[QuadraticEmissionsT], jax.Array]:
 
-    posterior = inference_exact(
+    posterior, log_normalizer = inference_exact(
         model,
         observations,
     )
@@ -34,7 +34,7 @@ def em_step(
         posterior,
     )
 
-    return new_model, posterior.log_normalizer
+    return new_model, log_normalizer
 
 
 def laplace_em_step(
@@ -42,7 +42,7 @@ def laplace_em_step(
     observations: jax.Array,
 ) -> tuple[Model[LaplaceEmissionsT], jax.Array]:
 
-    posterior = inference_laplace(
+    posterior, log_normalizer = inference_laplace(
         model,
         observations,
     )
@@ -52,7 +52,7 @@ def laplace_em_step(
         posterior,
     )
 
-    return new_model, posterior.log_normalizer
+    return new_model, log_normalizer
 
 
 def fit_em(
@@ -66,7 +66,7 @@ def fit_em(
         observations,
         num_iters,
         step=em_step,
-        objective=lambda m, o: inference_exact(m, o).log_normalizer,
+        objective=lambda m, o: inference_exact(m, o)[1],
     )
 
 
@@ -81,7 +81,7 @@ def fit_em_many(
         observations,
         num_iters,
         step=em_step,
-        objective=lambda m, o: inference_exact(m, o).log_normalizer,
+        objective=lambda m, o: inference_exact(m, o)[1],
     )
 
 
@@ -96,7 +96,7 @@ def fit_laplace_em(
         observations,
         num_iters,
         step=laplace_em_step,
-        objective=lambda m, o: inference_laplace(m, o).log_normalizer,
+        objective=lambda m, o: inference_laplace(m, o)[1],
     )
 
 
@@ -111,5 +111,5 @@ def fit_laplace_em_many(
         observations,
         num_iters,
         step=laplace_em_step,
-        objective=lambda m, o: inference_laplace(m, o).log_normalizer,
+        objective=lambda m, o: inference_laplace(m, o)[1],
     )

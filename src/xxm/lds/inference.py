@@ -25,7 +25,7 @@ def to_chain(
 def inference_exact(
     model: Model[QuadraticEmissionsT],
     observations: jax.Array,
-) -> Posterior:
+) -> tuple[Posterior, jax.Array]:
     """Compute the exact posterior over latents for quadratic emissions."""
 
     latent_chain = to_chain(
@@ -102,7 +102,8 @@ class _NewtonSearchModel(
 
         # The mean is also the mode of this local Gaussian approximation.
         # TODO: Use a solver for the mode that avoids computing the full posterior.
-        newton_latents = local_posterior_chain.forward_backward().means
+        posterior, _ = local_posterior_chain.forward_backward()
+        newton_latents = posterior.means
 
         return _NewtonSearchParams(
             latents=newton_latents - params.latents,
@@ -116,7 +117,7 @@ def inference_laplace(
     max_iter: int = 20,
     tol: float = 1e-6,
     max_line_search_iters: int = 20,
-) -> Posterior:
+) -> tuple[Posterior, jax.Array]:
     """
     Approximate the posterior over latents using Laplace inference.
 

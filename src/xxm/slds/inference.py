@@ -2,6 +2,7 @@ import typing
 
 import jax
 import jax.numpy as jnp
+import jax.scipy as jsp
 
 from xxm.core.discrete.chain import DiscreteChain, DiscreteChainMarginals
 from xxm.core.gaussian.chain import (
@@ -53,14 +54,14 @@ class ContinuousPotentials(typing.NamedTuple):
     def inference(
         self,
         state_probs: jax.Array,
-    ) -> GaussianChainMarginals:
+    ) -> tuple[GaussianChainMarginals, jax.Array]:
         return self.to_chain(state_probs).forward_backward()
 
     def infer_state_log_potentials(
         self,
         state_probs: jax.Array,
     ) -> jax.Array:
-        posterior = self.inference(state_probs)
+        posterior, _ = self.inference(state_probs)
         return self.get_expected_state_log_potentials(posterior)
 
     def get_expected_state_log_potentials(
@@ -97,16 +98,17 @@ class DiscretePotentials(typing.NamedTuple):
     def inference(
         self,
         state_log_potentials: jax.Array,
-    ) -> DiscreteChainMarginals:
+    ) -> tuple[DiscreteChainMarginals, jax.Array]:
         return self.to_chain(state_log_potentials).forward_backward()
 
     def infer_state_probs(
         self,
         state_log_potentials: jax.Array,
     ) -> jax.Array:
-        return self.inference(state_log_potentials).state_marginals
+        posterior, _ = self.inference(state_log_potentials)
+        return posterior.state_probs
 
-    def prior(self) -> DiscreteChainMarginals:
+    def prior(self) -> tuple[DiscreteChainMarginals, jax.Array]:
         num_time_steps = self.transitions.shape[0] + 1
 
         state_log_potentials = jnp.zeros(
@@ -114,34 +116,69 @@ class DiscretePotentials(typing.NamedTuple):
             dtype=self.initial.dtype,
         )
 
-        return self.inference(state_log_potentials)
+        posterior, log_normalizer = self.inference(state_log_potentials)
+
+        return posterior, log_normalizer
 
 
-def inference_exact(
+def elbo(
+    model: Model,
+    posterior: Posterior,
+    continuous_log_normalizer: jax.Array,
+) -> jax.Array:
+    """Evidence lower bound for the structured SLDS posterior."""
+
+    discrete = posterior.discrete
+
+    expected_initial_log_prob = jnp.sum(
+        jsp.special.xlogy(
+            discrete.state_probs[0],
+            model.state_initial.model.probs,
+        )
+    )
+
+    expected_transition_log_prob = jnp.sum(
+        jsp.special.xlogy(
+            discrete.pair_probs,
+            model.transitions.model.probs,
+        )
+    )
+
+    return (
+        continuous_log_normalizer
+        + expected_initial_log_prob
+        + expected_transition_log_prob
+        + discrete.entropy()
+    )
+
+
+def inference_variational(
     model: Model,
     observations: jax.Array,
     num_iters: int,
-) -> Posterior:
+) -> tuple[Posterior, jax.Array]:
 
     num_time_steps = observations.shape[0]
 
-    if num_time_steps < 2:
-        raise ValueError('SLDS inference requires at least two time steps')
-
-    if num_iters < 0:
-        raise ValueError('Number of inference iterations must be non-negative')
-
-    cont_potentials = ContinuousPotentials.from_model(model, observations)
-    disc_potentials = DiscretePotentials.from_model(model, num_time_steps - 1)
+    cont_potentials = ContinuousPotentials.from_model(
+        model,
+        observations,
+    )
+    disc_potentials = DiscretePotentials.from_model(
+        model,
+        num_time_steps - 1,
+    )
 
     def step(_, disc_posterior):
-        cont_posterior = cont_potentials.inference(disc_posterior.state_marginals)
+        cont_posterior, _ = cont_potentials.inference(disc_posterior.state_probs)
 
         state_log_potentials = cont_potentials.get_expected_state_log_potentials(cont_posterior)
 
-        return disc_potentials.inference(state_log_potentials)
+        disc_posterior, _ = disc_potentials.inference(state_log_potentials)
 
-    disc_posterior = disc_potentials.prior()
+        return disc_posterior
+
+    disc_posterior, _ = disc_potentials.prior()
 
     disc_posterior = jax.lax.fori_loop(
         0,
@@ -150,9 +187,17 @@ def inference_exact(
         disc_posterior,
     )
 
-    cont_posterior = cont_potentials.inference(disc_posterior.state_marginals)
+    cont_posterior, cont_log_normalizer = cont_potentials.inference(disc_posterior.state_probs)
 
-    return Posterior(
+    posterior = Posterior(
         discrete=disc_posterior,
         continuous=cont_posterior,
     )
+
+    elbo_value = elbo(
+        model=model,
+        posterior=posterior,
+        continuous_log_normalizer=cont_log_normalizer,
+    )
+
+    return posterior, elbo_value

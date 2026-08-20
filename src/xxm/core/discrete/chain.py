@@ -6,6 +6,7 @@ import typing
 
 import jax
 import jax.numpy as jnp
+import jax.scipy as jsp
 
 
 class DiscretePotential(typing.NamedTuple):
@@ -57,7 +58,7 @@ class DiscreteChain(typing.NamedTuple):
     def num_time_steps(self) -> int:
         return self.state_log_potentials.shape[0]
 
-    def forward_backward(self) -> DiscreteChainMarginals:
+    def forward_backward(self) -> tuple[DiscreteChainMarginals, jax.Array]:
         """Run full forward-backward inference for one chain."""
 
         messages = _forward_backward(self)
@@ -83,19 +84,43 @@ class DiscreteChain(typing.NamedTuple):
 
 
 class DiscreteChainMarginals(typing.NamedTuple):
-    r"""Marginals and log normalizer of a discrete chain.
+    r"""Marginals of a discrete chain.
 
-    * ``state_marginals[t, k] = p_f(z_t=k)``.
-    * ``pair_marginals[t, i, j] = p_f(z_t=i, z_{t+1}=j)``.
-    * ``log_normalizer = log Z``.
+    * ``state_probs[t, k] = p_f(z_t=k)``.
+    * ``pair_probs[t, i, j] = p_f(z_t=i, z_{t+1}=j)``.
 
     Represents the marginals of one chain. Batch dimensions can be introduced
     externally by applying ``jax.vmap`` to chain inference.
     """
 
-    state_marginals: jax.Array  # (T, K)
-    pair_marginals: jax.Array  # (T - 1, K, K)
-    log_normalizer: jax.Array  # scalar
+    state_probs: jax.Array  # (T, K)
+    pair_probs: jax.Array  # (T - 1, K, K)
+
+    def entropy(self) -> jax.Array:
+        """Entropy of the discrete Markov-chain posterior."""
+
+        initial_entropy = -jnp.sum(
+            jsp.special.xlogy(
+                self.state_probs[0],
+                self.state_probs[0],
+            )
+        )
+
+        pair_entropy = -jnp.sum(
+            jsp.special.xlogy(
+                self.pair_probs,
+                self.pair_probs,
+            )
+        )
+
+        conditioning_entropy = jnp.sum(
+            jsp.special.xlogy(
+                self.state_probs[:-1],
+                self.state_probs[:-1],
+            )
+        )
+
+        return initial_entropy + pair_entropy + conditioning_entropy
 
 
 class _DiscreteChainMessages(typing.NamedTuple):
@@ -108,12 +133,16 @@ class _DiscreteChainMessages(typing.NamedTuple):
     def calculate_marginals(
         self,
         chain: DiscreteChain,
-    ) -> DiscreteChainMarginals:
-        return DiscreteChainMarginals(
-            state_marginals=self.calculate_state_marginals(),
-            pair_marginals=self.calculate_pair_marginals(chain),
-            log_normalizer=self.calculate_log_normalizer(),
+    ) -> tuple[DiscreteChainMarginals, jax.Array]:
+
+        posterior = DiscreteChainMarginals(
+            state_probs=self.calculate_state_marginals(),
+            pair_probs=self.calculate_pair_marginals(chain),
         )
+
+        log_normalizer = self.calculate_log_normalizer()
+
+        return posterior, log_normalizer
 
     def calculate_state_marginals(self) -> jax.Array:
         """Compute state probabilities gamma[t, k]."""

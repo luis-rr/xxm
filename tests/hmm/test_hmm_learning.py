@@ -19,21 +19,23 @@ ATOL = 1e-6
 def make_posterior(
     state_marginals: jnp.ndarray,
     pair_marginals: jnp.ndarray,
-) -> DiscreteChainMarginals:
+) -> tuple[DiscreteChainMarginals, jax.Array]:
     T, K = state_marginals.shape
 
-    return DiscreteChainMarginals(
-        # forward_probs=jnp.zeros((T, K)),
-        # backward_probs=jnp.zeros((T, K)),
-        # log_scaling_factors=jnp.zeros(T),
-        state_marginals=state_marginals,
-        pair_marginals=pair_marginals,
-        log_normalizer=jnp.log(jnp.sum(state_marginals[0])),
+    return (
+        DiscreteChainMarginals(
+            # forward_probs=jnp.zeros((T, K)),
+            # backward_probs=jnp.zeros((T, K)),
+            # log_scaling_factors=jnp.zeros(T),
+            state_probs=state_marginals,
+            pair_probs=pair_marginals,
+        ),
+        jnp.log(jnp.sum(state_marginals[0])),
     )
 
 
 def test_m_step_initial_probs():
-    posterior = make_posterior(
+    posterior, log_normalizer = make_posterior(
         state_marginals=jnp.array(
             [
                 [0.8, 0.2],
@@ -73,7 +75,7 @@ def test_m_step_transition_probs():
         ]
     )
 
-    posterior = make_posterior(
+    posterior, log_normalizer = make_posterior(
         state_marginals,
         pair_marginals,
     )
@@ -138,7 +140,7 @@ def test_poisson_m_step():
         ]
     )
 
-    posterior = make_posterior(
+    posterior, log_normalizer = make_posterior(
         state_marginals=jnp.array(
             [
                 [1.0, 0.0],
@@ -213,7 +215,7 @@ def test_gaussian_m_step():
         ]
     )
 
-    posterior = make_posterior(
+    posterior, log_normalizer = make_posterior(
         state_marginals=jnp.array(
             [
                 [1.0, 0.0],
@@ -244,7 +246,7 @@ def test_gaussian_m_step():
     )
 
     # Compute expected weighted variances independently.
-    gamma = np.asarray(posterior.state_marginals)
+    gamma = np.asarray(posterior.state_probs)
     x = np.asarray(observations[:, 0])
 
     expected_variances = []
