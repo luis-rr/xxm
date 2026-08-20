@@ -765,12 +765,6 @@ class _GaussianChainFactorization(typing.NamedTuple):
     effective_information_vectors: jax.Array
 
 
-class GaussianChainMoments(typing.NamedTuple):
-    means: jax.Array
-    second_moments: jax.Array
-    cross_second_moments: jax.Array
-
-
 class GaussianChainMarginals(typing.NamedTuple):
     r"""Marginal central moments and log normalizer of a Gaussian chain.
 
