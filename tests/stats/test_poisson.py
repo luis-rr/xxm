@@ -5,7 +5,8 @@ import jax.numpy as jnp
 import numpy as np
 
 from xxm.stats import poisson_fit
-from xxm.stats.gaussian import Affine, Gaussian
+from xxm.core.affine import Affine
+from xxm.stats.gaussian import Gaussian
 from xxm.stats.poisson import LinearPoisson, Poisson
 
 ATOL = 1e-5

@@ -3,7 +3,8 @@ import typing
 import jax
 import jax.numpy as jnp
 
-from xxm.stats.gaussian import Affine, Gaussian
+from xxm.core.affine import Affine
+from xxm.stats.gaussian import Gaussian
 from xxm.stats.poisson import LinearPoisson, Poisson
 
 from ..newton import NewtonSearch

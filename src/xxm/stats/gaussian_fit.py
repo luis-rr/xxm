@@ -1,7 +1,8 @@
 import jax
 import jax.numpy as jnp
 
-from xxm.stats.gaussian import Affine, Gaussian, LinearGaussian
+from xxm.core.affine import Affine
+from xxm.stats.gaussian import Gaussian, LinearGaussian
 
 EPS: float = 1e-8
 

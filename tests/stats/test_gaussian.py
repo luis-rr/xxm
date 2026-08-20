@@ -3,7 +3,8 @@ import jax.numpy as jnp
 import numpy as np
 
 from xxm.stats import gaussian_fit
-from xxm.stats.gaussian import Affine, Gaussian, LinearGaussian
+from xxm.core.affine import Affine
+from xxm.stats.gaussian import Gaussian, LinearGaussian
 
 ATOL = 1e-5
 

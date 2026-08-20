@@ -13,7 +13,8 @@ from xxm.lds.inference import (
     to_chain,
 )
 from xxm.newton import NewtonSearch
-from xxm.stats.gaussian import Affine, Gaussian, LinearGaussian
+from xxm.core.affine import Affine
+from xxm.stats.gaussian import Gaussian, LinearGaussian
 from xxm.stats.poisson import LinearPoisson
 
 

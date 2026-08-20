@@ -22,8 +22,9 @@ from xxm.slds.core import (
     SwitchingLinearGaussianDynamicsModel,
 )
 from xxm.slds.inference import inference_variational
+from xxm.core.affine import Affine
 from xxm.stats.categorical import Categorical
-from xxm.stats.gaussian import Affine, Gaussian, LinearGaussian
+from xxm.stats.gaussian import Gaussian, LinearGaussian
 
 ATOL = 1e-5
 

@@ -5,7 +5,8 @@ import numpy as np
 from jax import numpy as jnp
 
 from xxm.core.gaussian.emissions import GaussianEmissions, PoissonEmissions
-from xxm.stats.gaussian import Affine, LinearGaussian
+from xxm.core.affine import Affine
+from xxm.stats.gaussian import LinearGaussian
 from xxm.stats.poisson import LinearPoisson
 
 
@@ -129,7 +130,7 @@ def test_gaussian_fit_recovers_known_parameters():
         ),
     )
 
-    fitted = emissions.fit_params(observations, posterior)
+    fitted = emissions.fit_params(observations, posterior)  # type: ignore
 
     np.testing.assert_allclose(fitted.model.affine.coefficients, [[2.0]], atol=1e-6)
     np.testing.assert_allclose(fitted.model.affine.bias, [1.0], atol=1e-6)

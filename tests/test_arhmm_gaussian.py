@@ -4,7 +4,8 @@ import numpy as np
 
 from xxm.core.discrete.chain import DiscreteChainMarginals
 from xxm.core.discrete.emissions_ar import AREmissions, lagged_observations
-from xxm.stats.gaussian import Affine, LinearGaussian
+from xxm.core.affine import Affine
+from xxm.stats.gaussian import LinearGaussian
 
 ATOL = 1e-6
 FIT_ATOL = 2e-5

@@ -7,7 +7,8 @@ from xxm.core.gaussian.chain import (
     GaussianPairPotential,
     GaussianPotential,
 )
-from xxm.stats.gaussian import Affine, Gaussian, LinearGaussian
+from xxm.core.affine import Affine
+from xxm.stats.gaussian import Gaussian, LinearGaussian
 
 jax.config.update('jax_enable_x64', True)
 
