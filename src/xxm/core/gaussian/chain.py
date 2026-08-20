@@ -311,11 +311,18 @@ class GaussianPairPotential(typing.NamedTuple):
             ),
         )
 
-    def expected(
+    def weighted_sum(
         self,
         weights: jax.Array,  # (..., K)
     ) -> GaussianPairPotential:
-        """Average a batch of potentials using weights over the last axis."""
+        r"""Compute the weighted sum of the batched log potentials.
+
+        Returns the Gaussian potential given weights ``w[..., k]``:
+
+            sum_k w[..., k] log f_k(x_0, x_1).
+
+        The returned potential has batch shape ``weights.shape[:-1]``.
+        """
 
         if self.batch_shape != (weights.shape[-1],):
             raise ValueError(
@@ -360,7 +367,15 @@ class GaussianPairPotential(typing.NamedTuple):
         self,
         posterior: GaussianChainMarginals,
     ) -> jax.Array:
-        """Return E_q(x)[log p(x[t+1] | x[t], z[t]=k)], shape (T-1, K)."""
+        r"""Compute each log potential's expectation under the chain posterior.
+
+        Returns
+
+            E_q[log f_k(x_t, x_{t+1})]
+
+        for every transition ``t`` and batched potential ``k``, with
+        shape ``(T - 1, K)``.
+        """
 
         means = posterior.means
         second = posterior.raw_second_moments()

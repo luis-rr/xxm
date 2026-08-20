@@ -37,7 +37,7 @@ class ContinuousPotentials(typing.NamedTuple):
         state_marginals: jax.Array,
     ) -> GaussianChain:
 
-        pair_potentials = self.dynamics.expected(
+        pair_potentials = self.dynamics.weighted_sum(
             state_marginals,
         )
 
