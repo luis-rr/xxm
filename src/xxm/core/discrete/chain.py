@@ -49,45 +49,6 @@ class DiscreteChain(typing.NamedTuple):
     transition_probs: jax.Array  # (T - 1, K, K)
     state_log_potentials: jax.Array  # (T, K)
 
-    def validate(self) -> None:
-        if self.initial_probs.ndim != 1:
-            raise ValueError(
-                f'initial_probs must have shape (K,). Got shape {self.initial_probs.shape}'
-            )
-
-        if self.transition_probs.ndim != 3:
-            raise ValueError(
-                f'transition_probs must have shape (T - 1, K, K). '
-                f'Got shape {self.transition_probs.shape}'
-            )
-
-        if self.state_log_potentials.ndim != 2:
-            raise ValueError(
-                f'state_log_potentials must have shape (T, K). '
-                f'Got shape {self.state_log_potentials.shape}'
-            )
-
-        k = self.initial_probs.shape[0]
-        t = self.state_log_potentials.shape[0]
-
-        if t < 1:
-            raise ValueError('Chain must contain at least one time step')
-
-        if k < 1:
-            raise ValueError('Chain must contain at least one state')
-
-        if self.state_log_potentials.shape != (t, k):
-            raise ValueError(
-                f'state_log_potentials must have shape (T, K). '
-                f'Got shape {self.state_log_potentials.shape}'
-            )
-
-        if self.transition_probs.shape != (t - 1, k, k):
-            raise ValueError(
-                f'transition_probs must have shape (T - 1, K, K). '
-                f'Got shape {self.transition_probs.shape}'
-            )
-
     @property
     def num_states(self) -> int:
         return self.initial_probs.shape[0]
@@ -98,7 +59,6 @@ class DiscreteChain(typing.NamedTuple):
 
     def forward_backward(self) -> DiscreteChainMarginals:
         """Run full forward-backward inference for one chain."""
-        self.validate()
 
         messages = _forward_backward(self)
 
@@ -109,10 +69,13 @@ class DiscreteChain(typing.NamedTuple):
         potential: DiscretePotential,
     ) -> DiscreteChain:
         if potential.batch_shape != (self.num_time_steps,):
-            raise ValueError(...)
+            raise ValueError(f'Potential must have shape (T, K). Got shape {potential.batch_shape}')
 
         if potential.num_states != self.num_states:
-            raise ValueError(...)
+            raise ValueError(
+                f'Potential must have the same number of states as the chain. '
+                f'Got {potential.num_states}, expected {self.num_states}'
+            )
 
         return self._replace(
             state_log_potentials=(self.state_log_potentials + potential.log_values)

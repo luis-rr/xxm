@@ -78,57 +78,12 @@ class GaussianEmissions(typing.NamedTuple):
 
     def get_potential(
         self,
-        observations: jax.Array,  # (T, N)
+        observations: jax.Array,
     ) -> GaussianPotential:
         """Convert the Gaussian likelihood into a potential over latents."""
-        coefficients = self.model.affine.coefficients  # (N, D)
-        bias = self.model.affine.bias  # (N,)
-        covariance = self.model.covariance  # (N, N)
-
-        num_samples = observations.shape[0]
-        latent_dim = self.model.affine.input_dim
-
-        cholesky = jnp.linalg.cholesky(covariance)  # (N, N)
-
-        precision = jsp_linalg.cho_solve(
-            (cholesky, True),
-            jnp.eye(
-                self.model.affine.output_dim,
-                dtype=covariance.dtype,
-            ),
-        )  # (N, N)
-
-        centered = observations - bias  # (T, N)
-
-        precision_coefficients = precision @ coefficients  # (N, D)
-
-        precision_block = coefficients.T @ precision_coefficients  # (D, D)
-        precision_blocks = jnp.broadcast_to(
-            precision_block,
-            (num_samples, latent_dim, latent_dim),
-        )  # (T, D, D)
-
-        information_vectors = centered @ precision_coefficients  # (T, D)
-
-        quadratic_terms = jnp.einsum(
-            'tn,nm,tm->t',
-            centered,
-            precision,
-            centered,
-        )  # (T,)
-
-        log_det_covariance = 2.0 * jnp.sum(jnp.log(jnp.diagonal(cholesky)))  # ()
-
-        log_constant = -0.5 * (
-            quadratic_terms
-            + log_det_covariance
-            + self.model.affine.output_dim * jnp.log(2.0 * jnp.pi)
-        )  # (T,)
-
-        return GaussianPotential(
-            precision_blocks=precision_blocks,
-            information_vectors=information_vectors,
-            log_constant=log_constant,
+        return GaussianPotential.from_linear_likelihood(
+            self.model,
+            observations,
         )
 
     def sample(

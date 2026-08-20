@@ -89,24 +89,6 @@ class GaussianPotential(typing.NamedTuple):
     def variable_dim(self) -> int:
         return self.precision_blocks.shape[-1]
 
-    def validate(self) -> None:
-        if self.precision_blocks.ndim < 2:
-            raise ValueError('precision_blocks must have shape (..., N, N)')
-
-        if self.precision_blocks.shape[-2] != self.precision_blocks.shape[-1]:
-            raise ValueError('precision_blocks must have shape (..., N, N)')
-
-        if self.variable_dim < 1:
-            raise ValueError('Potential must contain at least one variable dimension')
-
-        if self.information_vectors.shape != self.batch_shape + (self.variable_dim,):
-            raise ValueError(
-                'information_vectors must have shape (..., N) matching precision_blocks'
-            )
-
-        if self.log_constant.shape != self.batch_shape:
-            raise ValueError('log_constant must have the same leading shape as precision_blocks')
-
     @classmethod
     def from_moments(
         cls,
@@ -145,6 +127,62 @@ class GaussianPotential(typing.NamedTuple):
             information_vectors=information,
             log_constant=(
                 -0.5 * quadratic - 0.5 * log_det_covariance - 0.5 * d * jnp.log(2.0 * jnp.pi)
+            ),
+        )
+
+    @classmethod
+    def from_linear_likelihood(
+        cls,
+        model: LinearGaussian,
+        observations: jax.Array,  # (T, N)
+    ) -> GaussianPotential:
+        """Construct the potential over inputs induced by a linear Gaussian likelihood."""
+        coefficients = model.affine.coefficients  # (N, D)
+        residuals = observations - model.affine.bias  # (T, N)
+
+        cholesky = jnp.linalg.cholesky(
+            model.covariance,
+        )  # (N, N)
+
+        whitened_coefficients = jsp_linalg.solve_triangular(
+            cholesky,
+            coefficients,
+            lower=True,
+        )  # (N, D)
+
+        whitened_residuals = jsp_linalg.solve_triangular(
+            cholesky,
+            residuals.T,
+            lower=True,
+        ).T  # (T, N)
+
+        precision_block = whitened_coefficients.T @ whitened_coefficients  # (D, D)
+
+        information_vectors = whitened_residuals @ whitened_coefficients  # (T, D)
+
+        quadratic_terms = jnp.sum(
+            whitened_residuals**2,
+            axis=-1,
+        )  # (T,)
+
+        log_det_covariance = _log_det_from_cholesky(
+            cholesky,
+        )  # ()
+
+        num_time_steps = observations.shape[0]
+        variable_dim = model.affine.input_dim
+
+        return cls(
+            precision_blocks=jnp.broadcast_to(
+                precision_block,
+                (num_time_steps, variable_dim, variable_dim),
+            ),
+            information_vectors=information_vectors,
+            log_constant=-0.5
+            * (
+                quadratic_terms
+                + log_det_covariance
+                + model.affine.output_dim * jnp.log(2.0 * jnp.pi)
             ),
         )
 
@@ -193,37 +231,6 @@ class GaussianPairPotential(typing.NamedTuple):
     @property
     def variable_dim(self) -> int:
         return self.left_precision.shape[-1]
-
-    def validate(self) -> None:
-        if self.left_precision.ndim < 2:
-            raise ValueError('left_precision must have shape (..., N, N)')
-
-        if self.left_precision.shape[-2] != self.left_precision.shape[-1]:
-            raise ValueError('left_precision must have shape (..., N, N)')
-
-        if self.variable_dim < 1:
-            raise ValueError('Potential must contain at least one variable dimension')
-
-        matrix_shape = self.batch_shape + (
-            self.variable_dim,
-            self.variable_dim,
-        )
-        vector_shape = self.batch_shape + (self.variable_dim,)
-
-        if self.right_precision.shape != matrix_shape:
-            raise ValueError('right_precision must have shape (..., N, N) matching left_precision')
-
-        if self.lower_precision.shape != matrix_shape:
-            raise ValueError('lower_precision must have shape (..., N, N) matching left_precision')
-
-        if self.left_information.shape != vector_shape:
-            raise ValueError('left_information must have shape (..., N) matching left_precision')
-
-        if self.right_information.shape != vector_shape:
-            raise ValueError('right_information must have shape (..., N) matching left_precision')
-
-        if self.log_constant.shape != self.batch_shape:
-            raise ValueError('log_constant must have the same leading shape as left_precision')
 
     @classmethod
     def from_linear_conditional(
@@ -457,6 +464,12 @@ class GaussianChain(typing.NamedTuple):
     ) -> GaussianChain:
         """Construct a Gaussian chain from initial and time-indexed pair potentials."""
 
+        if pair_potentials.variable_dim != initial_potential.variable_dim:
+            raise ValueError(
+                'initial_potential and pair_potentials must have the same variable dimension. '
+                f'Got {initial_potential.variable_dim} and {pair_potentials.variable_dim}'
+            )
+
         num_time_steps = pair_potentials.left_precision.shape[0] + 1
         state_dim = initial_potential.precision_blocks.shape[0]
         dtype = initial_potential.precision_blocks.dtype
@@ -494,44 +507,11 @@ class GaussianChain(typing.NamedTuple):
     def variable_dim(self) -> int:
         return self.diagonal_precision_blocks.shape[1]
 
-    def validate(self) -> None:
-        if self.diagonal_precision_blocks.ndim != 3:
-            raise ValueError('diagonal_precision_blocks must have shape (T, N, N)')
-
-        if self.lower_precision_blocks.ndim != 3:
-            raise ValueError('lower_precision_blocks must have shape (T - 1, N, N)')
-
-        if self.information_vectors.ndim != 2:
-            raise ValueError('information_vectors must have shape (T, N)')
-
-        if self.log_constant.ndim != 0:
-            raise ValueError('log_constant must be scalar')
-
-        t = self.num_time_steps
-        d = self.variable_dim
-
-        if self.diagonal_precision_blocks.shape[2] != d:
-            raise ValueError('diagonal_precision_blocks must have shape (T, N, N)')
-
-        if t < 1:
-            raise ValueError('Chain must contain at least one time step')
-
-        if d < 1:
-            raise ValueError('Chain must contain at least one variable dimension')
-
-        if self.information_vectors.shape != (t, d):
-            raise ValueError('information_vectors must have shape (T, N)')
-
-        if self.lower_precision_blocks.shape != (t - 1, d, d):
-            raise ValueError('lower_precision_blocks must have shape (T - 1, N, N)')
-
     def add_local_potential(
         self,
         potential: GaussianPotential,
     ) -> GaussianChain:
         """Add one unary Gaussian potential at each time step."""
-        self.validate()
-        potential.validate()
 
         expected_batch_shape = (self.num_time_steps,)
 
@@ -560,7 +540,6 @@ class GaussianChain(typing.NamedTuple):
         latent: jax.Array,
     ) -> jax.Array:
         """Compute log f(x) for a latent trajectory."""
-        self.validate()
 
         expected_shape = (self.num_time_steps, self.variable_dim)
 
@@ -591,7 +570,6 @@ class GaussianChain(typing.NamedTuple):
         This helper is intentionally dense and should not be used by the main
         Gaussian-chain inference path.
         """
-        self.validate()
 
         diagonal_blocks = self.diagonal_precision_blocks
         lower_blocks = self.lower_precision_blocks
@@ -678,7 +656,6 @@ class GaussianChain(typing.NamedTuple):
         self,
     ) -> GaussianChainMarginals:
         """Compute moments and log normalizer for a Gaussian chain."""
-        self.validate()
 
         factorization = self._forward_elimination()
 
