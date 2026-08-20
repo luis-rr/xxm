@@ -134,22 +134,6 @@ class DiscreteChainMarginals(typing.NamedTuple):
     pair_marginals: jax.Array  # (T - 1, K, K)
     log_normalizer: jax.Array  # scalar
 
-    def weighted_means(self, data: jax.Array) -> jax.Array:
-        r"""Compute the posterior-weighted mean of ``data`` for each state \(k\).
-
-        \[
-        \mu_k =
-        \frac{\sum_t p(z_t = k)\, x_t}
-            {\sum_t p(z_t = k)}.
-        \]
-
-        ``data`` must have shape ``(T, N)``.
-        """
-        state_counts = self.state_marginals.sum(axis=0)
-        state_counts = jnp.where(state_counts > 0, state_counts, 1)
-
-        return self.state_marginals.T @ data / state_counts[:, None]
-
 
 class _DiscreteChainMessages(typing.NamedTuple):
     r"""Normalized messages and per-step log normalizers for one chain."""

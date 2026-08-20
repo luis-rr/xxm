@@ -5,7 +5,7 @@ import jax.numpy as jnp
 
 from xxm.core.discrete.chain import DiscretePotential
 from xxm.hmm.core import Posterior
-from xxm.stats import gaussian_fit
+from xxm.stats import gaussian_fit, poisson_fit
 from xxm.stats.gaussian import Gaussian
 from xxm.stats.poisson import Poisson
 
@@ -57,9 +57,12 @@ class PoissonEmissions(typing.NamedTuple):
         )
 
     def fit_params(self, observations: jax.Array, posterior: Posterior) -> 'PoissonEmissions':
-        rates = posterior.weighted_means(observations)
-        rates = jnp.maximum(rates, 1e-8)
-        return self._replace(model=Poisson(log_rates=jnp.log(rates)))
+        return self._replace(
+            model=poisson_fit.poisson_from_samples_weighted(
+                observations=observations,
+                weights=posterior.state_marginals,
+            ),
+        )
 
     def permute(
         self,
