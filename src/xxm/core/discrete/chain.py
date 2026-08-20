@@ -143,19 +143,10 @@ class DiscreteChainMarginals(typing.NamedTuple):
             {\sum_t p(z_t = k)}.
         \]
 
-        ``data`` must have shape ``(T, D)``.
+        ``data`` must have shape ``(T, N)``.
         """
-        if data.ndim != 2:
-            raise ValueError(f'data must have shape (T, D). Got shape {data.shape}')
-
-        if data.shape[0] != self.state_marginals.shape[0]:
-            raise ValueError(
-                'data and state_marginals must have the same number of '
-                f'time steps. Got {data.shape[0]} and '
-                f'{self.state_marginals.shape[0]}'
-            )
-
         state_counts = self.state_marginals.sum(axis=0)
+        state_counts = jnp.where(state_counts > 0, state_counts, 1)
 
         return self.state_marginals.T @ data / state_counts[:, None]
 
