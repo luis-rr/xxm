@@ -97,7 +97,7 @@ def test_fit_weighted_matches_weighted_sample_means():
         ]
     )
 
-    fit = poisson_fit.poisson_from_pairs_weighted(observations, weights)
+    fit = poisson_fit.poisson_from_samples_weighted(observations, weights)
 
     np.testing.assert_allclose(
         fit.log_rates,
@@ -107,7 +107,7 @@ def test_fit_weighted_matches_weighted_sample_means():
 
 
 def test_fit_weighted_keeps_zero_rates_finite():
-    fit = poisson_fit.poisson_from_pairs_weighted(
+    fit = poisson_fit.poisson_from_samples_weighted(
         observations=jnp.zeros((2, 1)),
         weights=jnp.ones((2, 1)),
     )
@@ -134,10 +134,9 @@ def test_fit_linear_from_marginals_matches_known_ridge_solution():
     # choosing this ridge gives the exact optimum below.
     ridge = 3.0 / (13.0 * np.log(1.5))
 
-    fit = poisson_fit.linear_from_marginals(
-        observations=jnp.array([[1.0], [3.0]]),
-        input_means=jnp.array([[-1.0], [1.0]]),
-        input_covariances=None,
+    fit = poisson_fit.linear_from_pairs(
+        outputs=jnp.array([[1.0], [3.0]]),
+        inputs=jnp.array([[-1.0], [1.0]]),
         initial_affine=Affine(coefficients=jnp.zeros((1, 1)), bias=jnp.zeros(1)),
         ridge=ridge,
     )
@@ -215,11 +214,10 @@ def test_public_routines_are_jittable():
             observations=observations,
             inputs=inputs,
         )
-        fitted = poisson_fit.poisson_from_pairs_weighted(observations, weights)
+        fitted = poisson_fit.poisson_from_samples_weighted(observations, weights)
         marginal_fit = poisson_fit.linear_from_marginals(
-            observations=observations,
-            input_means=means,
-            input_covariances=covariances,
+            inputs=Gaussian(mean=means, covariance=covariances),
+            outputs=observations,
             initial_affine=Affine(coefficients=coefficients, bias=bias),
             max_iter=2,
             ridge=0.1,

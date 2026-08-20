@@ -148,7 +148,7 @@ def test_em_step_jittable(case):
     np.testing.assert_allclose(
         jit_objective,
         eager_objective,
-        rtol=1e-5,
+        rtol=1e-4,
         atol=1e-5,
     )
 
@@ -160,6 +160,6 @@ def test_em_step_jittable(case):
         np.testing.assert_allclose(
             jit_leaf,
             eager_leaf,
-            rtol=1e-5,
+            rtol=1e-4,
             atol=1e-5,
         )

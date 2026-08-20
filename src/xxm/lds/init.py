@@ -52,16 +52,10 @@ def poisson_emissions_from_latents(
         ),
         bias=jnp.log(mean_rates),
     )
-    # Known latents have zero posterior uncertainty.
-    covariances = jnp.zeros(
-        (latents.shape[0], latent_dim, latent_dim),
-        dtype=latents.dtype,
-    )
 
-    model = poisson_fit.linear_from_marginals(
-        observations=observations,
-        input_means=latents,
-        input_covariances=covariances,
+    model = poisson_fit.linear_from_pairs(
+        outputs=observations,
+        inputs=latents,
         initial_affine=initial_affine,
     )
 

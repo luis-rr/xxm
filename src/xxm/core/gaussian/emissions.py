@@ -254,9 +254,8 @@ class PoissonEmissions(typing.NamedTuple):
     ) -> typing.Self:
         """Fit the emission parameters from Gaussian latent marginals."""
         model = poisson_fit.linear_from_marginals(
-            observations=observations,
-            input_means=posterior.means,
-            input_covariances=posterior.covariances,
+            outputs=observations,
+            inputs=Gaussian(mean=posterior.means, covariance=posterior.covariances),
             initial_affine=self.model.affine,
         )
 

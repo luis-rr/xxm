@@ -27,7 +27,7 @@ class GaussianEmissions(typing.NamedTuple):
         observations: jax.Array,
         posterior: Posterior,
     ) -> typing.Self:
-        gaussian = gaussian_fit.gaussian_from_pairs_weighted(
+        gaussian = gaussian_fit.gaussian_from_samples_weighted(
             observations,
             posterior.state_marginals,
         )

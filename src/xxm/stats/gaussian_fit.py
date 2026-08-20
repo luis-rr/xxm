@@ -6,7 +6,7 @@ from xxm.stats.gaussian import Affine, Gaussian, LinearGaussian
 EPS: float = 1e-8
 
 
-def gaussian_from_pairs(
+def gaussian_from_samples(
     observations: jax.Array,  # (T, N)
 ) -> Gaussian:
     """Fit a Gaussian from samples along the first axis."""
@@ -24,7 +24,7 @@ def gaussian_from_pairs(
     return Gaussian(mean=mean, covariance=covariance)
 
 
-def gaussian_from_pairs_weighted(
+def gaussian_from_samples_weighted(
     observations: jax.Array,  # (T, N)
     weights: jax.Array,  # (T, ...)
 ) -> Gaussian:
@@ -51,7 +51,7 @@ def gaussian_from_pairs_weighted(
     return Gaussian(mean=mean, covariance=covariance)
 
 
-def gaussian_from_pairs_grouped(
+def gaussian_from_samples_grouped(
     observations: jax.Array,  # (T, N)
     assignments: jax.Array,  # (T,)
     num_groups: int,
@@ -63,7 +63,7 @@ def gaussian_from_pairs_grouped(
         dtype=observations.dtype,
     )  # (T, K)
 
-    return gaussian_from_pairs_weighted(
+    return gaussian_from_samples_weighted(
         observations=observations,
         weights=weights,
     )

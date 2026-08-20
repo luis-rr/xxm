@@ -8,7 +8,6 @@ from xxm.stats.poisson import LinearPoisson, Poisson
 
 from ..newton import NewtonSearch
 
-
 EPS: float = 1e-8
 
 
@@ -220,14 +219,14 @@ class _NewtonSearchModel(typing.NamedTuple):
         )
 
 
-def poisson_from_pairs(
+def poisson_from_samples(
     observations: jax.Array,  # (T, N)
 ) -> Poisson:
     rates = jnp.mean(observations, axis=0)
     return Poisson(log_rates=jnp.log(jnp.maximum(rates, EPS)))
 
 
-def poisson_from_pairs_weighted(
+def poisson_from_samples_weighted(
     observations: jax.Array,  # (T, N)
     weights: jax.Array,  # (T, ...)
 ) -> Poisson:
@@ -248,7 +247,7 @@ def poisson_from_pairs_weighted(
     )
 
 
-def poisson_from_pairs_grouped(
+def poisson_from_samples_grouped(
     observations: jax.Array,  # (T, N)
     assignments: jax.Array,  # (T,)
     num_groups: int,
@@ -260,7 +259,7 @@ def poisson_from_pairs_grouped(
         dtype=jnp.result_type(observations, jnp.float32),
     )  # (T, K)
 
-    return poisson_from_pairs_weighted(
+    return poisson_from_samples_weighted(
         observations=observations,
         weights=weights,
     )
@@ -279,14 +278,14 @@ def _initial_affine(
     )
 
     if weights is None:
-        bias = poisson_from_pairs(
+        bias = poisson_from_samples(
             outputs,
         ).log_rates  # (O,)
 
         batch_shape = ()
 
     else:
-        bias = poisson_from_pairs_weighted(
+        bias = poisson_from_samples_weighted(
             observations=outputs,
             weights=weights,
         ).log_rates  # (..., O)
@@ -308,25 +307,27 @@ def _initial_affine(
     )
 
 
-def linear_from_marginals(
-    observations: jax.Array,  # (T, O)
-    input_means: jax.Array,  # (T, I)
-    input_covariances: jax.Array | None,  # (T, I, I)
-    initial_affine: Affine | None = None,
-    sample_weights: jax.Array | None = None,  # (T,)
-    max_iter: int = 20,
-    tol: float = 1e-6,
-    max_line_search_iters: int = 20,
-    ridge: float = 0.0,
+def _linear_from_moments(
+    outputs: jax.Array,
+    input_means: jax.Array,
+    input_covariances: jax.Array | None,
+    sample_weights: jax.Array | None,
+    initial_affine: Affine | None,
+    max_iter: int,
+    tol: float,
+    max_line_search_iters: int,
+    ridge: float,
 ) -> LinearPoisson:
-    """Fit from Gaussian input marginals."""
+    """
+    Fit from Gaussian input moments.
+    """
     dtype = jnp.result_type(
-        observations,
+        outputs,
         input_means,
         jnp.float32,
     )
 
-    observations = observations.astype(dtype)
+    outputs = outputs.astype(dtype)
     input_means = input_means.astype(dtype)
 
     if input_covariances is not None:
@@ -334,7 +335,7 @@ def linear_from_marginals(
 
     if sample_weights is None:
         sample_weights = jnp.ones(
-            observations.shape[0],
+            outputs.shape[0],
             dtype=dtype,
         )  # (T,)
     else:
@@ -343,7 +344,7 @@ def linear_from_marginals(
     if initial_affine is None:
         initial_affine = _initial_affine(
             inputs=input_means,
-            outputs=observations,
+            outputs=outputs,
             weights=sample_weights,
         )
 
@@ -361,7 +362,7 @@ def linear_from_marginals(
     centered_affine = initial_affine.shift(center)
 
     model = _NewtonSearchModel(
-        observations=observations,
+        observations=outputs,
         input_means=centered_means,
         input_covariances=input_covariances,
         sample_weights=sample_weights,
@@ -384,6 +385,30 @@ def linear_from_marginals(
     )
 
 
+def linear_from_marginals(
+    inputs: Gaussian,  # T-batched
+    outputs: jax.Array,  # (T, O)
+    sample_weights: jax.Array | None = None,  # (T,)
+    initial_affine: Affine | None = None,
+    max_iter: int = 20,
+    tol: float = 1e-6,
+    max_line_search_iters: int = 20,
+    ridge: float = 0.0,
+) -> LinearPoisson:
+    """Fit from Gaussian input marginals."""
+    return _linear_from_moments(
+        outputs=outputs,
+        input_means=inputs.mean,
+        input_covariances=inputs.covariance,
+        sample_weights=sample_weights,
+        initial_affine=initial_affine,
+        max_iter=max_iter,
+        tol=tol,
+        max_line_search_iters=max_line_search_iters,
+        ridge=ridge,
+    )
+
+
 def linear_from_pairs(
     inputs: jax.Array,  # (T, I)
     outputs: jax.Array,  # (T, O)
@@ -393,28 +418,12 @@ def linear_from_pairs(
     max_line_search_iters: int = 20,
     ridge: float = 0.0,
 ) -> LinearPoisson:
-    """Fit a model from paired samples."""
-    dtype = jnp.result_type(
-        inputs,
-        outputs,
-        jnp.float32,
-    )
-
-    inputs = inputs.astype(dtype)
-    outputs = outputs.astype(dtype)
-
-    if initial_affine is None:
-        initial_affine = _initial_affine(
-            inputs=inputs,
-            outputs=outputs,
-        )
-
-    initial_affine = initial_affine.astype(dtype)
-
-    return linear_from_marginals(
-        observations=outputs,
+    """Fit from paired input-output samples."""
+    return _linear_from_moments(
+        outputs=outputs,
         input_means=inputs,
         input_covariances=None,
+        sample_weights=None,
         initial_affine=initial_affine,
         max_iter=max_iter,
         tol=tol,
@@ -434,41 +443,28 @@ def linear_from_pairs_weighted(
     ridge: float = 0.0,
 ) -> LinearPoisson:
     """Fit one weighted model for each weight column."""
-    dtype = jnp.result_type(
-        inputs,
-        outputs,
-        weights,
-        jnp.float32,
-    )
-
-    inputs = inputs.astype(dtype)
-    outputs = outputs.astype(dtype)
-    weights = weights.astype(dtype)
-
-    if initial_affine is None:
-        initial_affine = _initial_affine(
-            inputs=inputs,
-            outputs=outputs,
-            weights=weights,
-        )
-
-    initial_affine = initial_affine.astype(dtype)
 
     def fit_state(
         state_weights: jax.Array,  # (T,)
-        state_affine: Affine,
+        state_affine: Affine | None,
     ) -> LinearPoisson:
-        return linear_from_marginals(
-            observations=outputs,
+        return _linear_from_moments(
+            outputs=outputs,
             input_means=inputs,
             input_covariances=None,
-            initial_affine=state_affine,
             sample_weights=state_weights,
+            initial_affine=state_affine,
             max_iter=max_iter,
             tol=tol,
             max_line_search_iters=max_line_search_iters,
             ridge=ridge,
         )
+
+    if initial_affine is None:
+        return jax.vmap(
+            lambda state_weights: fit_state(state_weights, None),
+            in_axes=1,
+        )(weights)
 
     return jax.vmap(
         fit_state,

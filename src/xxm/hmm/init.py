@@ -118,7 +118,7 @@ def _initialize_gaussian_emissions(
         key,
     )  # (T,)
 
-    gaussian = gaussian_fit.gaussian_from_pairs_grouped(
+    gaussian = gaussian_fit.gaussian_from_samples_grouped(
         observations=observations,
         assignments=assignments,
         num_groups=num_states,
@@ -247,7 +247,7 @@ def _initialize_poisson_emissions(
         key,
     )  # (T,)
 
-    poisson = poisson_fit.poisson_from_pairs_grouped(
+    poisson = poisson_fit.poisson_from_samples_grouped(
         observations=observations,
         assignments=assignments,
         num_groups=num_states,
