@@ -10,7 +10,7 @@ from xxm.stats import gaussian_fit, poisson_fit
 from xxm.stats.gaussian import Gaussian, LinearGaussian
 from xxm.stats.poisson import LinearPoisson, Poisson
 
-from .chain import GaussianPotential
+from .chain import GaussianPotential, GaussianChainMarginals
 
 
 class Emissions(typing.Protocol):
@@ -142,7 +142,7 @@ class GaussianEmissions(typing.NamedTuple):
     def fit_params(
         self,
         observations: jax.Array,  # (T, N)
-        posterior: typing.Any,
+        posterior: GaussianChainMarginals,  # (T, D)
     ) -> typing.Self:
         """Fit the emission parameters from Gaussian latent marginals."""
         means = posterior.means  # (T, D)
@@ -250,7 +250,7 @@ class PoissonEmissions(typing.NamedTuple):
     def fit_params(
         self,
         observations: jax.Array,  # (T, N)
-        posterior: typing.Any,
+        posterior: GaussianChainMarginals,  # (T, D)
     ) -> typing.Self:
         """Fit the emission parameters from Gaussian latent marginals."""
         model = poisson_fit.linear_from_marginals(
