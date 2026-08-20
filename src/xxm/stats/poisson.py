@@ -51,31 +51,31 @@ class Poisson(typing.NamedTuple):
 
     def log_prob_each(
         self,
-        observations: jax.Array,  # (..., N)
+        values: jax.Array,  # (..., N)
     ) -> jax.Array:  # (..., N)
         """Evaluate the log probability separately for each output dimension."""
-        return observations * self.log_rates - self.rates - jsp.special.gammaln(observations + 1)
+        return values * self.log_rates - self.rates - jsp.special.gammaln(values + 1)
 
     def log_prob(
         self,
-        observations: jax.Array,  # (..., N)
+        values: jax.Array,  # (..., N)
     ) -> jax.Array:  # (...)
         """Evaluate log probabilities with aligned/broadcast-compatible batch dimensions."""
         return jnp.sum(
-            self.log_prob_each(observations),
+            self.log_prob_each(values),
             axis=-1,
         )
 
     def log_prob_broadcast(
         self,
-        observations: jax.Array,  # (..., N)
+        values: jax.Array,  # (..., N)
     ) -> jax.Array:  # (..., *batch_shape)
         """Evaluate every observation against every batched distribution."""
-        observations = observations.reshape(
-            observations.shape[:-1] + (1,) * len(self.batch_shape) + (self.variable_dim,)
+        values = values.reshape(
+            values.shape[:-1] + (1,) * len(self.batch_shape) + (self.variable_dim,)
         )  # (..., 1, ..., 1, N)
 
-        return self.log_prob(observations)
+        return self.log_prob(values)
 
 
 class LinearPoisson(typing.NamedTuple):
