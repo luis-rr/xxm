@@ -5,7 +5,6 @@ import itertools
 import jax
 import jax.numpy as jnp
 import numpy as np
-import pytest
 
 import xxm.core.discrete.chain
 

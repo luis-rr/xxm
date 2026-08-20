@@ -1,7 +1,6 @@
 import typing
 
 import jax
-import jax.numpy as jnp
 
 from xxm.core.discrete.chain import DiscretePotential
 from xxm.hmm.core import Posterior

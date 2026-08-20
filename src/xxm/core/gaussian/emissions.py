@@ -10,7 +10,7 @@ from xxm.stats import gaussian_fit, poisson_fit
 from xxm.stats.gaussian import Gaussian, LinearGaussian
 from xxm.stats.poisson import LinearPoisson, Poisson
 
-from .chain import GaussianPotential, GaussianChainMarginals
+from .chain import GaussianChainMarginals, GaussianPotential
 
 
 class Emissions(typing.Protocol):

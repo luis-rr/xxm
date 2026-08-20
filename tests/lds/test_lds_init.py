@@ -1,5 +1,4 @@
 import jax
-import pytest
 from jax import numpy as jnp
 
 from xxm.lds.init import init_pca_gaussian, init_pca_gaussian_many

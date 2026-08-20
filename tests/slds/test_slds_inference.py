@@ -3,7 +3,6 @@ import typing
 import jax
 import jax.numpy as jnp
 import numpy as np
-import pytest
 
 from xxm.core.discrete.chain import DiscreteChainMarginals
 from xxm.core.gaussian.chain import (
