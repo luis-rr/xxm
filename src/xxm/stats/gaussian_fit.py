@@ -3,6 +3,8 @@ import jax.numpy as jnp
 
 from xxm.stats.gaussian import Affine, Gaussian, LinearGaussian
 
+EPS: float = 1e-8
+
 
 def gaussian_from_pairs(
     observations: jax.Array,  # (T, N)
@@ -25,10 +27,10 @@ def gaussian_from_pairs(
 def gaussian_from_pairs_weighted(
     observations: jax.Array,  # (T, N)
     weights: jax.Array,  # (T, ...)
-    eps: float = 1e-8,
 ) -> Gaussian:
     """Fit one weighted Gaussian for each batch entry of ``weights``."""
-    counts = jnp.maximum(jnp.sum(weights, axis=0), eps)
+    total = jnp.sum(weights, axis=0)
+    counts = jnp.where(total > 0, total, EPS)
     normalized = weights / counts[None, ...]
 
     mean = jnp.einsum(
@@ -143,11 +145,11 @@ def linear_from_pairs_weighted(
     inputs: jax.Array,  # (T, I)
     outputs: jax.Array,  # (T, O)
     weights: jax.Array,  # (T, ...)
-    eps: float = 1e-8,
     ridge: float = 0.0,
 ) -> 'LinearGaussian':
     """Fit one weighted model for each batch entry of ``weights``."""
-    counts = jnp.maximum(jnp.sum(weights, axis=0), eps)
+    total = jnp.sum(weights, axis=0)
+    counts = jnp.where(total > 0, total, EPS)
     normalized = weights / counts[None, ...]
 
     return linear_from_moments(

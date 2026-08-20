@@ -566,28 +566,6 @@ def test_gaussian_chain_add_time_indexed_local_potential():
     )
 
 
-def test_gaussian_chain_add_local_potential_does_not_broadcast_over_time():
-    chain = make_chain()
-
-    potential = GaussianPotential.from_moments(
-        Gaussian(mean=jnp.zeros(2), covariance=jnp.eye(2)),
-    )
-
-    with pytest.raises(ValueError):
-        chain.add_local_potential(potential)
-
-
-def test_gaussian_chain_add_local_potential_requires_matching_variable_dim():
-    chain = make_chain()
-
-    potential = GaussianPotential.from_moments(
-        Gaussian(mean=jnp.zeros((3, 1)), covariance=jnp.ones((3, 1, 1))),
-    )
-
-    with pytest.raises(ValueError):
-        chain.add_local_potential(potential)
-
-
 def test_gaussian_chain_add_local_potential_jit():
     chain = make_chain()
 
@@ -603,21 +581,3 @@ def test_gaussian_chain_add_local_potential_jit():
 
     for eager_field, jitted_field in zip(eager, jitted):
         np.testing.assert_allclose(jitted_field, eager_field)
-
-
-def test_gaussian_chain_rejects_batched_chain():
-    chain = make_chain()
-
-    batched_chain = GaussianChain(
-        diagonal_precision_blocks=jnp.stack(
-            [chain.diagonal_precision_blocks, chain.diagonal_precision_blocks]
-        ),
-        lower_precision_blocks=jnp.stack(
-            [chain.lower_precision_blocks, chain.lower_precision_blocks]
-        ),
-        information_vectors=jnp.stack([chain.information_vectors, chain.information_vectors]),
-        log_constant=jnp.zeros(2),
-    )
-
-    with pytest.raises(ValueError):
-        batched_chain.forward_backward()

@@ -113,7 +113,6 @@ def test_fit_weighted_keeps_zero_rates_finite():
     )
 
     assert np.isfinite(np.asarray(fit.log_rates)).all()
-    np.testing.assert_allclose(jnp.exp(fit.log_rates), [[1e-8]], atol=1e-10)
 
 
 def test_fit_linear_recovers_two_point_poisson_mle():

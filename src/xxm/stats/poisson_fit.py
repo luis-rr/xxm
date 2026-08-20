@@ -9,6 +9,9 @@ from xxm.stats.poisson import LinearPoisson, Poisson
 from ..newton import NewtonSearch
 
 
+EPS: float = 1e-8
+
+
 class _NewtonSearchParams(typing.NamedTuple):
     """Poisson regression parameters, with one independent block per output."""
 
@@ -219,19 +222,18 @@ class _NewtonSearchModel(typing.NamedTuple):
 
 def poisson_from_pairs(
     observations: jax.Array,  # (T, N)
-    eps: float = 1e-8,
 ) -> Poisson:
     rates = jnp.mean(observations, axis=0)
-    return Poisson(log_rates=jnp.log(jnp.maximum(rates, eps)))
+    return Poisson(log_rates=jnp.log(jnp.maximum(rates, EPS)))
 
 
 def poisson_from_pairs_weighted(
     observations: jax.Array,  # (T, N)
     weights: jax.Array,  # (T, ...)
-    eps: float = 1e-8,
 ) -> Poisson:
     """Fit one weighted Poisson model per batch entry of ``weights``."""
-    counts = jnp.maximum(jnp.sum(weights, axis=0), eps)
+    total = jnp.sum(weights, axis=0)
+    counts = jnp.where(total > 0, total, EPS)
     rates = (
         jnp.einsum(
             't...,tn->...n',
@@ -242,7 +244,7 @@ def poisson_from_pairs_weighted(
     )
 
     return Poisson(
-        log_rates=jnp.log(jnp.maximum(rates, eps)),
+        log_rates=jnp.log(jnp.maximum(rates, EPS)),
     )
 
 

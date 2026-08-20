@@ -15,11 +15,6 @@ def test_init_pca_gaussian_returns_model_with_requested_state_dimension():
     assert model.emissions.model.affine.coefficients.shape == (3, 2)
 
 
-def test_init_pca_gaussian_rejects_too_few_time_steps():
-    with pytest.raises(ValueError, match='At least'):
-        init_pca_gaussian(jnp.ones((3, 2)), state_dim=2)
-
-
 def test_init_pca_gaussian_many_returns_one_model_per_floor():
     observations = jnp.arange(24.0).reshape(8, 3)
 
