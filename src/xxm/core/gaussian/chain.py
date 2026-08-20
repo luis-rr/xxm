@@ -356,7 +356,7 @@ class GaussianPairPotential(typing.NamedTuple):
             ),
         )
 
-    def expected_log_likelihoods(
+    def expected_log_potentials(
         self,
         posterior: GaussianChainMarginals,
     ) -> jax.Array:

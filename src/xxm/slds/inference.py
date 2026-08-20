@@ -67,7 +67,7 @@ class ContinuousPotentials(typing.NamedTuple):
         self,
         posterior: GaussianChainMarginals,
     ) -> jax.Array:
-        return self.dynamics.expected_log_likelihoods(posterior)
+        return self.dynamics.expected_log_potentials(posterior)
 
 
 class DiscretePotentials(typing.NamedTuple):
