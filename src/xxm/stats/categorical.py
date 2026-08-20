@@ -82,15 +82,15 @@ class Categorical(typing.NamedTuple):
     def from_counts(
         cls,
         counts: jax.Array,  # (..., K)
-        eps: float = 1e-8,
     ) -> 'Categorical':
         """Construct a categorical distribution from category counts."""
-        total = jnp.sum(
-            counts,
-            axis=-1,
-            keepdims=True,
-        )
+        total = counts.sum(axis=-1, keepdims=True)
+        valid = total > 0
 
-        return cls(
-            probs=counts / jnp.maximum(total, eps),
-        )
+        # Handle zero counts with the uniform distribution.
+        valid_total = jnp.where(valid, total, counts.shape[-1])
+        valid_counts = jnp.where(valid, counts, 1)
+
+        probs = valid_counts / valid_total
+
+        return cls(probs=probs)
