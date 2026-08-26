@@ -13,7 +13,7 @@ from xxm.core.emissions.discrete_ar import (
     AREmissions,
     lagged_observations,
 )
-from xxm.core.models.discrete import CategoricalInitial, CategoricalTransition
+from xxm.core.models.discrete import CategoricalInitial, CategoricalTransitions
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import poisson as poisson_fit
 from xxm.hmm.model import Model
@@ -105,7 +105,7 @@ def _init(
 
     return Model(
         initial=CategoricalInitial(Categorical(probs=initial_probs)),
-        transitions=CategoricalTransition(Categorical(probs=transition_probs)),
+        transitions=CategoricalTransitions(Categorical(probs=transition_probs)),
         emissions=emissions,
     )
 

@@ -16,7 +16,7 @@ from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.emissions.continuous import GaussianEmissions
 from xxm.core.models.discrete import CategoricalInitial
 from xxm.core.models.gaussian import GaussianInitial
-from xxm.hmm.model import CategoricalTransition
+from xxm.hmm.model import CategoricalTransitions
 from xxm.slds.inference import infer_variational
 from xxm.slds.model import (
     GaussianLinearSwitchingDynamics,
@@ -127,7 +127,7 @@ def _single_state_model() -> Model:
         state_initial=CategoricalInitial(
             Categorical(probs=jnp.array([1.0])),
         ),
-        transitions=CategoricalTransition(
+        transitions=CategoricalTransitions(
             Categorical(probs=jnp.array([[1.0]])),
         ),
         latent_initial=GaussianInitial(
@@ -150,7 +150,7 @@ def _two_state_model() -> Model:
         state_initial=CategoricalInitial(
             Categorical(probs=jnp.array([0.7, 0.3])),
         ),
-        transitions=CategoricalTransition(
+        transitions=CategoricalTransitions(
             Categorical(
                 jnp.array(
                     [

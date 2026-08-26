@@ -26,7 +26,7 @@ class CategoricalInitial(typing.NamedTuple):
         return self._replace(model=Categorical.from_counts(posterior.state_probs[0]))
 
 
-class CategoricalTransition(typing.NamedTuple):
+class CategoricalTransitions(typing.NamedTuple):
     model: Categorical  # K-batched
 
     @property
@@ -41,7 +41,7 @@ class CategoricalTransition(typing.NamedTuple):
         """Sample the next state conditional on the previous state."""
         return self.conditional(previous).sample(key)
 
-    def permute(self, permutation: jax.Array) -> 'CategoricalTransition':
+    def permute(self, permutation: jax.Array) -> 'CategoricalTransitions':
         return self._replace(model=self.model.select(permutation).permute(permutation))
 
     def fit_params(self, posterior: DiscretePosterior) -> typing.Self:

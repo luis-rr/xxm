@@ -7,7 +7,7 @@ from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
 from xxm.core.emissions.discrete import GaussianEmissions, PoissonEmissions
-from xxm.core.models.discrete import CategoricalInitial, CategoricalTransition
+from xxm.core.models.discrete import CategoricalInitial, CategoricalTransitions
 from xxm.hmm.learning import em_step
 from xxm.hmm.model import Model
 
@@ -81,7 +81,7 @@ def test_m_step_transition_probs():
         pair_marginals,
     )
 
-    transitions = CategoricalTransition(Categorical(probs=jnp.array([[0.5, 0.5], [0.5, 0.5]])))
+    transitions = CategoricalTransitions(Categorical(probs=jnp.array([[0.5, 0.5], [0.5, 0.5]])))
 
     result = transitions.fit_params(posterior)
 
@@ -266,7 +266,7 @@ def test_gaussian_m_step():
 def test_em_step_is_jit_compatible():
     model = Model(
         initial=CategoricalInitial(Categorical(probs=jnp.array([0.5, 0.5]))),
-        transitions=CategoricalTransition(
+        transitions=CategoricalTransitions(
             Categorical(
                 probs=jnp.array(
                     [

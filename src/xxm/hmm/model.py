@@ -9,7 +9,7 @@ import jax.numpy as jnp
 
 from xxm.core.chains.discrete import DiscreteChainMarginals as Posterior
 from xxm.core.emissions.discrete import Emissions
-from xxm.core.models.discrete import CategoricalInitial, CategoricalTransition
+from xxm.core.models.discrete import CategoricalInitial, CategoricalTransitions
 
 EmissionsT = typing.TypeVar('EmissionsT', bound=Emissions)
 
@@ -24,7 +24,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     """
 
     initial: CategoricalInitial
-    transitions: CategoricalTransition
+    transitions: CategoricalTransitions
     emissions: EmissionsT
 
     @property
