@@ -78,10 +78,10 @@ def test_sample_weights_ignore_zero_weight_samples():
     observations = jnp.array([[2.0], [100.0]])
     means = jnp.zeros((2, 1))
     linear_model = LinearPoisson(affine=Affine(coefficients=jnp.zeros((1, 1)), bias=jnp.zeros(1)))
-    sample_weights = jnp.array([1.0, 0.0])
+    weights = jnp.array([1.0, 0.0])
 
     log_probs = linear_model.conditional(means).log_prob_each(observations)
-    actual = jnp.sum(sample_weights[:, None] * log_probs)
+    actual = jnp.sum(weights[:, None] * log_probs)
 
     expected = _poisson_log_prob(2, 1.0)
     np.testing.assert_allclose(actual, expected, atol=ATOL)

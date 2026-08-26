@@ -67,7 +67,7 @@ class _NewtonSearchModel(typing.NamedTuple):
     values: jax.Array  # (T, O)
     input_means: jax.Array  # (T, I)
     input_covariances: jax.Array | None  # (T, I, I)
-    sample_weights: jax.Array  # (T,)
+    weights: jax.Array  # (T,)
     ridge: float
 
     def _expected_rates(self, params: _NewtonSearchParams) -> jax.Array:
@@ -100,11 +100,11 @@ class _NewtonSearchModel(typing.NamedTuple):
             )
 
         log_likelihood = jnp.sum(
-            self.sample_weights[:, None] * log_probs,
+            self.weights[:, None] * log_probs,
             axis=0,
         )
 
-        weight_sum = jnp.sum(self.sample_weights)
+        weight_sum = jnp.sum(self.weights)
         penalty = 0.5 * self.ridge * weight_sum * jnp.sum(params.affine.coefficients**2, axis=-1)
 
         return log_likelihood - penalty
@@ -116,8 +116,8 @@ class _NewtonSearchModel(typing.NamedTuple):
         """Compute the Newton direction independently for all outputs."""
         expected_rates = self._expected_rates(params)
 
-        weighted_observations = self.sample_weights[:, None] * self.values
-        weighted_rates = self.sample_weights[:, None] * expected_rates
+        weighted_observations = self.weights[:, None] * self.values
+        weighted_rates = self.weights[:, None] * expected_rates
 
         gradient_bias = jnp.sum(
             weighted_observations - weighted_rates,
@@ -166,7 +166,7 @@ class _NewtonSearchModel(typing.NamedTuple):
                 shifted_means,
             )
 
-        weight_sum = jnp.sum(self.sample_weights)
+        weight_sum = jnp.sum(self.weights)
         ridge_precision = self.ridge * weight_sum
         input_dim = params.affine.coefficients.shape[-1]
 
@@ -312,7 +312,7 @@ def _linear_from_moments(
     outputs: jax.Array,
     input_means: jax.Array,
     input_covariances: jax.Array | None,
-    sample_weights: jax.Array | None,
+    weights: jax.Array | None,
     initial_affine: Affine | None,
     max_iter: int,
     tol: float,
@@ -334,28 +334,26 @@ def _linear_from_moments(
     if input_covariances is not None:
         input_covariances = input_covariances.astype(dtype)
 
-    if sample_weights is None:
-        sample_weights = jnp.ones(
+    if weights is None:
+        weights = jnp.ones(
             outputs.shape[0],
             dtype=dtype,
         )  # (T,)
     else:
-        sample_weights = sample_weights.astype(dtype)
+        weights = weights.astype(dtype)
 
     if initial_affine is None:
         initial_affine = _initial_affine(
             inputs=input_means,
             outputs=outputs,
-            weights=sample_weights,
+            weights=weights,
         )
 
     initial_affine = initial_affine.astype(dtype)
 
-    weight_sum = jnp.sum(sample_weights)
+    weight_sum = jnp.sum(weights)
 
-    center = jnp.sum(sample_weights[:, None] * input_means, axis=0) / jnp.maximum(
-        weight_sum, 1e-8
-    )  # (I,)
+    center = jnp.sum(weights[:, None] * input_means, axis=0) / jnp.maximum(weight_sum, 1e-8)  # (I,)
 
     centered_means = input_means - center  # (T, I)
 
@@ -366,7 +364,7 @@ def _linear_from_moments(
         values=outputs,
         input_means=centered_means,
         input_covariances=input_covariances,
-        sample_weights=sample_weights,
+        weights=weights,
         ridge=ridge,
     )
 
@@ -389,7 +387,7 @@ def _linear_from_moments(
 def linear_from_marginals(
     inputs: Gaussian,  # T-batched
     outputs: jax.Array,  # (T, O)
-    sample_weights: jax.Array | None = None,  # (T,)
+    weights: jax.Array | None = None,  # (T,)
     initial_affine: Affine | None = None,
     max_iter: int = 20,
     tol: float = 1e-6,
@@ -401,7 +399,7 @@ def linear_from_marginals(
         outputs=outputs,
         input_means=inputs.mean,
         input_covariances=inputs.covariance,
-        sample_weights=sample_weights,
+        weights=weights,
         initial_affine=initial_affine,
         max_iter=max_iter,
         tol=tol,
@@ -424,7 +422,7 @@ def linear_from_pairs(
         outputs=outputs,
         input_means=inputs,
         input_covariances=None,
-        sample_weights=None,
+        weights=None,
         initial_affine=initial_affine,
         max_iter=max_iter,
         tol=tol,
@@ -453,7 +451,7 @@ def linear_from_pairs_weighted(
             outputs=outputs,
             input_means=inputs,
             input_covariances=None,
-            sample_weights=state_weights,
+            weights=state_weights,
             initial_affine=state_affine,
             max_iter=max_iter,
             tol=tol,

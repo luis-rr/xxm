@@ -149,14 +149,14 @@ class LinearPoisson(typing.NamedTuple):
         self,
         values: jax.Array,
         inputs: Gaussian,
-        sample_weights: jax.Array | None = None,
+        weights: jax.Array | None = None,
     ) -> jax.Array:
         log_probs = self.expected_log_prob_each(
             values=values,
             inputs=inputs,
         )
 
-        if sample_weights is not None:
-            log_probs = sample_weights[..., None] * log_probs
+        if weights is not None:
+            log_probs = weights[..., None] * log_probs
 
         return jnp.sum(log_probs)
