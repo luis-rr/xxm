@@ -6,8 +6,7 @@ import jax.numpy as jnp
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
-
-from .newton import NewtonSearch
+from xxm.core.optim.newton import NewtonSearch
 
 EPS: float = 1e-8
 

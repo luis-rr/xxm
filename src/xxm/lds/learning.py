@@ -5,10 +5,10 @@ import typing
 import jax
 
 from xxm.core.emissions.continuous import LaplaceEmissionsT, QuadraticEmissionsT
+from xxm.core.optim.loop import Fit, FitCollection
+from xxm.core.optim.loop import fit_many as _fit_many
+from xxm.core.optim.loop import fit_one as _fit_one
 
-from ..core.optim.loop import Fit, FitCollection
-from ..core.optim.loop import fit_many as _fit_many
-from ..core.optim.loop import fit_one as _fit_one
 from .inference import infer_exact, infer_laplace
 from .model import Model
 

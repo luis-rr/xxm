@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import jax
 
-from ..core.optim.loop import Fit
-from ..core.optim.loop import fit_one as _fit_one
+from xxm.core.optim.loop import Fit
+from xxm.core.optim.loop import fit_one as _fit_one
+
 from .inference import infer_exact
 from .model import Model
 
