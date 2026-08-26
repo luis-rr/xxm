@@ -2,6 +2,7 @@ import jax
 from jax import numpy as jnp
 
 from xxm.core.emissions.discrete import (
+    Emissions,
     GaussianEmissions,
     PoissonEmissions,
 )
@@ -15,7 +16,7 @@ from xxm.core.dists.gaussian import LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
 
 from xxm.core.models.discrete import CategoricalInitial, CategoricalTransition
-from xxm.hmm.model import Emissions, Model
+from xxm.hmm.model import Model
 
 
 def _kmeans(

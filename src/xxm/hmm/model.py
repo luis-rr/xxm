@@ -9,28 +9,8 @@ import jax.numpy as jnp
 
 from xxm.core.chains.discrete import DiscreteChainMarginals as Posterior
 from xxm.core.dists.categorical import Categorical
+from xxm.core.emissions.discrete import Emissions
 from xxm.core.models.discrete import CategoricalInitial, CategoricalTransition
-
-
-class Emissions(typing.Protocol):
-    def log_likelihoods(self, observations: jax.Array) -> jax.Array: ...
-
-    def fit_params(
-        self,
-        observations: jax.Array,
-        posterior: Posterior,
-    ) -> typing.Self: ...
-
-    def sample(
-        self,
-        key: jax.Array,
-        states: jax.Array,
-    ) -> jax.Array: ...
-
-    def permute(
-        self,
-        permutation: jax.Array,
-    ) -> typing.Self: ...
 
 
 EmissionsT = typing.TypeVar('EmissionsT', bound=Emissions)

@@ -2,11 +2,32 @@ import typing
 
 import jax
 
-from xxm.core.chains.discrete import DiscretePotential
+from xxm.core.chains.discrete import DiscreteChainMarginals as Posterior, DiscretePotential
 from xxm.hmm.model import Posterior
 from xxm.core.optim import gaussian as gaussian_fit, poisson as poisson_fit
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
+
+
+class Emissions(typing.Protocol):
+    def log_likelihoods(self, observations: jax.Array) -> jax.Array: ...
+
+    def fit_params(
+        self,
+        observations: jax.Array,
+        posterior: Posterior,
+    ) -> typing.Self: ...
+
+    def sample(
+        self,
+        key: jax.Array,
+        states: jax.Array,
+    ) -> jax.Array: ...
+
+    def permute(
+        self,
+        permutation: jax.Array,
+    ) -> typing.Self: ...
 
 
 class GaussianEmissions(typing.NamedTuple):
