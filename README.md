@@ -1,6 +1,6 @@
 # xxm
 
-A lightweight JAX implementation of SLDS inference routines, inspired by [`ssm`](https://github.com/lindermanlab/ssm) and [`Dynamax`](https://github.com/probml/dynamax).
+A lightweight JAX implementation of SLDS inference routines, inspired by [`ssm`](https://github.com/lindermanlab/ssm) and [`dynamax`](https://github.com/probml/dynamax).
 
 ## Installation
 
