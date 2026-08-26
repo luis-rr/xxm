@@ -1,4 +1,4 @@
-from xxm.core.chains.discrete import DiscreteChainMarginals as Posterior
+from xxm.core.emissions.discrete import DiscretePosterior
 from xxm.core.dists.categorical import Categorical
 
 
@@ -23,7 +23,7 @@ class CategoricalInitial(typing.NamedTuple):
             model=self.model.permute(permutation),
         )
 
-    def fit_params(self, posterior: Posterior) -> typing.Self:
+    def fit_params(self, posterior: DiscretePosterior) -> typing.Self:
         """Maximum-likelihood update from expected initial-state counts."""
         return self._replace(model=Categorical.from_counts(posterior.state_probs[0]))
 
@@ -46,7 +46,7 @@ class CategoricalTransition(typing.NamedTuple):
     def permute(self, permutation: jax.Array) -> 'CategoricalTransition':
         return self._replace(model=self.model.select(permutation).permute(permutation))
 
-    def fit_params(self, posterior: Posterior) -> typing.Self:
+    def fit_params(self, posterior: DiscretePosterior) -> typing.Self:
         """Maximum-likelihood update from expected transition counts."""
         expected_transitions = posterior.pair_probs.sum(axis=0)  # (K, K)
 

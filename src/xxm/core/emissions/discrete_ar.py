@@ -30,10 +30,10 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core.chains.discrete import DiscretePotential
-from xxm.hmm.model import Posterior
 from xxm.core.optim import gaussian as gaussian_fit, poisson as poisson_fit
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
+from xxm.core.emissions.discrete import DiscretePosterior
 
 
 def lagged_observations(observations: jax.Array, num_lags: int) -> jax.Array:  # (T-L, L, N)
@@ -176,7 +176,7 @@ class AREmissions(typing.NamedTuple, typing.Generic[ConditionalModelT]):
     def fit_params(
         self,
         observations: jax.Array,  # (T, N)
-        posterior: Posterior,
+        posterior: DiscretePosterior,
     ) -> typing.Self:
         predictors = self.predictors(observations)  # (T-L, L*N)
         current = observations[self.num_lags :]  # (T-L, N)

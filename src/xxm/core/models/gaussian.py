@@ -1,6 +1,5 @@
 from jax import numpy as jnp
 
-from xxm.core.chains.gaussian import GaussianChainMarginals as Posterior
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 
 
@@ -9,13 +8,30 @@ import jax
 
 import typing
 
+
 from xxm.core.optim import gaussian as gaussian_fit
+
+
+class ContinuousPosterior(typing.Protocol):
+    @property
+    def means(self) -> jax.Array:  # (T, D)
+        ...
+
+    @property
+    def covariances(self) -> jax.Array:  # (T, D, D)
+        ...
+
+    def raw_second_moments(self) -> jax.Array:  # (T, D, D)
+        ...
+
+    def raw_cross_moments(self) -> jax.Array:  # (T-1, D, D)
+        ...
 
 
 class GaussianInitial(typing.NamedTuple):
     model: Gaussian  # no batch
 
-    def fit_params(self, posterior: Posterior) -> typing.Self:
+    def fit_params(self, posterior: ContinuousPosterior) -> typing.Self:
         r"""
         Maximum-likelihood update of the latent model.
         """
@@ -31,7 +47,7 @@ class GaussianInitial(typing.NamedTuple):
 class GaussianLinearDynamics(typing.NamedTuple):
     model: LinearGaussian  # no batch
 
-    def fit_params(self, posterior: Posterior) -> typing.Self:
+    def fit_params(self, posterior: ContinuousPosterior) -> typing.Self:
         r"""
         Maximum-likelihood update of the latent model.
         """

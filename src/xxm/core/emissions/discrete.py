@@ -2,10 +2,20 @@ import typing
 
 import jax
 
-from xxm.core.chains.discrete import DiscreteChainMarginals as Posterior, DiscretePotential
+from xxm.core.chains.discrete import DiscretePotential
 from xxm.core.optim import gaussian as gaussian_fit, poisson as poisson_fit
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
+
+
+class DiscretePosterior(typing.Protocol):
+    @property
+    def state_probs(self) -> jax.Array:  # (T, K)
+        ...
+
+    @property
+    def pair_probs(self) -> jax.Array:  # (T, K, K)
+        ...
 
 
 class Emissions(typing.Protocol):
@@ -14,7 +24,7 @@ class Emissions(typing.Protocol):
     def fit_params(
         self,
         observations: jax.Array,
-        posterior: Posterior,
+        posterior: DiscretePosterior,
     ) -> typing.Self: ...
 
     def sample(
@@ -44,7 +54,7 @@ class GaussianEmissions(typing.NamedTuple):
     def fit_params(
         self,
         observations: jax.Array,
-        posterior: Posterior,
+        posterior: DiscretePosterior,
     ) -> typing.Self:
         gaussian = gaussian_fit.from_samples_weighted(
             observations,
@@ -75,7 +85,9 @@ class PoissonEmissions(typing.NamedTuple):
             log_values=self.log_likelihoods(observations),
         )
 
-    def fit_params(self, observations: jax.Array, posterior: Posterior) -> 'PoissonEmissions':
+    def fit_params(
+        self, observations: jax.Array, posterior: DiscretePosterior
+    ) -> 'PoissonEmissions':
         return self._replace(
             model=poisson_fit.from_samples_weighted(
                 values=observations,
