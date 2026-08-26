@@ -12,7 +12,7 @@ from xxm.lds.inference import (
     infer_laplace,
     to_chain,
 )
-from xxm.optim.newton import NewtonSearch
+from xxm.core.optim.newton import NewtonSearch
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson

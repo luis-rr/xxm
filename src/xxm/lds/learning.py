@@ -6,9 +6,9 @@ import jax
 
 from xxm.core.emissions.continuous import LaplaceEmissionsT, QuadraticEmissionsT
 
-from ..optim.loop import Fit, FitCollection
-from ..optim.loop import fit_many as _fit_many
-from ..optim.loop import fit_one as _fit_one
+from ..core.optim.loop import Fit, FitCollection
+from ..core.optim.loop import fit_many as _fit_many
+from ..core.optim.loop import fit_one as _fit_one
 from .model import Model
 from .inference import infer_exact, infer_laplace
 

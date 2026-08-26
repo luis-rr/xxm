@@ -9,7 +9,7 @@ from xxm.core.emissions.discrete_ar import (
     AREmissions,
     lagged_observations,
 )
-from xxm.optim import gaussian as gaussian_fit, poisson as poisson_fit
+from xxm.core.optim import gaussian as gaussian_fit, poisson as poisson_fit
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson

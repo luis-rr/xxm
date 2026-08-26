@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from xxm.optim import gaussian as gaussian_fit
+from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 

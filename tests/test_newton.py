@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from xxm.optim.newton import LineSearch, NewtonSearch
+from xxm.core.optim.newton import LineSearch, NewtonSearch
 
 
 class QuadraticParams(typing.NamedTuple):

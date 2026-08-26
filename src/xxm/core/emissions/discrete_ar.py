@@ -31,7 +31,7 @@ import jax.numpy as jnp
 
 from xxm.core.chains.discrete import DiscretePotential
 from xxm.hmm.model import Posterior
-from xxm.optim import gaussian as gaussian_fit, poisson as poisson_fit
+from xxm.core.optim import gaussian as gaussian_fit, poisson as poisson_fit
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
 
