@@ -71,7 +71,7 @@ MODEL_CASES = [
         initialize=init_arhmm_gaussian,
         em_step=hmm_em_step,
         observations=GAUSSIAN_OBSERVATIONS,
-        init_kwargs={'num_states': 2, 'lag': 1, 'key': jax.random.key(0)},
+        init_kwargs={'num_states': 2, 'num_lags': 1, 'key': jax.random.key(0)},
     ),
     ModelCase(
         name='arhmm-poisson',

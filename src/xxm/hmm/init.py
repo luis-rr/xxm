@@ -220,15 +220,15 @@ def _init_ar_gaussian_emissions(
 def init_arhmm_gaussian(
     num_states: int,
     observations: jax.Array,
-    lag: int,
+    num_lags: int,
     key: jax.Array,
     self_transition_prob: float = 0.9,
 ) -> Model:
     emissions = _init_ar_gaussian_emissions(
-        observations,
-        num_states,
-        lag,
-        key,
+        observations=observations,
+        num_states=num_states,
+        num_lags=num_lags,
+        key=key,
     )
 
     return _init(
