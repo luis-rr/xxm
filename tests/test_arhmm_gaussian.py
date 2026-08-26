@@ -203,7 +203,6 @@ def test_ar_gaussian_fit_recovers_known_ar2_parameters():
         # Mock pair marginals and log normalizer, since they are not used in the fit.
         pair_probs=jnp.ones((observations.shape[0] - 1, 1, 1)),
     )
-    log_normalizer = jnp.zeros((1,))
 
     emissions = _make_emissions(
         coefficients=jnp.zeros((1, 2, 1, 1)),

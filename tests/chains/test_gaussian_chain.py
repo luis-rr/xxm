@@ -525,7 +525,7 @@ def test_gaussian_pair_potential_from_linear_conditional_batched_jit():
         )
     )(matrices, biases, covariances)
 
-    for eager_field, jitted_field in zip(eager, jitted):
+    for eager_field, jitted_field in zip(eager, jitted, strict=True):
         np.testing.assert_allclose(jitted_field, eager_field, atol=ATOL, rtol=RTOL)
 
 
@@ -579,5 +579,5 @@ def test_gaussian_chain_add_local_potential_jit():
         potential,
     )
 
-    for eager_field, jitted_field in zip(eager, jitted):
+    for eager_field, jitted_field in zip(eager, jitted, strict=True):
         np.testing.assert_allclose(jitted_field, eager_field)
