@@ -9,7 +9,7 @@ class DiscretePosterior(typing.Protocol):
         ...
 
     @property
-    def pair_probs(self) -> jax.Array:  # (T, K, K)
+    def pair_probs(self) -> jax.Array:  # (T-1, K, K)
         ...
 
 
