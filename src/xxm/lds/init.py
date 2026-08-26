@@ -97,7 +97,6 @@ def dynamics_from_latents(
 
 
 def initial_from_latents(
-    observations: jax.Array,
     latents: jax.Array,
     covariance_floor: float = 1e-2,
 ) -> GaussianInitial:
@@ -162,7 +161,7 @@ def init_pca_gaussian(
     )
 
     return Model(
-        initial=initial_from_latents(observations, latents, covariance_floor),
+        initial=initial_from_latents(latents, covariance_floor),
         dynamics=dynamics_from_latents(latents, covariance_floor),
         emissions=gaussian_emissions_from_latents(observations, latents, covariance_floor),
     )
@@ -199,7 +198,7 @@ def init_pca_poisson(
     )
 
     return Model(
-        initial=initial_from_latents(observations, latents, covariance_floor),
+        initial=initial_from_latents(latents, covariance_floor),
         dynamics=dynamics_from_latents(latents, covariance_floor),
         emissions=poisson_emissions_from_latents(observations, latents),
     )

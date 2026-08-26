@@ -20,9 +20,9 @@ from xxm.hmm.model import Model
 
 
 def _kmeans(
+    key: jax.Array,
     observations: jax.Array,
     num_states: int,
-    key: jax.Array,
     num_iters: int = 20,
 ) -> jax.Array:
     """Return hard K-means assignments with shape (T,)."""
@@ -73,8 +73,8 @@ def _kmeans(
 
 
 def _init(
-    num_states: int,
     emissions: Emissions,
+    num_states: int,
     dtype: jnp.dtype,
     self_transition_prob: float = 0.9,
 ) -> Model:
@@ -111,14 +111,14 @@ def _init(
 
 
 def _init_gaussian_emissions(
+    key: jax.Array,
     observations: jax.Array,  # (T, N)
     num_states: int,
-    key: jax.Array,
 ) -> GaussianEmissions:
     assignments = _kmeans(
-        observations,
-        num_states,
-        key,
+        key=key,
+        observations=observations,
+        num_states=num_states,
     )  # (T,)
 
     gaussian = gaussian_fit.from_samples_grouped(
@@ -143,26 +143,30 @@ def _init_gaussian_emissions(
     )
 
 
-def init_hmm_gaussian(
-    num_states: int,
-    observations: jax.Array,
+def init_gaussian(
     key: jax.Array,
+    observations: jax.Array,
+    num_states: int,
     self_transition_prob: float = 0.9,
 ) -> Model:
-    emissions = _init_gaussian_emissions(observations, num_states, key=key)
+    emissions = _init_gaussian_emissions(
+        observations=observations,
+        num_states=num_states,
+        key=key,
+    )
     return _init(
-        num_states,
-        emissions,
+        emissions=emissions,
+        num_states=num_states,
         self_transition_prob=self_transition_prob,
         dtype=observations.dtype,
     )
 
 
 def _init_ar_state_assignments(
+    key: jax.Array,
     predictors: jax.Array,  # (T-L, L*N)
     current: jax.Array,  # (T-L, N)
     num_states: int,
-    key: jax.Array,
 ) -> jax.Array:  # (T-L,)
     """Initialize AR states by clustering predictors and current observations."""
     features = jnp.concatenate(
@@ -171,17 +175,17 @@ def _init_ar_state_assignments(
     )  # (T-L, (L+1)*N)
 
     return _kmeans(
-        features,
-        num_states,
-        key,
+        key=key,
+        observations=features,
+        num_states=num_states,
     )
 
 
 def _init_ar_gaussian_emissions(
+    key: jax.Array,
     observations: jax.Array,  # (T, N)
     num_states: int,
     num_lags: int,
-    key: jax.Array,
 ) -> AREmissions[LinearGaussian]:
     history = lagged_observations(
         observations,
@@ -198,10 +202,10 @@ def _init_ar_gaussian_emissions(
     )  # (T-L, L*N)
 
     assignments = _init_ar_state_assignments(
-        predictors,
-        current,
-        num_states,
-        key,
+        key=key,
+        predictors=predictors,
+        current=current,
+        num_states=num_states,
     )  # (T-L,)
 
     model = gaussian_fit.linear_from_pairs_grouped(
@@ -217,37 +221,37 @@ def _init_ar_gaussian_emissions(
     return AREmissions(model)
 
 
-def init_arhmm_gaussian(
-    num_states: int,
-    observations: jax.Array,
-    num_lags: int,
+def init_gaussian_ar(
     key: jax.Array,
+    observations: jax.Array,
+    num_states: int,
+    num_lags: int,
     self_transition_prob: float = 0.9,
 ) -> Model:
     emissions = _init_ar_gaussian_emissions(
+        key=key,
         observations=observations,
         num_states=num_states,
         num_lags=num_lags,
-        key=key,
     )
 
     return _init(
-        num_states,
-        emissions,
+        emissions=emissions,
+        num_states=num_states,
         dtype=observations.dtype,
         self_transition_prob=self_transition_prob,
     )
 
 
 def _init_poisson_emissions(
+    key: jax.Array,
     observations: jax.Array,  # (T, N)
     num_states: int,
-    key: jax.Array,
 ) -> PoissonEmissions:
     assignments = _kmeans(
-        observations,
-        num_states,
-        key,
+        key=key,
+        observations=observations,
+        num_states=num_states,
     )  # (T,)
 
     poisson = poisson_fit.from_samples_grouped(
@@ -261,26 +265,30 @@ def _init_poisson_emissions(
     )
 
 
-def init_hmm_poisson(
-    num_states: int,
-    observations: jax.Array,
+def init_poisson(
     key: jax.Array,
+    observations: jax.Array,
+    num_states: int,
     self_transition_prob: float = 0.9,
 ) -> Model:
-    emissions = _init_poisson_emissions(observations, num_states, key=key)
+    emissions = _init_poisson_emissions(
+        key=key,
+        observations=observations,
+        num_states=num_states,
+    )
     return _init(
-        num_states,
-        emissions,
+        emissions=emissions,
+        num_states=num_states,
         self_transition_prob=self_transition_prob,
         dtype=observations.dtype,
     )
 
 
 def _init_ar_poisson_emissions(
+    key: jax.Array,
     observations: jax.Array,  # (T, N)
     num_states: int,
     num_lags: int,
-    key: jax.Array,
 ) -> AREmissions[LinearPoisson]:
     history = lagged_observations(
         observations,
@@ -297,10 +305,10 @@ def _init_ar_poisson_emissions(
     )  # (T-L, L*N)
 
     assignments = _init_ar_state_assignments(
-        predictors,
-        current,
-        num_states,
-        key,
+        key=key,
+        predictors=predictors,
+        current=current,
+        num_states=num_states,
     )  # (T-L,)
 
     model = poisson_fit.linear_from_pairs_grouped(
@@ -313,18 +321,23 @@ def _init_ar_poisson_emissions(
     return AREmissions(model)
 
 
-def init_arhmm_poisson(
-    num_states: int,
-    observations: jax.Array,
-    num_lags: int,
+def init_poisson_ar(
     key: jax.Array,
+    observations: jax.Array,
+    num_states: int,
+    num_lags: int,
     self_transition_prob: float = 0.9,
 ) -> Model:
 
-    emissions = _init_ar_poisson_emissions(observations, num_states, num_lags=num_lags, key=key)
+    emissions = _init_ar_poisson_emissions(
+        key=key,
+        observations=observations,
+        num_states=num_states,
+        num_lags=num_lags,
+    )
     return _init(
-        num_states,
-        emissions,
+        emissions=emissions,
+        num_states=num_states,
         self_transition_prob=self_transition_prob,
         dtype=jnp.result_type(observations, jnp.float32),
     )
