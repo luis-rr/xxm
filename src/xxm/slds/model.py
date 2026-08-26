@@ -5,12 +5,11 @@ import jax.numpy as jnp
 
 from xxm.core.chains.discrete import DiscreteChainMarginals
 from xxm.core.chains.gaussian import GaussianChainMarginals, GaussianPairPotential
-from xxm.core.models.discrete import CategoricalInitial
-from xxm.core.models.gaussian import GaussianInitial
-from xxm.core.models.discrete import CategoricalTransition
-from xxm.lds.model import EmissionsT
-from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.dists.gaussian import LinearGaussian
+from xxm.core.models.discrete import CategoricalInitial, CategoricalTransition
+from xxm.core.models.gaussian import GaussianInitial
+from xxm.core.optim import gaussian as gaussian_fit
+from xxm.lds.model import EmissionsT
 
 
 class Posterior(typing.NamedTuple):

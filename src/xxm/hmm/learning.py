@@ -4,8 +4,8 @@ import jax
 
 from ..core.optim.loop import Fit
 from ..core.optim.loop import fit_one as _fit_one
-from .model import Model
 from .inference import infer_exact
+from .model import Model
 
 
 def em_step(

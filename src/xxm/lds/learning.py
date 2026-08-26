@@ -9,8 +9,8 @@ from xxm.core.emissions.continuous import LaplaceEmissionsT, QuadraticEmissionsT
 from ..core.optim.loop import Fit, FitCollection
 from ..core.optim.loop import fit_many as _fit_many
 from ..core.optim.loop import fit_one as _fit_one
-from .model import Model
 from .inference import infer_exact, infer_laplace
+from .model import Model
 
 ModelT = typing.TypeVar('ModelT')
 PosteriorT = typing.TypeVar('PosteriorT')

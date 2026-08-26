@@ -30,10 +30,11 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core.chains.discrete import DiscretePotential
-from xxm.core.optim import gaussian as gaussian_fit, poisson as poisson_fit
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
 from xxm.core.emissions.discrete import DiscretePosterior
+from xxm.core.optim import gaussian as gaussian_fit
+from xxm.core.optim import poisson as poisson_fit
 
 
 def lagged_observations(observations: jax.Array, num_lags: int) -> jax.Array:  # (T-L, L, N)

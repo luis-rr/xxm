@@ -1,11 +1,9 @@
-from xxm.core.emissions.discrete import DiscretePosterior
-from xxm.core.dists.categorical import Categorical
-
+import typing
 
 import jax
 
-
-import typing
+from xxm.core.dists.categorical import Categorical
+from xxm.core.emissions.discrete import DiscretePosterior
 
 
 class CategoricalInitial(typing.NamedTuple):

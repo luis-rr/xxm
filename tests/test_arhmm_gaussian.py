@@ -2,10 +2,10 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from xxm.core.chains.discrete import DiscreteChainMarginals
-from xxm.core.emissions.discrete_ar import AREmissions, lagged_observations
 from xxm.core.affine import Affine
+from xxm.core.chains.discrete import DiscreteChainMarginals
 from xxm.core.dists.gaussian import LinearGaussian
+from xxm.core.emissions.discrete_ar import AREmissions, lagged_observations
 
 ATOL = 1e-6
 FIT_ATOL = 2e-5

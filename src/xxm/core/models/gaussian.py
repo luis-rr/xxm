@@ -1,14 +1,9 @@
+import typing
+
+import jax
 from jax import numpy as jnp
 
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
-
-
-import jax
-
-
-import typing
-
-
 from xxm.core.optim import gaussian as gaussian_fit
 
 

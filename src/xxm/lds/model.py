@@ -14,8 +14,7 @@ from xxm.core.chains.gaussian import (
     GaussianPotential,
 )
 from xxm.core.emissions.continuous import Emissions
-from xxm.core.models.gaussian import GaussianInitial
-from xxm.core.models.gaussian import GaussianLinearDynamics
+from xxm.core.models.gaussian import GaussianInitial, GaussianLinearDynamics
 
 EmissionsT = typing.TypeVar('EmissionsT', bound=Emissions)
 

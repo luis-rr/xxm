@@ -1,8 +1,7 @@
+import typing
+
 import jax
 import jax.numpy as jnp
-
-
-import typing
 
 
 class Affine(typing.NamedTuple):

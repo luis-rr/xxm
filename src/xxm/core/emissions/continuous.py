@@ -5,9 +5,10 @@ import typing
 import jax
 from jax import numpy as jnp
 
-from xxm.core.optim import gaussian as gaussian_fit, poisson as poisson_fit
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
+from xxm.core.optim import gaussian as gaussian_fit
+from xxm.core.optim import poisson as poisson_fit
 
 from ..chains.gaussian import GaussianChainMarginals, GaussianPotential
 

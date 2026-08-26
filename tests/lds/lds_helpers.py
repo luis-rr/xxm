@@ -1,11 +1,11 @@
 import jax
 from jax import numpy as jnp
 
+from xxm.core.affine import Affine
+from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.emissions.continuous import GaussianEmissions
 from xxm.core.models.gaussian import GaussianInitial, GaussianLinearDynamics
 from xxm.lds.model import Model
-from xxm.core.affine import Affine
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 
 
 def make_model() -> Model[GaussianEmissions]:

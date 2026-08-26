@@ -4,26 +4,25 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from xxm.core.affine import Affine
 from xxm.core.chains.discrete import DiscreteChainMarginals
 from xxm.core.chains.gaussian import (
     GaussianChain,
     GaussianChainMarginals,
     GaussianPotential,
 )
-from xxm.core.emissions.continuous import GaussianEmissions
-from xxm.core.models.discrete import CategoricalInitial
-from xxm.hmm.model import CategoricalTransition
-
-from xxm.core.models.gaussian import GaussianInitial
-from xxm.slds.model import (
-    Model,
-    Posterior,
-    GaussianLinearSwitchingDynamics,
-)
-from xxm.slds.inference import infer_variational
-from xxm.core.affine import Affine
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.emissions.continuous import GaussianEmissions
+from xxm.core.models.discrete import CategoricalInitial
+from xxm.core.models.gaussian import GaussianInitial
+from xxm.hmm.model import CategoricalTransition
+from xxm.slds.inference import infer_variational
+from xxm.slds.model import (
+    GaussianLinearSwitchingDynamics,
+    Model,
+    Posterior,
+)
 
 ATOL = 1e-5
 
