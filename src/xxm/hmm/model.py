@@ -43,8 +43,8 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
     def sample(
         self,
-        num_steps: int,
         key: jax.Array,
+        num_steps: int,
     ) -> tuple[jax.Array, jax.Array]:
         """Sample latent states and observations from an HMM."""
 
