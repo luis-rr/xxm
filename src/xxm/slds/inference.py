@@ -152,7 +152,7 @@ def elbo(
     )
 
 
-def inference_variational(
+def infer_variational(
     model: Model,
     observations: jax.Array,
     num_iters: int,

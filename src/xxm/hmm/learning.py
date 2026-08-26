@@ -5,7 +5,7 @@ import jax
 from ..optim.loop import Fit
 from ..optim.loop import fit_one as _fit_one
 from .model import Model
-from .inference import inference_exact
+from .inference import infer_exact
 
 
 def em_step(
@@ -13,7 +13,7 @@ def em_step(
     observations: jax.Array,
 ) -> tuple[Model, jax.Array]:
 
-    posterior, log_normalizer = inference_exact(
+    posterior, log_normalizer = infer_exact(
         model,
         observations,
     )
@@ -37,5 +37,5 @@ def fit_em(
         observations,
         num_iters,
         step=em_step,
-        objective=lambda m, o: inference_exact(m, o)[1],
+        objective=lambda m, o: infer_exact(m, o)[1],
     )

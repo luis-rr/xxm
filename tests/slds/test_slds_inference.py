@@ -21,7 +21,7 @@ from xxm.slds.model import (
     Posterior,
     SwitchingLinearGaussianDynamicsModel,
 )
-from xxm.slds.inference import inference_variational
+from xxm.slds.inference import infer_variational
 from xxm.core.affine import Affine
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
@@ -184,7 +184,7 @@ def test_single_state_slds_matches_gaussian_chain():
     model = _single_state_model()
     observations = jnp.array([[0.2], [1.0], [-0.3]])
 
-    posterior, _ = inference_variational(
+    posterior, _ = infer_variational(
         model,
         observations,
         num_iters=3,
@@ -236,7 +236,7 @@ def test_zero_iterations_uses_discrete_prior():
     model = _two_state_model()
     observations = jnp.zeros((4, 1))
 
-    posterior, _ = inference_variational(
+    posterior, _ = infer_variational(
         model,
         observations,
         num_iters=0,
@@ -268,14 +268,14 @@ def test_inference_exact_is_jittable():
     model = _two_state_model()
     observations = jnp.array([[0.0], [0.5], [1.0], [0.2]])
 
-    eager, _ = inference_variational(
+    eager, _ = infer_variational(
         model,
         observations,
         num_iters=2,
     )
 
     inference_jit = jax.jit(
-        inference_variational,
+        infer_variational,
         static_argnames=('num_iters',),
     )
 

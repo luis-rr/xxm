@@ -10,7 +10,7 @@ from ..optim.loop import Fit, FitCollection
 from ..optim.loop import fit_many as _fit_many
 from ..optim.loop import fit_one as _fit_one
 from .model import Model
-from .inference import inference_exact, inference_laplace
+from .inference import infer_exact, infer_laplace
 
 ModelT = typing.TypeVar('ModelT')
 PosteriorT = typing.TypeVar('PosteriorT')
@@ -24,7 +24,7 @@ def em_step(
     observations: jax.Array,
 ) -> tuple[Model[QuadraticEmissionsT], jax.Array]:
 
-    posterior, log_normalizer = inference_exact(
+    posterior, log_normalizer = infer_exact(
         model,
         observations,
     )
@@ -42,7 +42,7 @@ def laplace_em_step(
     observations: jax.Array,
 ) -> tuple[Model[LaplaceEmissionsT], jax.Array]:
 
-    posterior, log_normalizer = inference_laplace(
+    posterior, log_normalizer = infer_laplace(
         model,
         observations,
     )
@@ -66,7 +66,7 @@ def fit_em(
         observations,
         num_iters,
         step=em_step,
-        objective=lambda m, o: inference_exact(m, o)[1],
+        objective=lambda m, o: infer_exact(m, o)[1],
     )
 
 
@@ -81,7 +81,7 @@ def fit_em_many(
         observations,
         num_iters,
         step=em_step,
-        objective=lambda m, o: inference_exact(m, o)[1],
+        objective=lambda m, o: infer_exact(m, o)[1],
     )
 
 
@@ -96,7 +96,7 @@ def fit_laplace_em(
         observations,
         num_iters,
         step=laplace_em_step,
-        objective=lambda m, o: inference_laplace(m, o)[1],
+        objective=lambda m, o: infer_laplace(m, o)[1],
     )
 
 
@@ -111,5 +111,5 @@ def fit_laplace_em_many(
         observations,
         num_iters,
         step=laplace_em_step,
-        objective=lambda m, o: inference_laplace(m, o)[1],
+        objective=lambda m, o: infer_laplace(m, o)[1],
     )

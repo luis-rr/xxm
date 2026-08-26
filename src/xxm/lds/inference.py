@@ -22,7 +22,7 @@ def to_chain(
     )
 
 
-def inference_exact(
+def infer_exact(
     model: Model[QuadraticEmissionsT],
     observations: jax.Array,
 ) -> tuple[Posterior, jax.Array]:
@@ -110,7 +110,7 @@ class _NewtonSearchModel(
         )
 
 
-def inference_laplace(
+def infer_laplace(
     model: Model[LaplaceEmissionsT],
     observations: jax.Array,
     initial_latents: jax.Array | None = None,

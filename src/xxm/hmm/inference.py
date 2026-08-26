@@ -28,7 +28,7 @@ def to_chain(
     )
 
 
-def inference_exact(
+def infer_exact(
     model: Model,
     observations: jax.Array,
 ) -> tuple[Posterior, jax.Array]:
