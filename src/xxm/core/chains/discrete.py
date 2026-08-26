@@ -55,7 +55,7 @@ class DiscreteChain(typing.NamedTuple):
         return self.initial_probs.shape[0]
 
     @property
-    def num_time_steps(self) -> int:
+    def num_steps(self) -> int:
         return self.state_log_potentials.shape[0]
 
     def forward_backward(self) -> tuple[DiscreteChainMarginals, jax.Array]:
@@ -69,7 +69,7 @@ class DiscreteChain(typing.NamedTuple):
         self,
         potential: DiscretePotential,
     ) -> DiscreteChain:
-        if potential.batch_shape != (self.num_time_steps,):
+        if potential.batch_shape != (self.num_steps,):
             raise ValueError(f'Potential must have shape (T, K). Got shape {potential.batch_shape}')
 
         if potential.num_states != self.num_states:
@@ -184,7 +184,7 @@ class _DiscreteChainMessages(typing.NamedTuple):
                 'forward_messages and backward_messages must both have shape (T, K) and match.'
             )
 
-        t = chain.num_time_steps
+        t = chain.num_steps
         k = chain.num_states
 
         if t == 1:
@@ -231,7 +231,7 @@ def _forward_pass(
     chain: DiscreteChain,
 ) -> tuple[jax.Array, jax.Array]:
     """Run a normalized probability-space forward recursion."""
-    t = chain.num_time_steps
+    t = chain.num_steps
 
     min_normalizer = jnp.finfo(chain.state_log_potentials.dtype).tiny
 
@@ -337,7 +337,7 @@ def _backward_pass(
 ) -> jax.Array:
     """Run the backward recursion consistent with forward normalizers."""
     k = chain.num_states
-    t = chain.num_time_steps
+    t = chain.num_steps
 
     if log_scaling_factors.shape != (t,):
         raise ValueError('log_scaling_factors must have shape (T,)')

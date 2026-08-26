@@ -152,7 +152,7 @@ def test_public_routines_are_jittable():
 
 
 def test_linear_gaussian_conditional_broadcasts_covariance():
-    num_time_steps = 5
+    num_steps = 5
     num_models = 3
     input_dim = 2
     output_dim = 4
@@ -169,7 +169,7 @@ def test_linear_gaussian_conditional_broadcasts_covariance():
     )
 
     inputs = jnp.zeros(
-        (num_time_steps, num_models, input_dim),
+        (num_steps, num_models, input_dim),
     )
 
     conditional = model.conditional(inputs)
@@ -181,13 +181,13 @@ def test_linear_gaussian_conditional_broadcasts_covariance():
     )
 
     assert conditional.mean.shape == (
-        num_time_steps,
+        num_steps,
         num_models,
         output_dim,
     )
 
     assert conditional.covariance.shape == (
-        num_time_steps,
+        num_steps,
         num_models,
         output_dim,
         output_dim,

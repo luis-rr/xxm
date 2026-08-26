@@ -170,13 +170,13 @@ class GaussianPotential(typing.NamedTuple):
             cholesky,
         )  # ()
 
-        num_time_steps = observations.shape[0]
+        num_steps = observations.shape[0]
         variable_dim = model.affine.input_dim
 
         return cls(
             precision_blocks=jnp.broadcast_to(
                 precision_block,
-                (num_time_steps, variable_dim, variable_dim),
+                (num_steps, variable_dim, variable_dim),
             ),
             information_vectors=information_vectors,
             log_constant=-0.5
@@ -514,12 +514,12 @@ class GaussianChain(typing.NamedTuple):
                 f'Got {initial_potential.variable_dim} and {pair_potentials.variable_dim}'
             )
 
-        num_time_steps = pair_potentials.left_precision.shape[0] + 1
+        num_steps = pair_potentials.left_precision.shape[0] + 1
         latent_dim = initial_potential.precision_blocks.shape[0]
         dtype = initial_potential.precision_blocks.dtype
 
         diagonal = jnp.zeros(
-            (num_time_steps, latent_dim, latent_dim),
+            (num_steps, latent_dim, latent_dim),
             dtype=dtype,
         )
         diagonal = diagonal.at[0].add(initial_potential.precision_blocks)
@@ -527,7 +527,7 @@ class GaussianChain(typing.NamedTuple):
         diagonal = diagonal.at[1:].add(pair_potentials.right_precision)
 
         information_vectors = jnp.zeros(
-            (num_time_steps, latent_dim),
+            (num_steps, latent_dim),
             dtype=dtype,
         )
         information_vectors = information_vectors.at[0].add(initial_potential.information_vectors)
@@ -544,7 +544,7 @@ class GaussianChain(typing.NamedTuple):
         )
 
     @property
-    def num_time_steps(self) -> int:
+    def num_steps(self) -> int:
         return self.diagonal_precision_blocks.shape[0]
 
     @property
@@ -557,7 +557,7 @@ class GaussianChain(typing.NamedTuple):
     ) -> GaussianChain:
         """Add one unary Gaussian potential at each time step."""
 
-        expected_batch_shape = (self.num_time_steps,)
+        expected_batch_shape = (self.num_steps,)
 
         if potential.batch_shape != expected_batch_shape:
             raise ValueError(
@@ -585,7 +585,7 @@ class GaussianChain(typing.NamedTuple):
     ) -> jax.Array:
         """Compute log f(x) for a latent trajectory."""
 
-        expected_shape = (self.num_time_steps, self.variable_dim)
+        expected_shape = (self.num_steps, self.variable_dim)
 
         if latent.shape != expected_shape:
             raise ValueError(f'latent must have shape {expected_shape}. Got shape {latent.shape}')
@@ -713,7 +713,7 @@ class GaussianChain(typing.NamedTuple):
 
         quadratic_term = jnp.sum(self.information_vectors * means)
 
-        total_dimension = self.num_time_steps * self.variable_dim
+        total_dimension = self.num_steps * self.variable_dim
 
         log_normalizer = (
             self.log_constant

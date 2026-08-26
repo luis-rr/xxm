@@ -68,12 +68,12 @@ def _enumerate_exact_posterior(
     return state_posterior_probs, pair_posterior_probs, log_z
 
 
-def _stack_static_transition(transition_probs: jax.Array, num_time_steps: int) -> jax.Array:
-    return jnp.repeat(transition_probs[None, :, :], repeats=max(0, num_time_steps - 1), axis=0)
+def _stack_static_transition(transition_probs: jax.Array, num_steps: int) -> jax.Array:
+    return jnp.repeat(transition_probs[None, :, :], repeats=max(0, num_steps - 1), axis=0)
 
 
 def test_forward_backward_matches_exact_enumeration() -> None:
-    num_time_steps = 3
+    num_steps = 3
 
     chain = xxm.core.chains.discrete.DiscreteChain(
         initial_probs=jnp.array([0.6, 0.4]),
@@ -84,7 +84,7 @@ def test_forward_backward_matches_exact_enumeration() -> None:
                     [0.2, 0.8],
                 ]
             ),
-            num_time_steps,
+            num_steps,
         ),
         state_log_potentials=jnp.log(
             jnp.array(
@@ -119,7 +119,7 @@ def test_forward_backward_matches_exact_enumeration() -> None:
 
 def test_normalization_and_finiteness_invariants() -> None:
     initial_probs = jnp.array([0.55, 0.45])
-    num_time_steps = 4
+    num_steps = 4
 
     transition_probs = _stack_static_transition(
         jnp.array(
@@ -128,7 +128,7 @@ def test_normalization_and_finiteness_invariants() -> None:
                 [0.15, 0.85],
             ]
         ),
-        num_time_steps,
+        num_steps,
     )
 
     state_log_potentials = jnp.log(

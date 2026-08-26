@@ -59,15 +59,15 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
     def compute_pair_potentials(
         self,
-        num_time_steps: int,
+        num_steps: int,
     ) -> GaussianPairPotential:
         potential = GaussianPairPotential.from_linear_conditional(self.dynamics.model)
 
-        return potential.broadcast(batch_shape=(num_time_steps - 1,))
+        return potential.broadcast(batch_shape=(num_steps - 1,))
 
     def sample(
         self,
-        num_time_steps: int,
+        num_steps: int,
         key: jax.Array,
     ) -> tuple[jax.Array, jax.Array]:
         """Sample latent and observations from the LDS."""
@@ -94,7 +94,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
             sample_step,
             (initial_latent, key),
             None,
-            length=num_time_steps - 1,
+            length=num_steps - 1,
         )
 
         latents = jnp.concatenate(
@@ -109,7 +109,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
         return latents, observations
 
-    def compute_prior_mean_latents(self, num_time_steps: int) -> jax.Array:
+    def compute_prior_mean_latents(self, num_steps: int) -> jax.Array:
         """Compute the mean latent trajectory under the model's prior."""
 
         def step(
@@ -125,7 +125,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
             step,
             self.initial.model.mean,
             None,
-            length=num_time_steps - 1,
+            length=num_steps - 1,
         )
 
         return jnp.concatenate(

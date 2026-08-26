@@ -67,16 +67,16 @@ def test_laplace_newton_steps_do_not_decrease_objective():
     model = make_scalar_poisson_model()
     observations = jnp.array([[3.0]])
 
-    num_time_steps = observations.shape[0]
+    num_steps = observations.shape[0]
 
     laplace_model = _NewtonSearchModel(
-        latent_chain=to_chain(model=model, num_time_steps=num_time_steps),
+        latent_chain=to_chain(model=model, num_steps=num_steps),
         emissions=model.emissions,
         observations=observations,
     )
 
     initial_params = _NewtonSearchParams(
-        latents=model.compute_prior_mean_latents(num_time_steps),
+        latents=model.compute_prior_mean_latents(num_steps),
     )
 
     search = NewtonSearch[_NewtonSearchParams](

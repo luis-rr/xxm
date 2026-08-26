@@ -15,7 +15,7 @@ def test_dynamics_next_mean_applies_matrix_and_bias():
 def test_prior_mean_starts_at_initial_mean():
     model = make_model()
 
-    means = model.compute_prior_mean_latents(num_time_steps=3)
+    means = model.compute_prior_mean_latents(num_steps=3)
 
     assert jnp.allclose(means[0], model.initial.model.mean)
     assert jnp.allclose(means[1], model.dynamics.model.conditional(means[0]).mean)
@@ -24,7 +24,7 @@ def test_prior_mean_starts_at_initial_mean():
 def test_sample_returns_one_latent_and_observation_per_time_step():
     model = make_model()
 
-    latents, observations = model.sample(num_time_steps=4, key=jax.random.key(0))
+    latents, observations = model.sample(num_steps=4, key=jax.random.key(0))
 
     assert latents.shape == (4, 2)
     assert observations.shape == (4, 2)
@@ -32,6 +32,6 @@ def test_sample_returns_one_latent_and_observation_per_time_step():
 
 def test_log_joint_is_finite_for_sampled_data():
     model = make_model()
-    latents, observations = model.sample(num_time_steps=3, key=jax.random.key(0))
+    latents, observations = model.sample(num_steps=3, key=jax.random.key(0))
 
     assert jnp.isfinite(model.log_joint(observations, latents))

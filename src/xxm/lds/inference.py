@@ -13,12 +13,12 @@ from .model import Model
 
 def to_chain(
     model: Model,
-    num_time_steps: int,
+    num_steps: int,
 ) -> Chain:
     """Construct the Gaussian chain defined by the latent LDS prior."""
     return Chain.from_pair_potentials(
         model.compute_initial_potential(),
-        model.compute_pair_potentials(num_time_steps),
+        model.compute_pair_potentials(num_steps),
     )
 
 
@@ -30,7 +30,7 @@ def infer_exact(
 
     latent_chain = to_chain(
         model,
-        num_time_steps=observations.shape[0],
+        num_steps=observations.shape[0],
     )
 
     observation_potential = model.emissions.compute_potential(observations)
@@ -139,17 +139,17 @@ def infer_laplace(
     if max_line_search_iters < 0:
         raise ValueError('max_line_search_iters must be non-negative')
 
-    num_time_steps = observations.shape[0]
+    num_steps = observations.shape[0]
 
     if initial_latents is None:
-        latents = model.compute_prior_mean_latents(num_time_steps)
+        latents = model.compute_prior_mean_latents(num_steps)
     else:
         latents = initial_latents
 
     newton_model = _NewtonSearchModel(
         latent_chain=to_chain(
             model=model,
-            num_time_steps=num_time_steps,
+            num_steps=num_steps,
         ),
         emissions=model.emissions,
         observations=observations,

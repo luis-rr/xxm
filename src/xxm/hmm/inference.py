@@ -7,12 +7,12 @@ from xxm.hmm.model import Model, Posterior
 
 def to_chain(
     model: Model,
-    num_time_steps: int,
+    num_steps: int,
 ) -> Chain:
     transition_probs = jnp.broadcast_to(
         model.transitions.model.probs,
         (
-            num_time_steps - 1,
+            num_steps - 1,
             model.num_states,
             model.num_states,
         ),
@@ -22,7 +22,7 @@ def to_chain(
         initial_probs=model.initial.model.probs,
         transition_probs=transition_probs,
         state_log_potentials=jnp.zeros(
-            (num_time_steps, model.num_states),
+            (num_steps, model.num_states),
             dtype=model.initial.model.probs.dtype,
         ),
     )
@@ -36,7 +36,7 @@ def infer_exact(
 
     latent_chain = to_chain(
         model,
-        num_time_steps=observations.shape[0],
+        num_steps=observations.shape[0],
     )
 
     observation_potential = model.emissions.compute_potential(observations)

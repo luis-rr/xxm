@@ -76,10 +76,10 @@ class DiscretePotentials(typing.NamedTuple):
     transitions: jax.Array
 
     @classmethod
-    def from_model(cls, model: Model, num_time_steps: int) -> 'DiscretePotentials':
+    def from_model(cls, model: Model, num_steps: int) -> 'DiscretePotentials':
         return DiscretePotentials(
             initial=model.state_initial.model.probs,
-            transitions=model.transitions.model.broadcast((num_time_steps - 1,)).probs,
+            transitions=model.transitions.model.broadcast((num_steps - 1,)).probs,
         )
 
     def to_chain(
@@ -109,10 +109,10 @@ class DiscretePotentials(typing.NamedTuple):
         return posterior.state_probs
 
     def prior(self) -> tuple[DiscreteChainMarginals, jax.Array]:
-        num_time_steps = self.transitions.shape[0] + 1
+        num_steps = self.transitions.shape[0] + 1
 
         state_log_potentials = jnp.zeros(
-            (num_time_steps, self.initial.shape[0]),
+            (num_steps, self.initial.shape[0]),
             dtype=self.initial.dtype,
         )
 
@@ -158,7 +158,7 @@ def infer_variational(
     num_iters: int,
 ) -> tuple[Posterior, jax.Array]:
 
-    num_time_steps = observations.shape[0]
+    num_steps = observations.shape[0]
 
     cont_potentials = ContinuousPotentials.from_model(
         model,
@@ -166,7 +166,7 @@ def infer_variational(
     )
     disc_potentials = DiscretePotentials.from_model(
         model,
-        num_time_steps - 1,
+        num_steps - 1,
     )
 
     def step(_, disc_posterior):
