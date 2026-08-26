@@ -4,7 +4,7 @@ import jax
 
 from xxm.core.discrete.chain import DiscretePotential
 from xxm.hmm.core import Posterior
-from xxm.stats import gaussian_fit, poisson_fit
+from xxm.fit import gaussian as gaussian_fit, poisson as poisson_fit
 from xxm.stats.gaussian import Gaussian
 from xxm.stats.poisson import Poisson
 

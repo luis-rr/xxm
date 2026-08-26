@@ -5,7 +5,7 @@ import typing
 import jax
 from jax import numpy as jnp
 
-from xxm.stats import gaussian_fit, poisson_fit
+from xxm.fit import gaussian as gaussian_fit, poisson as poisson_fit
 from xxm.stats.gaussian import Gaussian, LinearGaussian
 from xxm.stats.poisson import LinearPoisson, Poisson
 

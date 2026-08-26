@@ -14,7 +14,7 @@ from xxm.core.gaussian.chain import (
     GaussianPotential,
 )
 from xxm.core.gaussian.emissions import Emissions
-from xxm.stats import gaussian_fit
+from xxm.fit import gaussian as gaussian_fit
 from xxm.stats.gaussian import Gaussian, LinearGaussian
 
 EmissionsT = typing.TypeVar('EmissionsT', bound=Emissions)

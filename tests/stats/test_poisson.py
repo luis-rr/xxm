@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from xxm.stats import poisson_fit
+from xxm.fit import poisson as poisson_fit
 from xxm.core.affine import Affine
 from xxm.stats.gaussian import Gaussian
 from xxm.stats.poisson import LinearPoisson, Poisson

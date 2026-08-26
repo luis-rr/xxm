@@ -7,7 +7,7 @@ from xxm.core.discrete.chain import DiscreteChainMarginals
 from xxm.core.gaussian.chain import GaussianChainMarginals, GaussianPairPotential
 from xxm.hmm.core import DiscreteInitialModel, DiscreteTransitionModel
 from xxm.lds.core import EmissionsT, GaussianInitialModel
-from xxm.stats import gaussian_fit
+from xxm.fit import gaussian as gaussian_fit
 from xxm.stats.gaussian import LinearGaussian
 
 
