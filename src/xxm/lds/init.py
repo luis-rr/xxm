@@ -102,7 +102,7 @@ def initial_from_latents(
 ) -> GaussianInitial:
     """Construct an LDS from a known latent trajectory."""
 
-    # There is only one initial state estimate, so use the overall
+    # There is only one initial latent estimate, so use the overall
     # latent covariance as a reasonable scale for its uncertainty.
     return GaussianInitial(
         Gaussian(
@@ -118,25 +118,25 @@ def initial_from_latents(
 
 def _validate_initialization(
     observations: jax.Array,
-    state_dim: int,
+    latent_dim: int,
 ) -> None:
     if observations.ndim != 2:
         raise ValueError('observations must have shape (T, N)')
 
     time_steps, observation_dim = observations.shape
 
-    if state_dim < 1 or state_dim > observation_dim:
-        raise ValueError('state_dim must be between 1 and the observation dimension')
+    if latent_dim < 1 or latent_dim > observation_dim:
+        raise ValueError('latent_dim must be between 1 and the observation dimension')
 
-    if time_steps < state_dim + 2:
+    if time_steps < latent_dim + 2:
         raise ValueError(
-            'At least state_dim + 2 time steps are required to initialize the dynamics'
+            'At least latent_dim + 2 time steps are required to initialize the dynamics'
         )
 
 
-def _pca_states(
+def _pca_latents(
     observations: jax.Array,
-    state_dim: int,
+    latent_dim: int,
 ) -> jax.Array:
     centered = observations - jnp.mean(observations, axis=0)
 
@@ -145,31 +145,31 @@ def _pca_states(
         full_matrices=False,
     )
 
-    return centered @ vt[:state_dim].T
+    return centered @ vt[:latent_dim].T
 
 
 def init_pca_gaussian(
     observations: jax.Array,
-    state_dim: int,
+    latent_dim: int,
     covariance_floor: float = 1e-2,
 ) -> Model[GaussianEmissions]:
-    _validate_initialization(observations, state_dim)
+    _validate_initialization(observations, latent_dim)
 
-    states = _pca_states(
+    latents = _pca_latents(
         observations,
-        state_dim,
+        latent_dim,
     )
 
     return Model(
-        initial=initial_from_latents(observations, states, covariance_floor),
-        dynamics=dynamics_from_latents(states, covariance_floor),
-        emissions=gaussian_emissions_from_latents(observations, states, covariance_floor),
+        initial=initial_from_latents(observations, latents, covariance_floor),
+        dynamics=dynamics_from_latents(latents, covariance_floor),
+        emissions=gaussian_emissions_from_latents(observations, latents, covariance_floor),
     )
 
 
 def init_pca_gaussian_many(
     observations: jax.Array,
-    state_dim: int,
+    latent_dim: int,
     covariance_floors: jax.Array | None = None,
 ) -> tuple[Model[GaussianEmissions], ...]:
     """Initialize multiple LDS models from PCA latent projections."""
@@ -177,7 +177,7 @@ def init_pca_gaussian_many(
     stacked = jax.vmap(
         lambda covariance_floor: init_pca_gaussian(
             observations,
-            state_dim,
+            latent_dim,
             covariance_floor,
         )
     )(covariance_floors)
@@ -187,26 +187,26 @@ def init_pca_gaussian_many(
 
 def init_pca_poisson(
     observations: jax.Array,
-    state_dim: int,
+    latent_dim: int,
     covariance_floor: float = 1e-2,
 ) -> Model[PoissonEmissions]:
-    _validate_initialization(observations, state_dim)
+    _validate_initialization(observations, latent_dim)
 
-    states = _pca_states(
+    latents = _pca_latents(
         observations,
-        state_dim,
+        latent_dim,
     )
 
     return Model(
-        initial=initial_from_latents(observations, states, covariance_floor),
-        dynamics=dynamics_from_latents(states, covariance_floor),
-        emissions=poisson_emissions_from_latents(observations, states),
+        initial=initial_from_latents(observations, latents, covariance_floor),
+        dynamics=dynamics_from_latents(latents, covariance_floor),
+        emissions=poisson_emissions_from_latents(observations, latents),
     )
 
 
 def init_pca_poisson_many(
     observations: jax.Array,
-    state_dim: int,
+    latent_dim: int,
     covariance_floors: jax.Array | None = None,
 ) -> tuple[Model[PoissonEmissions], ...]:
     """Initialize multiple LDS models from PCA latent projections."""
@@ -214,7 +214,7 @@ def init_pca_poisson_many(
     stacked = jax.vmap(
         lambda covariance_floor: init_pca_poisson(
             observations,
-            state_dim,
+            latent_dim,
             covariance_floor,
         )
     )(covariance_floors)

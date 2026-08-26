@@ -85,14 +85,14 @@ MODEL_CASES = [
         initialize=initialize_lds_gaussian,
         em_step=lds_em_step,
         observations=GAUSSIAN_OBSERVATIONS,
-        init_kwargs={'state_dim': 1},
+        init_kwargs={'latent_dim': 1},
     ),
     ModelCase(
         name='lds-poisson',
         initialize=initialize_lds_poisson,
         em_step=lds_laplace_em_step,
         observations=POISSON_OBSERVATIONS,
-        init_kwargs={'state_dim': 1},
+        init_kwargs={'latent_dim': 1},
     ),
 ]
 

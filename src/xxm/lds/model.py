@@ -117,9 +117,9 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
             _: None,
         ) -> tuple[jax.Array, jax.Array]:
 
-            next_state = self.dynamics.model.conditional(latent).mean
+            next_latent = self.dynamics.model.conditional(latent).mean
 
-            return next_state, next_state
+            return next_latent, next_latent
 
         _, remaining_latents = jax.lax.scan(
             step,

@@ -515,11 +515,11 @@ class GaussianChain(typing.NamedTuple):
             )
 
         num_time_steps = pair_potentials.left_precision.shape[0] + 1
-        state_dim = initial_potential.precision_blocks.shape[0]
+        latent_dim = initial_potential.precision_blocks.shape[0]
         dtype = initial_potential.precision_blocks.dtype
 
         diagonal = jnp.zeros(
-            (num_time_steps, state_dim, state_dim),
+            (num_time_steps, latent_dim, latent_dim),
             dtype=dtype,
         )
         diagonal = diagonal.at[0].add(initial_potential.precision_blocks)
@@ -527,7 +527,7 @@ class GaussianChain(typing.NamedTuple):
         diagonal = diagonal.at[1:].add(pair_potentials.right_precision)
 
         information_vectors = jnp.zeros(
-            (num_time_steps, state_dim),
+            (num_time_steps, latent_dim),
             dtype=dtype,
         )
         information_vectors = information_vectors.at[0].add(initial_potential.information_vectors)
