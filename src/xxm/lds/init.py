@@ -6,8 +6,9 @@ from xxm.core.optim import gaussian as gaussian_fit, poisson as poisson_fit
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian
 
-from ..core.optim.loop import unstack_models
-from .model import GaussianInitialModel, LinearGaussianDynamicsModel, Model
+from xxm.core.models.gaussian import GaussianInitial, GaussianLinearDynamics
+from xxm.core.optim.loop import unstack_models
+from .model import Model
 
 
 def _covariance(
@@ -82,7 +83,7 @@ def gaussian_emissions_from_latents(
 def dynamics_from_latents(
     latents: jax.Array,
     covariance_floor: float,
-) -> LinearGaussianDynamicsModel:
+) -> GaussianLinearDynamics:
     """Fit linear dynamics to a known latent trajectory."""
     model = gaussian_fit.linear_from_pairs(
         latents[:-1],
@@ -91,19 +92,19 @@ def dynamics_from_latents(
 
     model = model.add_covariance_jitter(covariance_floor)
 
-    return LinearGaussianDynamicsModel(model)
+    return GaussianLinearDynamics(model)
 
 
 def initial_from_latents(
     observations: jax.Array,
     latents: jax.Array,
     covariance_floor: float = 1e-2,
-) -> GaussianInitialModel:
+) -> GaussianInitial:
     """Construct an LDS from a known latent trajectory."""
 
     # There is only one initial state estimate, so use the overall
     # latent covariance as a reasonable scale for its uncertainty.
-    return GaussianInitialModel(
+    return GaussianInitial(
         Gaussian(
             mean=latents[0],
             covariance=_add_covariance_floor(

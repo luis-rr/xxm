@@ -11,15 +11,14 @@ from xxm.core.chains.gaussian import (
     GaussianPotential,
 )
 from xxm.core.emissions.continuous import GaussianEmissions
-from xxm.hmm.model import (
-    DiscreteInitialModel,
-    DiscreteTransitionModel,
-)
-from xxm.lds.model import GaussianInitialModel
+from xxm.core.models.discrete import CategoricalInitial
+from xxm.hmm.model import CategoricalTransition
+
+from xxm.core.models.gaussian import GaussianInitial
 from xxm.slds.model import (
     Model,
     Posterior,
-    SwitchingLinearGaussianDynamicsModel,
+    SwitchingLinearGaussianDynamics,
 )
 from xxm.slds.inference import infer_variational
 from xxm.core.affine import Affine
@@ -62,7 +61,7 @@ def test_switching_dynamics_fit_recovers_known_linear_gaussian_model():
         continuous=continuous,
     )
 
-    dynamics = SwitchingLinearGaussianDynamicsModel(
+    dynamics = SwitchingLinearGaussianDynamics(
         model=LinearGaussian(
             affine=Affine(coefficients=jnp.zeros((1, 1, 1)), bias=jnp.zeros((1, 1))),
             covariance=jnp.ones((1, 1, 1)),
@@ -90,7 +89,7 @@ def test_switching_dynamics_fit_is_jittable():
 
     posterior = Posterior(discrete, continuous)
 
-    dynamics = SwitchingLinearGaussianDynamicsModel(
+    dynamics = SwitchingLinearGaussianDynamics(
         model=LinearGaussian(
             affine=Affine(coefficients=jnp.zeros((1, 1, 1)), bias=jnp.zeros((1, 1))),
             covariance=jnp.ones((1, 1, 1)),
@@ -126,16 +125,16 @@ class _IdentityGaussianEmissions(typing.NamedTuple):
 
 def _single_state_model() -> Model:
     return Model(
-        state_initial=DiscreteInitialModel(
+        state_initial=CategoricalInitial(
             Categorical(probs=jnp.array([1.0])),
         ),
-        transitions=DiscreteTransitionModel(
+        transitions=CategoricalTransition(
             Categorical(probs=jnp.array([[1.0]])),
         ),
-        latent_initial=GaussianInitialModel(
+        latent_initial=GaussianInitial(
             model=Gaussian(mean=jnp.array([0.0]), covariance=jnp.array([[1.0]])),
         ),
-        dynamics=SwitchingLinearGaussianDynamicsModel(
+        dynamics=SwitchingLinearGaussianDynamics(
             model=LinearGaussian(
                 affine=Affine(coefficients=jnp.array([[[0.8]]]), bias=jnp.array([[0.2]])),
                 covariance=jnp.array([[[0.5]]]),
@@ -149,10 +148,10 @@ def _single_state_model() -> Model:
 
 def _two_state_model() -> Model:
     return Model(
-        state_initial=DiscreteInitialModel(
+        state_initial=CategoricalInitial(
             Categorical(probs=jnp.array([0.7, 0.3])),
         ),
-        transitions=DiscreteTransitionModel(
+        transitions=CategoricalTransition(
             Categorical(
                 jnp.array(
                     [
@@ -162,10 +161,10 @@ def _two_state_model() -> Model:
                 )
             ),
         ),
-        latent_initial=GaussianInitialModel(
+        latent_initial=GaussianInitial(
             model=Gaussian(mean=jnp.array([0.0]), covariance=jnp.array([[1.0]])),
         ),
-        dynamics=SwitchingLinearGaussianDynamicsModel(
+        dynamics=SwitchingLinearGaussianDynamics(
             model=LinearGaussian(
                 affine=Affine(
                     coefficients=jnp.array([[[0.8]], [[-0.5]]]),

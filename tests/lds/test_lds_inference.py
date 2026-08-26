@@ -4,7 +4,8 @@ from jax import numpy as jnp
 
 from tests.lds.lds_helpers import make_model, make_observations
 from xxm.core.emissions.continuous import PoissonEmissions
-from xxm.lds.model import GaussianInitialModel, LinearGaussianDynamicsModel, Model
+from xxm.core.models.gaussian import GaussianInitial, GaussianLinearDynamics
+from xxm.lds.model import Model
 from xxm.lds.inference import (
     _NewtonSearchModel,
     _NewtonSearchParams,
@@ -20,8 +21,8 @@ from xxm.core.dists.poisson import LinearPoisson
 
 def make_scalar_poisson_model() -> Model[PoissonEmissions]:
     return Model(
-        initial=GaussianInitialModel(model=Gaussian(mean=jnp.zeros(1), covariance=jnp.eye(1))),
-        dynamics=LinearGaussianDynamicsModel(
+        initial=GaussianInitial(model=Gaussian(mean=jnp.zeros(1), covariance=jnp.eye(1))),
+        dynamics=GaussianLinearDynamics(
             model=LinearGaussian(
                 affine=Affine(coefficients=jnp.eye(1), bias=jnp.zeros(1)),
                 covariance=jnp.eye(1),

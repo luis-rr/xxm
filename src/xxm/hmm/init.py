@@ -14,7 +14,8 @@ from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
 
-from .model import DiscreteInitialModel, DiscreteTransitionModel, Emissions, Model
+from xxm.core.models.discrete import CategoricalInitial, CategoricalTransition
+from xxm.hmm.model import Emissions, Model
 
 
 def _kmeans(
@@ -102,8 +103,8 @@ def _initialize(
     )
 
     return Model(
-        initial=DiscreteInitialModel(Categorical(probs=initial_probs)),
-        transitions=DiscreteTransitionModel(Categorical(probs=transition_probs)),
+        initial=CategoricalInitial(Categorical(probs=initial_probs)),
+        transitions=CategoricalTransition(Categorical(probs=transition_probs)),
         emissions=emissions,
     )
 

@@ -9,6 +9,7 @@ import jax.numpy as jnp
 
 from xxm.core.chains.discrete import DiscreteChainMarginals as Posterior
 from xxm.core.dists.categorical import Categorical
+from xxm.core.models.discrete import CategoricalInitial, CategoricalTransition
 
 
 class Emissions(typing.Protocol):
@@ -35,73 +36,6 @@ class Emissions(typing.Protocol):
 EmissionsT = typing.TypeVar('EmissionsT', bound=Emissions)
 
 
-class DiscreteInitialModel(typing.NamedTuple):
-    model: Categorical  # no batch
-
-    @property
-    def num_states(self) -> int:
-        return self.model.num_categories
-
-    def sample(
-        self,
-        key: jax.Array,
-    ) -> jax.Array:  # ()
-        return self.model.sample(key)
-
-    def permute(
-        self,
-        permutation: jax.Array,  # (K,)
-    ) -> DiscreteInitialModel:
-        return self._replace(
-            model=self.model.permute(permutation),
-        )
-
-    def fit_params(
-        self,
-        posterior: Posterior,
-    ) -> typing.Self:
-        """Maximum-likelihood update from expected initial-state counts."""
-        return self._replace(model=Categorical.from_counts(posterior.state_probs[0]))
-
-
-class DiscreteTransitionModel(typing.NamedTuple):
-    model: Categorical  # K-batched
-
-    @property
-    def num_states(self) -> int:
-        return self.model.num_categories
-
-    def conditional(
-        self,
-        previous: jax.Array,  # (...)
-    ) -> Categorical:
-        """Conditional distribution of the next state."""
-        return self.model.select(previous)
-
-    def sample(
-        self,
-        key: jax.Array,
-        previous: jax.Array,  # (...)
-    ) -> jax.Array:  # (...)
-        """Sample the next state conditional on the previous state."""
-        return self.conditional(previous).sample(key)
-
-    def permute(
-        self,
-        permutation: jax.Array,  # (K,)
-    ) -> DiscreteTransitionModel:
-        return self._replace(model=self.model.select(permutation).permute(permutation))
-
-    def fit_params(
-        self,
-        posterior: Posterior,
-    ) -> typing.Self:
-        """Maximum-likelihood update from expected transition counts."""
-        expected_transitions = posterior.pair_probs.sum(axis=0)  # (K, K)
-
-        return self._replace(model=Categorical.from_counts(expected_transitions))
-
-
 class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     r"""
     Container for HMM model parameters.
@@ -111,8 +45,8 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     * ``emission_log_likelihoods[t, k] = \log p(y_t \mid z_t=k)``
     """
 
-    initial: DiscreteInitialModel
-    transitions: DiscreteTransitionModel
+    initial: CategoricalInitial
+    transitions: CategoricalTransition
     emissions: EmissionsT
 
     @property

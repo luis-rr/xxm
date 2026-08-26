@@ -5,8 +5,10 @@ import jax.numpy as jnp
 
 from xxm.core.chains.discrete import DiscreteChainMarginals
 from xxm.core.chains.gaussian import GaussianChainMarginals, GaussianPairPotential
-from xxm.hmm.model import DiscreteInitialModel, DiscreteTransitionModel
-from xxm.lds.model import EmissionsT, GaussianInitialModel
+from xxm.core.models.discrete import CategoricalInitial
+from xxm.core.models.gaussian import GaussianInitial
+from xxm.core.models.discrete import CategoricalTransition
+from xxm.lds.model import EmissionsT
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.dists.gaussian import LinearGaussian
 
@@ -16,7 +18,7 @@ class Posterior(typing.NamedTuple):
     continuous: GaussianChainMarginals  # T latents
 
 
-class SwitchingLinearGaussianDynamicsModel(typing.NamedTuple):
+class SwitchingLinearGaussianDynamics(typing.NamedTuple):
     model: LinearGaussian  # K-batched, input dimension D, output dimension D
 
     @property
@@ -77,10 +79,10 @@ class SwitchingLinearGaussianDynamicsModel(typing.NamedTuple):
 
 
 class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
-    state_initial: DiscreteInitialModel
-    transitions: DiscreteTransitionModel
-    latent_initial: GaussianInitialModel
-    dynamics: SwitchingLinearGaussianDynamicsModel
+    state_initial: CategoricalInitial
+    transitions: CategoricalTransition
+    latent_initial: GaussianInitial
+    dynamics: SwitchingLinearGaussianDynamics
     emissions: EmissionsT
 
     @property

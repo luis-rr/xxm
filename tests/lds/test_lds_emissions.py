@@ -331,7 +331,7 @@ def test_poisson_fit_recovers_known_parameters():
         ),
     )
 
-    fitted = initial_emissions.fit_params(observations, posterior)
+    fitted = initial_emissions.fit_params(observations, posterior)  # type: ignore
 
     np.testing.assert_allclose(
         fitted.model.affine.coefficients,

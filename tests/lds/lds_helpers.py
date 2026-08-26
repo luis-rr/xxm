@@ -2,20 +2,21 @@ import jax
 from jax import numpy as jnp
 
 from xxm.core.emissions.continuous import GaussianEmissions
-from xxm.lds.model import GaussianInitialModel, LinearGaussianDynamicsModel, Model
+from xxm.core.models.gaussian import GaussianInitial, GaussianLinearDynamics
+from xxm.lds.model import Model
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 
 
 def make_model() -> Model[GaussianEmissions]:
     return Model(
-        initial=GaussianInitialModel(
+        initial=GaussianInitial(
             model=Gaussian(
                 mean=jnp.array([0.5, -0.3]),
                 covariance=jnp.array([[2.0, 0.2], [0.2, 1.5]]),
             ),
         ),
-        dynamics=LinearGaussianDynamicsModel(
+        dynamics=GaussianLinearDynamics(
             model=LinearGaussian(
                 affine=Affine(
                     coefficients=jnp.array([[0.9, 0.1], [0.0, 0.8]]),

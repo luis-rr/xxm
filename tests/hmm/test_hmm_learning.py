@@ -4,7 +4,8 @@ import numpy as np
 
 from xxm.core.chains.discrete import DiscreteChainMarginals
 from xxm.core.emissions.discrete import GaussianEmissions, PoissonEmissions
-from xxm.hmm.model import DiscreteInitialModel, DiscreteTransitionModel, Model
+from xxm.core.models.discrete import CategoricalInitial, CategoricalTransition
+from xxm.hmm.model import Model
 from xxm.hmm.learning import em_step
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian
@@ -46,7 +47,7 @@ def test_m_step_initial_probs():
         pair_marginals=jnp.zeros((2, 2, 2)),
     )
 
-    initial = DiscreteInitialModel(Categorical(probs=jnp.array([0.5, 0.5])))
+    initial = CategoricalInitial(Categorical(probs=jnp.array([0.5, 0.5])))
 
     result = initial.fit_params(posterior=posterior)
 
@@ -80,7 +81,7 @@ def test_m_step_transition_probs():
         pair_marginals,
     )
 
-    transitions = DiscreteTransitionModel(Categorical(probs=jnp.array([[0.5, 0.5], [0.5, 0.5]])))
+    transitions = CategoricalTransition(Categorical(probs=jnp.array([[0.5, 0.5], [0.5, 0.5]])))
 
     result = transitions.fit_params(posterior)
 
@@ -264,8 +265,8 @@ def test_gaussian_m_step():
 
 def test_em_step_is_jit_compatible():
     model = Model(
-        initial=DiscreteInitialModel(Categorical(probs=jnp.array([0.5, 0.5]))),
-        transitions=DiscreteTransitionModel(
+        initial=CategoricalInitial(Categorical(probs=jnp.array([0.5, 0.5]))),
+        transitions=CategoricalTransition(
             Categorical(
                 probs=jnp.array(
                     [
