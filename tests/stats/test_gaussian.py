@@ -47,7 +47,7 @@ def test_fit_weighted_matches_hard_assignments():
         ]
     )
 
-    fit = gaussian_fit.gaussian_from_samples_weighted(observations, weights)
+    fit = gaussian_fit.from_samples_weighted(observations, weights)
 
     np.testing.assert_allclose(fit.mean, [[1.0], [12.0]], atol=ATOL)
     np.testing.assert_allclose(fit.covariance, [[[1.0]], [[4.0]]], atol=ATOL)
@@ -125,7 +125,7 @@ def test_public_routines_are_jittable():
         log_likelihoods = Gaussian(mean=means, covariance=covariances).log_prob_broadcast(
             observations
         )
-        weighted_fit = gaussian_fit.gaussian_from_samples_weighted(
+        weighted_fit = gaussian_fit.from_samples_weighted(
             observations,
             weights,
         )

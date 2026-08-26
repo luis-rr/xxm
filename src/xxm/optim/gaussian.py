@@ -7,7 +7,7 @@ from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 EPS: float = 1e-8
 
 
-def gaussian_from_samples(
+def from_samples(
     observations: jax.Array,  # (T, N)
 ) -> Gaussian:
     """Fit a Gaussian from samples along the first axis."""
@@ -25,7 +25,7 @@ def gaussian_from_samples(
     return Gaussian(mean=mean, covariance=covariance)
 
 
-def gaussian_from_samples_weighted(
+def from_samples_weighted(
     observations: jax.Array,  # (T, N)
     weights: jax.Array,  # (T, ...)
 ) -> Gaussian:
@@ -52,7 +52,7 @@ def gaussian_from_samples_weighted(
     return Gaussian(mean=mean, covariance=covariance)
 
 
-def gaussian_from_samples_grouped(
+def from_samples_grouped(
     observations: jax.Array,  # (T, N)
     assignments: jax.Array,  # (T,)
     num_groups: int,
@@ -64,7 +64,7 @@ def gaussian_from_samples_grouped(
         dtype=observations.dtype,
     )  # (T, K)
 
-    return gaussian_from_samples_weighted(
+    return from_samples_weighted(
         observations=observations,
         weights=weights,
     )

@@ -220,14 +220,14 @@ class _NewtonSearchModel(typing.NamedTuple):
         )
 
 
-def poisson_from_samples(
+def from_samples(
     observations: jax.Array,  # (T, N)
 ) -> Poisson:
     rates = jnp.mean(observations, axis=0)
     return Poisson(log_rates=jnp.log(jnp.maximum(rates, EPS)))
 
 
-def poisson_from_samples_weighted(
+def from_samples_weighted(
     observations: jax.Array,  # (T, N)
     weights: jax.Array,  # (T, ...)
 ) -> Poisson:
@@ -248,7 +248,7 @@ def poisson_from_samples_weighted(
     )
 
 
-def poisson_from_samples_grouped(
+def from_samples_grouped(
     observations: jax.Array,  # (T, N)
     assignments: jax.Array,  # (T,)
     num_groups: int,
@@ -260,7 +260,7 @@ def poisson_from_samples_grouped(
         dtype=jnp.result_type(observations, jnp.float32),
     )  # (T, K)
 
-    return poisson_from_samples_weighted(
+    return from_samples_weighted(
         observations=observations,
         weights=weights,
     )
@@ -279,14 +279,14 @@ def _initial_affine(
     )
 
     if weights is None:
-        bias = poisson_from_samples(
+        bias = from_samples(
             outputs,
         ).log_rates  # (O,)
 
         batch_shape = ()
 
     else:
-        bias = poisson_from_samples_weighted(
+        bias = from_samples_weighted(
             observations=outputs,
             weights=weights,
         ).log_rates  # (..., O)

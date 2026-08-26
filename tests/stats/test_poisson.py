@@ -98,7 +98,7 @@ def test_fit_weighted_matches_weighted_sample_means():
         ]
     )
 
-    fit = poisson_fit.poisson_from_samples_weighted(observations, weights)
+    fit = poisson_fit.from_samples_weighted(observations, weights)
 
     np.testing.assert_allclose(
         fit.log_rates,
@@ -108,7 +108,7 @@ def test_fit_weighted_matches_weighted_sample_means():
 
 
 def test_fit_weighted_keeps_zero_rates_finite():
-    fit = poisson_fit.poisson_from_samples_weighted(
+    fit = poisson_fit.from_samples_weighted(
         observations=jnp.zeros((2, 1)),
         weights=jnp.ones((2, 1)),
     )
@@ -215,7 +215,7 @@ def test_public_routines_are_jittable():
             observations=observations,
             inputs=inputs,
         )
-        fitted = poisson_fit.poisson_from_samples_weighted(observations, weights)
+        fitted = poisson_fit.from_samples_weighted(observations, weights)
         marginal_fit = poisson_fit.linear_from_marginals(
             inputs=Gaussian(mean=means, covariance=covariances),
             outputs=observations,

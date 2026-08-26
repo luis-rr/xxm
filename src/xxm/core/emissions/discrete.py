@@ -26,7 +26,7 @@ class GaussianEmissions(typing.NamedTuple):
         observations: jax.Array,
         posterior: Posterior,
     ) -> typing.Self:
-        gaussian = gaussian_fit.gaussian_from_samples_weighted(
+        gaussian = gaussian_fit.from_samples_weighted(
             observations,
             posterior.state_probs,
         )
@@ -57,7 +57,7 @@ class PoissonEmissions(typing.NamedTuple):
 
     def fit_params(self, observations: jax.Array, posterior: Posterior) -> 'PoissonEmissions':
         return self._replace(
-            model=poisson_fit.poisson_from_samples_weighted(
+            model=poisson_fit.from_samples_weighted(
                 observations=observations,
                 weights=posterior.state_probs,
             ),
