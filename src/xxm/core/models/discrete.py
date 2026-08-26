@@ -3,7 +3,7 @@ import typing
 import jax
 
 from xxm.core.dists.categorical import Categorical
-from xxm.core.emissions.discrete import DiscretePosterior
+from xxm.core.posteriors import DiscretePosterior
 
 
 class CategoricalInitial(typing.NamedTuple):

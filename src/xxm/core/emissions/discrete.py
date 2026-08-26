@@ -7,16 +7,7 @@ from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import poisson as poisson_fit
-
-
-class DiscretePosterior(typing.Protocol):
-    @property
-    def state_probs(self) -> jax.Array:  # (T, K)
-        ...
-
-    @property
-    def pair_probs(self) -> jax.Array:  # (T, K, K)
-        ...
+from xxm.core.posteriors import DiscretePosterior
 
 
 class Emissions(typing.Protocol):

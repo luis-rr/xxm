@@ -5,22 +5,7 @@ from jax import numpy as jnp
 
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.optim import gaussian as gaussian_fit
-
-
-class ContinuousPosterior(typing.Protocol):
-    @property
-    def means(self) -> jax.Array:  # (T, D)
-        ...
-
-    @property
-    def covariances(self) -> jax.Array:  # (T, D, D)
-        ...
-
-    def raw_second_moments(self) -> jax.Array:  # (T, D, D)
-        ...
-
-    def raw_cross_moments(self) -> jax.Array:  # (T-1, D, D)
-        ...
+from xxm.core.posteriors import ContinuousPosterior
 
 
 class GaussianInitial(typing.NamedTuple):
