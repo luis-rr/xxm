@@ -18,7 +18,7 @@ from xxm.core.models.gaussian import GaussianInitial
 from xxm.slds.model import (
     Model,
     Posterior,
-    SwitchingLinearGaussianDynamics,
+    GaussianLinearSwitchingDynamics,
 )
 from xxm.slds.inference import infer_variational
 from xxm.core.affine import Affine
@@ -61,7 +61,7 @@ def test_switching_dynamics_fit_recovers_known_linear_gaussian_model():
         continuous=continuous,
     )
 
-    dynamics = SwitchingLinearGaussianDynamics(
+    dynamics = GaussianLinearSwitchingDynamics(
         model=LinearGaussian(
             affine=Affine(coefficients=jnp.zeros((1, 1, 1)), bias=jnp.zeros((1, 1))),
             covariance=jnp.ones((1, 1, 1)),
@@ -89,7 +89,7 @@ def test_switching_dynamics_fit_is_jittable():
 
     posterior = Posterior(discrete, continuous)
 
-    dynamics = SwitchingLinearGaussianDynamics(
+    dynamics = GaussianLinearSwitchingDynamics(
         model=LinearGaussian(
             affine=Affine(coefficients=jnp.zeros((1, 1, 1)), bias=jnp.zeros((1, 1))),
             covariance=jnp.ones((1, 1, 1)),
@@ -134,7 +134,7 @@ def _single_state_model() -> Model:
         latent_initial=GaussianInitial(
             model=Gaussian(mean=jnp.array([0.0]), covariance=jnp.array([[1.0]])),
         ),
-        dynamics=SwitchingLinearGaussianDynamics(
+        dynamics=GaussianLinearSwitchingDynamics(
             model=LinearGaussian(
                 affine=Affine(coefficients=jnp.array([[[0.8]]]), bias=jnp.array([[0.2]])),
                 covariance=jnp.array([[[0.5]]]),
@@ -164,7 +164,7 @@ def _two_state_model() -> Model:
         latent_initial=GaussianInitial(
             model=Gaussian(mean=jnp.array([0.0]), covariance=jnp.array([[1.0]])),
         ),
-        dynamics=SwitchingLinearGaussianDynamics(
+        dynamics=GaussianLinearSwitchingDynamics(
             model=LinearGaussian(
                 affine=Affine(
                     coefficients=jnp.array([[[0.8]], [[-0.5]]]),

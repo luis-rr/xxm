@@ -18,7 +18,7 @@ class Posterior(typing.NamedTuple):
     continuous: GaussianChainMarginals  # T latents
 
 
-class SwitchingLinearGaussianDynamics(typing.NamedTuple):
+class GaussianLinearSwitchingDynamics(typing.NamedTuple):
     model: LinearGaussian  # K-batched, input dimension D, output dimension D
 
     @property
@@ -82,7 +82,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     state_initial: CategoricalInitial
     transitions: CategoricalTransition
     latent_initial: GaussianInitial
-    dynamics: SwitchingLinearGaussianDynamics
+    dynamics: GaussianLinearSwitchingDynamics
     emissions: EmissionsT
 
     @property
