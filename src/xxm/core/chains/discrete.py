@@ -63,7 +63,7 @@ class DiscreteChain(typing.NamedTuple):
 
         messages = _forward_backward(self)
 
-        return messages.calculate_marginals(self)
+        return messages.compute_marginals(self)
 
     def add_local_potential(
         self,
@@ -130,21 +130,21 @@ class _DiscreteChainMessages(typing.NamedTuple):
     backward_messages: jax.Array  # (T, K)
     log_scaling_factors: jax.Array  # (T,)
 
-    def calculate_marginals(
+    def compute_marginals(
         self,
         chain: DiscreteChain,
     ) -> tuple[DiscreteChainMarginals, jax.Array]:
 
         posterior = DiscreteChainMarginals(
-            state_probs=self.calculate_state_marginals(),
-            pair_probs=self.calculate_pair_marginals(chain),
+            state_probs=self.compute_state_marginals(),
+            pair_probs=self.compute_pair_marginals(chain),
         )
 
-        log_normalizer = self.calculate_log_normalizer()
+        log_normalizer = self.compute_log_normalizer()
 
         return posterior, log_normalizer
 
-    def calculate_state_marginals(self) -> jax.Array:
+    def compute_state_marginals(self) -> jax.Array:
         """Compute state probabilities gamma[t, k]."""
         if (
             self.forward_messages.ndim != 2
@@ -170,7 +170,7 @@ class _DiscreteChainMessages(typing.NamedTuple):
 
         return unnormalized_state_marginals / state_marginal_normalizers
 
-    def calculate_pair_marginals(
+    def compute_pair_marginals(
         self,
         chain: DiscreteChain,
     ) -> jax.Array:
@@ -222,7 +222,7 @@ class _DiscreteChainMessages(typing.NamedTuple):
             self.log_scaling_factors[1:],
         )
 
-    def calculate_log_normalizer(self) -> jax.Array:
+    def compute_log_normalizer(self) -> jax.Array:
         """Compute the log normalizer of the chain distribution."""
         return jnp.sum(self.log_scaling_factors)
 

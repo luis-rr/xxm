@@ -161,7 +161,7 @@ def test_normalization_and_finiteness_invariants() -> None:
     assert np.isfinite(np.asarray(messages.log_scaling_factors)).all()
     assert (np.asarray(messages.forward_messages) >= 0.0).all()
 
-    marginals, log_normalizer = messages.calculate_marginals(chain)
+    marginals, log_normalizer = messages.compute_marginals(chain)
 
     np.testing.assert_allclose(
         np.asarray(marginals.state_probs.sum(axis=1)),
