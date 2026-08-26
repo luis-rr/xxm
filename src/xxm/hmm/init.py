@@ -180,21 +180,21 @@ def _initialize_ar_state_assignments(
 def _initialize_ar_gaussian_emissions(
     observations: jax.Array,  # (T, N)
     num_states: int,
-    max_lag: int,
+    num_lags: int,
     key: jax.Array,
 ) -> AREmissions[LinearGaussian]:
     history = lagged_observations(
         observations,
-        max_lag=max_lag,
+        num_lags=num_lags,
     )  # (T-L, L, N)
 
-    current = observations[max_lag:]  # (T-L, N)
+    current = observations[num_lags:]  # (T-L, N)
 
     num_samples, _, num_dims = history.shape
 
     predictors = history.reshape(
         num_samples,
-        max_lag * num_dims,
+        num_lags * num_dims,
     )  # (T-L, L*N)
 
     assignments = _initialize_ar_state_assignments(
@@ -279,21 +279,21 @@ def init_hmm_poisson(
 def _initialize_ar_poisson_emissions(
     observations: jax.Array,  # (T, N)
     num_states: int,
-    max_lag: int,
+    num_lags: int,
     key: jax.Array,
 ) -> AREmissions[LinearPoisson]:
     history = lagged_observations(
         observations,
-        max_lag=max_lag,
+        num_lags=num_lags,
     )  # (T-L, L, N)
 
-    current = observations[max_lag:]  # (T-L, N)
+    current = observations[num_lags:]  # (T-L, N)
 
     num_samples, _, num_dims = history.shape
 
     predictors = history.reshape(
         num_samples,
-        max_lag * num_dims,
+        num_lags * num_dims,
     )  # (T-L, L*N)
 
     assignments = _initialize_ar_state_assignments(
@@ -316,12 +316,14 @@ def _initialize_ar_poisson_emissions(
 def init_arhmm_poisson(
     num_states: int,
     observations: jax.Array,
-    max_lag: int,
+    num_lags: int,
     key: jax.Array,
     self_transition_prob: float = 0.9,
 ) -> Model:
 
-    emissions = _initialize_ar_poisson_emissions(observations, num_states, max_lag=max_lag, key=key)
+    emissions = _initialize_ar_poisson_emissions(
+        observations, num_states, num_lags=num_lags, key=key
+    )
     return _initialize(
         num_states,
         emissions,

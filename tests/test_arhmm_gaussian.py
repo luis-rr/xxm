@@ -17,12 +17,12 @@ def _flatten_lagged_coefficients(coefficients: jax.Array) -> jax.Array:
     The predictor concatenates lag blocks from lag 1 to lag L, so the
     coefficient columns must be reordered to match.
     """
-    num_states, max_lag, num_dims_out, num_dims_in = coefficients.shape
+    num_states, num_lags, num_dims_out, num_dims_in = coefficients.shape
 
     return jnp.moveaxis(coefficients, 1, 2).reshape(
         num_states,
         num_dims_out,
-        max_lag * num_dims_in,
+        num_lags * num_dims_in,
     )
 
 
@@ -50,7 +50,7 @@ def test_ar_gaussian_properties():
     )
 
     assert emissions.num_states == 3
-    assert emissions.max_lag == 2
+    assert emissions.num_lags == 2
     assert emissions.output_dim == 4
 
 
@@ -70,7 +70,7 @@ def test_ar_gaussian_lagged_observations():
         ]
     )
 
-    history = lagged_observations(observations, max_lag=emissions.max_lag)
+    history = lagged_observations(observations, num_lags=emissions.num_lags)
 
     expected = jnp.array(
         [

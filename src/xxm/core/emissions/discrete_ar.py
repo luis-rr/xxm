@@ -36,11 +36,11 @@ from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
 
 
-def lagged_observations(observations: jax.Array, max_lag: int) -> jax.Array:  # (T-L, L, N)
+def lagged_observations(observations: jax.Array, num_lags: int) -> jax.Array:  # (T-L, L, N)
     """Return histories ordered from lag 1 to lag L."""
 
     return jnp.stack(
-        [observations[max_lag - i - 1 : observations.shape[0] - i - 1] for i in range(max_lag)],
+        [observations[num_lags - i - 1 : observations.shape[0] - i - 1] for i in range(num_lags)],
         axis=1,
     )
 
@@ -106,7 +106,7 @@ class AREmissions(typing.NamedTuple, typing.Generic[ConditionalModelT]):
         return self.model.output_dim
 
     @property
-    def max_lag(self) -> int:
+    def num_lags(self) -> int:
         return self.model.input_dim // self.output_dim
 
     def predictors(
@@ -114,11 +114,11 @@ class AREmissions(typing.NamedTuple, typing.Generic[ConditionalModelT]):
         observations: jax.Array,  # (T, N)
     ) -> jax.Array:  # (T-L, L*N)
         """Construct flattened autoregressive predictors."""
-        history = lagged_observations(observations, self.max_lag)  # (T-L, L, N)
+        history = lagged_observations(observations, self.num_lags)  # (T-L, L, N)
 
         return history.reshape(
             history.shape[0],
-            self.max_lag * self.output_dim,
+            self.num_lags * self.output_dim,
         )  # (T-L, L*N)
 
     @typing.overload
@@ -153,10 +153,10 @@ class AREmissions(typing.NamedTuple, typing.Generic[ConditionalModelT]):
     ) -> jax.Array:  # (T, K)
         conditional = self.conditional(observations)
 
-        log_probs = conditional.log_prob(observations[self.max_lag :, None, :])  # (T-L, K)
+        log_probs = conditional.log_prob(observations[self.num_lags :, None, :])  # (T-L, K)
 
         padding = jnp.zeros(
-            (self.max_lag, self.num_states),
+            (self.num_lags, self.num_states),
             dtype=log_probs.dtype,
         )  # (L, K)
 
@@ -179,8 +179,8 @@ class AREmissions(typing.NamedTuple, typing.Generic[ConditionalModelT]):
         posterior: Posterior,
     ) -> typing.Self:
         predictors = self.predictors(observations)  # (T-L, L*N)
-        current = observations[self.max_lag :]  # (T-L, N)
-        weights = posterior.state_probs[self.max_lag :]  # (T-L, K)
+        current = observations[self.num_lags :]  # (T-L, N)
+        weights = posterior.state_probs[self.num_lags :]  # (T-L, K)
 
         model = _fit_ar_model(
             model=self.model,
@@ -209,7 +209,7 @@ class AREmissions(typing.NamedTuple, typing.Generic[ConditionalModelT]):
             key, key_observation = jax.random.split(key)
 
             predictors = history.reshape(
-                self.max_lag * self.output_dim,
+                self.num_lags * self.output_dim,
             )  # (L*N,)
 
             conditional = self.model.select(state).conditional(predictors)
@@ -227,7 +227,7 @@ class AREmissions(typing.NamedTuple, typing.Generic[ConditionalModelT]):
             return (new_history, key), observation
 
         initial_history = jnp.zeros(
-            (self.max_lag, self.output_dim),
+            (self.num_lags, self.output_dim),
             dtype=self.model.dtype,
         )  # (L, N)
 
