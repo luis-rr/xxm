@@ -192,13 +192,13 @@ def test_single_state_slds_matches_gaussian_chain():
     # With K=1, q(z_t=0)=1 and the SLDS reduces to a Gaussian chain.
     state_probs = jnp.ones((observations.shape[0] - 1, 1))
 
-    pair_potentials = model.dynamics.get_pair_potentials().weighted_sum(state_probs)
+    pair_potentials = model.dynamics.compute_pair_potentials().weighted_sum(state_probs)
     initial_potential = GaussianPotential.from_moments(
         Gaussian(
             mean=model.latent_initial.model.mean, covariance=model.latent_initial.model.covariance
         ),
     )
-    observation_potential = model.emissions.get_potential(observations)
+    observation_potential = model.emissions.compute_potential(observations)
 
     expected, _ = (
         GaussianChain.from_pair_potentials(

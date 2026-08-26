@@ -51,13 +51,13 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     """
 
     initial: GaussianInitial
-    dynamics: LinearDynamics
+    dynamics: GaussianLinearDynamics
     emissions: EmissionsT
 
-    def get_initial_potential(self) -> GaussianPotential:
+    def compute_initial_potential(self) -> GaussianPotential:
         return GaussianPotential.from_moments(self.initial.model)
 
-    def get_pair_potentials(
+    def compute_pair_potentials(
         self,
         num_time_steps: int,
     ) -> GaussianPairPotential:
@@ -109,7 +109,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
         return latents, observations
 
-    def get_prior_mean_latents(self, num_time_steps: int) -> jax.Array:
+    def compute_prior_mean_latents(self, num_time_steps: int) -> jax.Array:
         """Compute the mean latent trajectory under the model's prior."""
 
         def step(

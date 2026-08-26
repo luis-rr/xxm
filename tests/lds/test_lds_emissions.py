@@ -43,7 +43,7 @@ def test_gaussian_potential_matches_known_value():
         ),
     )
 
-    potential = emissions.get_potential(jnp.array([[2.0, 3.0]]))
+    potential = emissions.compute_potential(jnp.array([[2.0, 3.0]]))
 
     expected_precision = jnp.array(
         [
@@ -175,7 +175,7 @@ def test_gaussian_emissions_potential_has_one_factor_per_observation():
         ]
     )
 
-    potential = emissions.get_potential(observations)
+    potential = emissions.compute_potential(observations)
 
     # For R = 4 and C = 2:
     #
@@ -277,7 +277,7 @@ def test_poisson_local_potential_matches_value_gradient_and_hessian():
     observations = jnp.array([[3.0]])
     reference = jnp.array([[0.5]])
 
-    potential = emissions.get_local_potential(
+    potential = emissions.compute_local_potential(
         observations,
         reference,
     )
@@ -382,7 +382,7 @@ def test_gaussian_methods_are_jittable():
         covariances=jnp.broadcast_to(jnp.eye(2), (3, 2, 2)),
     )
 
-    jax.jit(emissions.get_potential)(observations)
+    jax.jit(emissions.compute_potential)(observations)
     jax.jit(emissions.log_likelihood)(observations, latents)
     jax.jit(emissions.sample)(jax.random.key(0), latents[0])
     jax.jit(emissions.fit_params)(observations, posterior)
@@ -404,6 +404,6 @@ def test_poisson_methods_are_jittable():
 
     jax.jit(emissions.rates)(latents)
     jax.jit(emissions.log_likelihood)(observations, latents)
-    jax.jit(emissions.get_local_potential)(observations, latents)
+    jax.jit(emissions.compute_local_potential)(observations, latents)
     jax.jit(emissions.sample)(jax.random.key(0), latents[0])
     jax.jit(emissions.fit_params)(observations, posterior)

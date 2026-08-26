@@ -23,8 +23,8 @@ class ContinuousPotentials(typing.NamedTuple):
     @classmethod
     def from_model(cls, model: Model, observations: jax.Array) -> 'ContinuousPotentials':
 
-        dynamics_potentials = model.dynamics.get_pair_potentials()
-        observation_potentials = model.emissions.get_potential(observations)
+        dynamics_potentials = model.dynamics.compute_pair_potentials()
+        observation_potentials = model.emissions.compute_potential(observations)
         initial_potential = GaussianPotential.from_moments(model.latent_initial.model)
 
         return ContinuousPotentials(
@@ -62,9 +62,9 @@ class ContinuousPotentials(typing.NamedTuple):
         state_probs: jax.Array,
     ) -> jax.Array:
         posterior, _ = self.infer(state_probs)
-        return self.get_expected_state_log_potentials(posterior)
+        return self.compute_expected_state_log_potentials(posterior)
 
-    def get_expected_state_log_potentials(
+    def compute_expected_state_log_potentials(
         self,
         posterior: GaussianChainMarginals,
     ) -> jax.Array:
@@ -172,7 +172,7 @@ def infer_variational(
     def step(_, disc_posterior):
         cont_posterior, _ = cont_potentials.infer(disc_posterior.state_probs)
 
-        state_log_potentials = cont_potentials.get_expected_state_log_potentials(cont_posterior)
+        state_log_potentials = cont_potentials.compute_expected_state_log_potentials(cont_posterior)
 
         disc_posterior, _ = disc_potentials.infer(state_log_potentials)
 

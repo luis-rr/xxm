@@ -25,7 +25,7 @@ class SwitchingLinearGaussianDynamics(typing.NamedTuple):
     def num_states(self) -> int:
         return self.model.covariance.shape[0]
 
-    def get_pair_potentials(self) -> GaussianPairPotential:
+    def compute_pair_potentials(self) -> GaussianPairPotential:
         """Return one Gaussian pair potential for each discrete state."""
         return GaussianPairPotential.from_linear_conditional(self.model)
 

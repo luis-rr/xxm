@@ -39,7 +39,7 @@ def infer_exact(
         num_time_steps=observations.shape[0],
     )
 
-    observation_potential = model.emissions.get_potential(observations)
+    observation_potential = model.emissions.compute_potential(observations)
 
     posterior_chain = latent_chain.add_local_potential(
         observation_potential,

@@ -36,7 +36,7 @@ class GaussianEmissions(typing.NamedTuple):
 
         return self.model.log_prob_broadcast(observations)
 
-    def get_potential(self, observations: jax.Array) -> DiscretePotential:
+    def compute_potential(self, observations: jax.Array) -> DiscretePotential:
         return DiscretePotential(
             log_values=self.log_likelihoods(observations),
         )
@@ -70,7 +70,7 @@ class PoissonEmissions(typing.NamedTuple):
     def log_likelihoods(self, observations: jax.Array) -> jax.Array:
         return self.model.log_prob_broadcast(observations)
 
-    def get_potential(self, observations: jax.Array) -> DiscretePotential:
+    def compute_potential(self, observations: jax.Array) -> DiscretePotential:
         return DiscretePotential(
             log_values=self.log_likelihoods(observations),
         )

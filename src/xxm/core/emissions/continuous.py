@@ -27,7 +27,7 @@ class Emissions(typing.Protocol):
 class QuadraticEmissions(Emissions, typing.Protocol):
     """Emissions with a quadratic log-likelihood, so that the posterior is Gaussian."""
 
-    def get_potential(
+    def compute_potential(
         self,
         observations: jax.Array,
     ) -> GaussianPotential: ...
@@ -42,7 +42,7 @@ QuadraticEmissionsT = typing.TypeVar(
 class LaplaceEmissions(Emissions, typing.Protocol):
     """Emissions that provide a local quadratic approximation for a latent."""
 
-    def get_local_potential(
+    def compute_local_potential(
         self,
         observations: jax.Array,
         latents: jax.Array,
@@ -75,7 +75,7 @@ class GaussianEmissions(typing.NamedTuple):
         """Compute the total conditional log likelihood."""
         return jnp.sum(self.conditional(latents).log_prob(observations))
 
-    def get_potential(
+    def compute_potential(
         self,
         observations: jax.Array,
     ) -> GaussianPotential:
@@ -144,7 +144,7 @@ class PoissonEmissions(typing.NamedTuple):
         """Compute the total conditional log likelihood."""
         return jnp.sum(self.conditional(latents).log_prob(observations))
 
-    def get_local_potential(
+    def compute_local_potential(
         self,
         observations: jax.Array,  # (T, N)
         latents: jax.Array,  # (T, D)

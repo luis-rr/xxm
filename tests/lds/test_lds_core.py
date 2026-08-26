@@ -15,7 +15,7 @@ def test_dynamics_next_mean_applies_matrix_and_bias():
 def test_prior_mean_starts_at_initial_mean():
     model = make_model()
 
-    means = model.get_prior_mean_latents(num_time_steps=3)
+    means = model.compute_prior_mean_latents(num_time_steps=3)
 
     assert jnp.allclose(means[0], model.initial.model.mean)
     assert jnp.allclose(means[1], model.dynamics.model.conditional(means[0]).mean)

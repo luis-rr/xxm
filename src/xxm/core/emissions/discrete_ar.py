@@ -165,7 +165,7 @@ class AREmissions(typing.NamedTuple, typing.Generic[ConditionalModelT]):
             axis=0,
         )  # (T, K)
 
-    def get_potential(
+    def compute_potential(
         self,
         observations: jax.Array,  # (T, N)
     ) -> DiscretePotential:

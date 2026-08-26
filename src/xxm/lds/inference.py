@@ -17,8 +17,8 @@ def to_chain(
 ) -> Chain:
     """Construct the Gaussian chain defined by the latent LDS prior."""
     return Chain.from_pair_potentials(
-        model.get_initial_potential(),
-        model.get_pair_potentials(num_time_steps),
+        model.compute_initial_potential(),
+        model.compute_pair_potentials(num_time_steps),
     )
 
 
@@ -33,7 +33,7 @@ def infer_exact(
         num_time_steps=observations.shape[0],
     )
 
-    observation_potential = model.emissions.get_potential(observations)
+    observation_potential = model.emissions.compute_potential(observations)
 
     posterior_chain = latent_chain.add_local_potential(
         observation_potential,
@@ -91,7 +91,7 @@ class _NewtonSearchModel(
     def newton_direction(self, params: _NewtonSearchParams) -> _NewtonSearchParams:
         """Compute the Newton direction for the latent trajectory."""
 
-        observation_potential = self.emissions.get_local_potential(
+        observation_potential = self.emissions.compute_local_potential(
             self.observations,
             params.latents,
         )
@@ -142,7 +142,7 @@ def infer_laplace(
     num_time_steps = observations.shape[0]
 
     if initial_latents is None:
-        latents = model.get_prior_mean_latents(num_time_steps)
+        latents = model.compute_prior_mean_latents(num_time_steps)
     else:
         latents = initial_latents
 
@@ -171,7 +171,7 @@ def infer_laplace(
 
     # Rebuild the approximation at the final mode: the covariance of the
     # Laplace approximation must use the Hessian evaluated there.
-    observation_potential = model.emissions.get_local_potential(
+    observation_potential = model.emissions.compute_local_potential(
         observations,
         latents,
     )
