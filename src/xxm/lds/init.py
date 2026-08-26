@@ -1,7 +1,7 @@
 import jax
 from jax import numpy as jnp
 
-from xxm.core.emissions.gaussian import GaussianEmissions, PoissonEmissions
+from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
 from xxm.optim import gaussian as gaussian_fit, poisson as poisson_fit
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian

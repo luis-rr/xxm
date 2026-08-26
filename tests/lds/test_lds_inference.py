@@ -3,7 +3,7 @@ import numpy as np
 from jax import numpy as jnp
 
 from tests.lds.lds_helpers import make_model, make_observations
-from xxm.core.emissions.gaussian import PoissonEmissions
+from xxm.core.emissions.continuous import PoissonEmissions
 from xxm.lds.core import GaussianInitialModel, LinearGaussianDynamicsModel, Model
 from xxm.lds.inference import (
     _NewtonSearchModel,

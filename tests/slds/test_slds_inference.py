@@ -10,7 +10,7 @@ from xxm.core.chains.gaussian import (
     GaussianChainMarginals,
     GaussianPotential,
 )
-from xxm.core.emissions.gaussian import GaussianEmissions
+from xxm.core.emissions.continuous import GaussianEmissions
 from xxm.hmm.core import (
     DiscreteInitialModel,
     DiscreteTransitionModel,

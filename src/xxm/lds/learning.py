@@ -4,7 +4,7 @@ import typing
 
 import jax
 
-from xxm.core.emissions.gaussian import LaplaceEmissionsT, QuadraticEmissionsT
+from xxm.core.emissions.continuous import LaplaceEmissionsT, QuadraticEmissionsT
 
 from ..optim.loop import Fit, FitCollection
 from ..optim.loop import fit_many as _fit_many

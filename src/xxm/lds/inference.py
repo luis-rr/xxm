@@ -5,7 +5,7 @@ from jax import numpy as jnp
 
 from xxm.core.chains.gaussian import GaussianChain as Chain
 from xxm.core.chains.gaussian import GaussianChainMarginals as Posterior
-from xxm.core.emissions.gaussian import LaplaceEmissionsT, QuadraticEmissionsT
+from xxm.core.emissions.continuous import LaplaceEmissionsT, QuadraticEmissionsT
 from xxm.optim.newton import NewtonSearch
 
 from .core import Model
