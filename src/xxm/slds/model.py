@@ -3,7 +3,7 @@ import typing
 import jax
 import jax.numpy as jnp
 
-from xxm.core.chains.discrete import DiscreteChainMarginals
+from xxm.core.chains.discrete import DiscreteChain, DiscreteChainMarginals
 from xxm.core.chains.gaussian import GaussianChainMarginals, GaussianPairPotential
 from xxm.core.dists.gaussian import LinearGaussian
 from xxm.core.models.discrete import CategoricalInitial, CategoricalTransitions
@@ -15,6 +15,21 @@ from xxm.lds.model import EmissionsT
 class Posterior(typing.NamedTuple):
     discrete: DiscreteChainMarginals  # T-1 discrete states
     continuous: GaussianChainMarginals  # T latents
+
+    def elbo_from_chain(
+        self,
+        continuous_log_normalizer: jax.Array,
+        discrete_prior: DiscreteChain,
+    ) -> jax.Array:
+        """Evidence lower bound for the structured SLDS posterior."""
+
+        discrete = self.discrete
+
+        return (
+            continuous_log_normalizer
+            + discrete.expected_log_potential(discrete_prior)
+            + discrete.entropy()
+        )
 
 
 class GaussianLinearSwitchingDynamics(typing.NamedTuple):

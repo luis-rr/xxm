@@ -1,155 +1,140 @@
 import typing
 
 import jax
-import jax.numpy as jnp
-import jax.scipy as jsp
 
-from xxm.core.chains.discrete import DiscreteChain, DiscreteChainMarginals
+from xxm.core.chains.discrete import (
+    DiscreteChain,
+    DiscretePotential,
+)
+from xxm.core.chains.discrete import (
+    DiscreteChainMarginals as DiscretePosterior,
+)
 from xxm.core.chains.gaussian import (
     GaussianChain,
-    GaussianChainMarginals,
     GaussianPairPotential,
     GaussianPotential,
+)
+from xxm.core.chains.gaussian import (
+    GaussianChainMarginals as ContinuousPosterior,
 )
 
 from .model import Model, Posterior
 
 
-class ContinuousPotentials(typing.NamedTuple):
-    dynamics: GaussianPairPotential
+class ContinuousFactors(typing.NamedTuple):
+    """Non-switching Gaussian factors of the SLDS."""
+
     observations: GaussianPotential
     initial: GaussianPotential
 
     @classmethod
-    def from_model(cls, model: Model, observations: jax.Array) -> 'ContinuousPotentials':
-
-        dynamics_potentials = model.dynamics.compute_pair_potentials()
-        observation_potentials = model.emissions.compute_potential(observations)
-        initial_potential = GaussianPotential.from_moments(model.latent_initial.model)
-
-        return ContinuousPotentials(
-            dynamics=dynamics_potentials,
-            observations=observation_potentials,
-            initial=initial_potential,
+    def from_model(
+        cls,
+        model: Model,
+        observations: jax.Array,
+    ) -> typing.Self:
+        return cls(
+            observations=model.emissions.compute_potential(observations),
+            initial=GaussianPotential.from_moments(
+                model.latent_initial.model,
+            ),
         )
 
-    def to_chain(
+    def infer(
         self,
-        state_marginals: jax.Array,
-    ) -> GaussianChain:
-
-        pair_potentials = self.dynamics.weighted_sum(
-            state_marginals,
-        )
+        continuous_potential: GaussianPairPotential,
+    ) -> tuple[ContinuousPosterior, jax.Array]:
+        """Infer the continuous posterior q(x) for a given dynamics potential."""
 
         chain = GaussianChain.from_pair_potentials(
             self.initial,
-            pair_potentials,
+            continuous_potential,
         )
-
-        chain = chain.add_local_potential(self.observations)
-
-        return chain
-
-    def infer(
-        self,
-        state_probs: jax.Array,
-    ) -> tuple[GaussianChainMarginals, jax.Array]:
-        return self.to_chain(state_probs).forward_backward()
-
-    def infer_state_log_potentials(
-        self,
-        state_probs: jax.Array,
-    ) -> jax.Array:
-        posterior, _ = self.infer(state_probs)
-        return self.compute_expected_state_log_potentials(posterior)
-
-    def compute_expected_state_log_potentials(
-        self,
-        posterior: GaussianChainMarginals,
-    ) -> jax.Array:
-        return self.dynamics.expected_log_potentials(posterior)
+        chain = chain.add_local_potential(
+            self.observations,
+        )
+        return chain.forward_backward()
 
 
-class DiscretePotentials(typing.NamedTuple):
-    initial: jax.Array
-    transitions: jax.Array
+class DiscreteFactors(typing.NamedTuple):
+    """Non-switching discrete factors of the SLDS."""
+
+    chain: DiscreteChain
 
     @classmethod
-    def from_model(cls, model: Model, num_steps: int) -> 'DiscretePotentials':
-        return DiscretePotentials(
-            initial=model.state_initial.model.probs,
-            transitions=model.transitions.model.broadcast((num_steps - 1,)).probs,
+    def from_model(
+        cls,
+        model: Model,
+        num_switch_steps: int,
+    ) -> typing.Self:
+
+        transition_probs = model.transitions.model.broadcast((num_switch_steps - 1,)).probs
+
+        return cls(
+            chain=DiscreteChain.from_markov_prior(
+                initial_probs=model.state_initial.model.probs,
+                transition_probs=transition_probs,
+            )
         )
-
-    def to_chain(
-        self,
-        state_log_potentials,
-    ) -> DiscreteChain:
-
-        chain = DiscreteChain(
-            initial_probs=self.initial,
-            transition_probs=self.transitions,
-            state_log_potentials=state_log_potentials,
-        )
-
-        return chain
 
     def infer(
         self,
-        state_log_potentials: jax.Array,
-    ) -> tuple[DiscreteChainMarginals, jax.Array]:
-        return self.to_chain(state_log_potentials).forward_backward()
+        discrete_potential: DiscretePotential,
+    ) -> DiscretePosterior:
+        """Infer the discrete posterior q(z) for a given state potential."""
 
-    def infer_state_probs(
+        chain = self.chain.add_local_potential(
+            discrete_potential,
+        )
+        posterior, _ = chain.forward_backward()
+        return posterior
+
+    def prior(self) -> DiscretePosterior:
+        """Return the discrete posterior under the Markov-chain prior."""
+
+        posterior, _ = self.chain.forward_backward()
+
+        return posterior
+
+
+class SwitchingFactors(typing.NamedTuple):
+    """State-dependent dynamics factors coupling the discrete and continuous latents."""
+
+    dynamics_potential: GaussianPairPotential
+
+    @classmethod
+    def from_model(
+        cls,
+        model: Model,
+    ) -> typing.Self:
+
+        dynamics = model.dynamics.compute_pair_potentials()
+
+        return cls(
+            dynamics_potential=dynamics,
+        )
+
+    def continuous_potential(
         self,
-        state_log_potentials: jax.Array,
-    ) -> jax.Array:
-        posterior, _ = self.infer(state_log_potentials)
-        return posterior.state_probs
+        discrete_posterior: DiscretePosterior,
+    ) -> GaussianPairPotential:
+        """Compute the expected Gaussian dynamics potential under q(z)."""
 
-    def prior(self) -> tuple[DiscreteChainMarginals, jax.Array]:
-        num_steps = self.transitions.shape[0] + 1
-
-        state_log_potentials = jnp.zeros(
-            (num_steps, self.initial.shape[0]),
-            dtype=self.initial.dtype,
+        return self.dynamics_potential.weighted_sum(
+            discrete_posterior.state_probs,
         )
 
-        posterior, log_normalizer = self.infer(state_log_potentials)
+    def discrete_potential(
+        self,
+        continuous_posterior: ContinuousPosterior,
+    ) -> DiscretePotential:
+        """Compute the expected discrete state potential under q(x)."""
 
-        return posterior, log_normalizer
-
-
-def elbo(
-    model: Model,
-    posterior: Posterior,
-    continuous_log_normalizer: jax.Array,
-) -> jax.Array:
-    """Evidence lower bound for the structured SLDS posterior."""
-
-    discrete = posterior.discrete
-
-    expected_initial_log_prob = jnp.sum(
-        jsp.special.xlogy(
-            discrete.state_probs[0],
-            model.state_initial.model.probs,
+        return DiscretePotential(
+            log_values=self.dynamics_potential.expected_log_potentials(
+                continuous_posterior,
+            )
         )
-    )
-
-    expected_transition_log_prob = jnp.sum(
-        jsp.special.xlogy(
-            discrete.pair_probs,
-            model.transitions.model.probs,
-        )
-    )
-
-    return (
-        continuous_log_normalizer
-        + expected_initial_log_prob
-        + expected_transition_log_prob
-        + discrete.entropy()
-    )
 
 
 def infer_variational(
@@ -157,28 +142,27 @@ def infer_variational(
     observations: jax.Array,
     num_iters: int,
 ) -> tuple[Posterior, jax.Array]:
+    """Run structured mean-field inference for the SLDS."""
 
-    num_steps = observations.shape[0]
+    num_cont_steps = observations.shape[0]
+    num_switch_steps = num_cont_steps - 1
 
-    cont_potentials = ContinuousPotentials.from_model(
-        model,
-        observations,
-    )
-    disc_potentials = DiscretePotentials.from_model(
-        model,
-        num_steps - 1,
-    )
+    switch_factors = SwitchingFactors.from_model(model)
+    cont_factors = ContinuousFactors.from_model(model, observations)
+    disc_factors = DiscreteFactors.from_model(model, num_switch_steps)
 
     def step(_, disc_posterior):
-        cont_posterior, _ = cont_potentials.infer(disc_posterior.state_probs)
+        """Perform one coordinate-ascent update of q(x) and q(z)."""
 
-        state_log_potentials = cont_potentials.compute_expected_state_log_potentials(cont_posterior)
+        cont_potential = switch_factors.continuous_potential(disc_posterior)
+        cont_posterior, _ = cont_factors.infer(cont_potential)
 
-        disc_posterior, _ = disc_potentials.infer(state_log_potentials)
+        disc_potential = switch_factors.discrete_potential(cont_posterior)
+        disc_posterior = disc_factors.infer(disc_potential)
 
         return disc_posterior
 
-    disc_posterior, _ = disc_potentials.prior()
+    disc_posterior = disc_factors.prior()
 
     disc_posterior = jax.lax.fori_loop(
         0,
@@ -187,17 +171,18 @@ def infer_variational(
         disc_posterior,
     )
 
-    cont_posterior, cont_log_normalizer = cont_potentials.infer(disc_posterior.state_probs)
+    cont_posterior, cont_log_normalizer = cont_factors.infer(
+        switch_factors.continuous_potential(disc_posterior),
+    )
 
     posterior = Posterior(
         discrete=disc_posterior,
         continuous=cont_posterior,
     )
 
-    elbo_value = elbo(
-        model=model,
-        posterior=posterior,
+    elbo_value = posterior.elbo_from_chain(
         continuous_log_normalizer=cont_log_normalizer,
+        discrete_prior=disc_factors.chain,
     )
 
     return posterior, elbo_value

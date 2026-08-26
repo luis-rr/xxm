@@ -58,6 +58,34 @@ class DiscreteChain(typing.NamedTuple):
     def num_steps(self) -> int:
         return self.state_log_potentials.shape[0]
 
+    @classmethod
+    def from_markov_prior(
+        cls,
+        initial_probs: jax.Array,
+        transition_probs: jax.Array,
+    ) -> typing.Self:
+        """Construct a discrete chain with no additional local potentials."""
+
+        if transition_probs.ndim != 3:
+            raise ValueError('transition_probs must have shape (T - 1, K, K)')
+
+        num_steps = transition_probs.shape[0] + 1
+        num_states = initial_probs.shape[0]
+
+        if transition_probs.shape[1:] != (num_states, num_states):
+            raise ValueError(
+                'transition_probs must have shape (T - 1, K, K), with K matching initial_probs'
+            )
+
+        return cls(
+            initial_probs=initial_probs,
+            transition_probs=transition_probs,
+            state_log_potentials=jnp.zeros(
+                (num_steps, num_states),
+                dtype=initial_probs.dtype,
+            ),
+        )
+
     def forward_backward(self) -> tuple[DiscreteChainMarginals, jax.Array]:
         """Run full forward-backward inference for one chain."""
 
@@ -121,6 +149,30 @@ class DiscreteChainMarginals(typing.NamedTuple):
         )
 
         return initial_entropy + pair_entropy + conditioning_entropy
+
+    def expected_log_potential(
+        self,
+        chain: DiscreteChain,
+    ) -> jax.Array:
+        """Compute E_q[log f(z)] for a discrete chain potential."""
+
+        expected_initial = jnp.sum(
+            jsp.special.xlogy(
+                self.state_probs[0],
+                chain.initial_probs,
+            )
+        )
+
+        expected_transitions = jnp.sum(
+            jsp.special.xlogy(
+                self.pair_probs,
+                chain.transition_probs,
+            )
+        )
+
+        expected_local = jnp.sum(self.state_probs * chain.state_log_potentials)
+
+        return expected_initial + expected_transitions + expected_local
 
 
 class _DiscreteChainMessages(typing.NamedTuple):
