@@ -72,7 +72,7 @@ def _kmeans(
     return jnp.argmin(distances, axis=1)
 
 
-def _initialize(
+def _init(
     num_states: int,
     emissions: Emissions,
     dtype: jnp.dtype,
@@ -110,7 +110,7 @@ def _initialize(
     )
 
 
-def _initialize_gaussian_emissions(
+def _init_gaussian_emissions(
     observations: jax.Array,  # (T, N)
     num_states: int,
     key: jax.Array,
@@ -149,8 +149,8 @@ def init_hmm_gaussian(
     key: jax.Array,
     self_transition_prob: float = 0.9,
 ) -> Model:
-    emissions = _initialize_gaussian_emissions(observations, num_states, key=key)
-    return _initialize(
+    emissions = _init_gaussian_emissions(observations, num_states, key=key)
+    return _init(
         num_states,
         emissions,
         self_transition_prob=self_transition_prob,
@@ -158,7 +158,7 @@ def init_hmm_gaussian(
     )
 
 
-def _initialize_ar_state_assignments(
+def _init_ar_state_assignments(
     predictors: jax.Array,  # (T-L, L*N)
     current: jax.Array,  # (T-L, N)
     num_states: int,
@@ -177,7 +177,7 @@ def _initialize_ar_state_assignments(
     )
 
 
-def _initialize_ar_gaussian_emissions(
+def _init_ar_gaussian_emissions(
     observations: jax.Array,  # (T, N)
     num_states: int,
     num_lags: int,
@@ -197,7 +197,7 @@ def _initialize_ar_gaussian_emissions(
         num_lags * num_dims,
     )  # (T-L, L*N)
 
-    assignments = _initialize_ar_state_assignments(
+    assignments = _init_ar_state_assignments(
         predictors,
         current,
         num_states,
@@ -224,14 +224,14 @@ def init_arhmm_gaussian(
     key: jax.Array,
     self_transition_prob: float = 0.9,
 ) -> Model:
-    emissions = _initialize_ar_gaussian_emissions(
+    emissions = _init_ar_gaussian_emissions(
         observations,
         num_states,
         lag,
         key,
     )
 
-    return _initialize(
+    return _init(
         num_states,
         emissions,
         dtype=observations.dtype,
@@ -239,7 +239,7 @@ def init_arhmm_gaussian(
     )
 
 
-def _initialize_poisson_emissions(
+def _init_poisson_emissions(
     observations: jax.Array,  # (T, N)
     num_states: int,
     key: jax.Array,
@@ -267,8 +267,8 @@ def init_hmm_poisson(
     key: jax.Array,
     self_transition_prob: float = 0.9,
 ) -> Model:
-    emissions = _initialize_poisson_emissions(observations, num_states, key=key)
-    return _initialize(
+    emissions = _init_poisson_emissions(observations, num_states, key=key)
+    return _init(
         num_states,
         emissions,
         self_transition_prob=self_transition_prob,
@@ -276,7 +276,7 @@ def init_hmm_poisson(
     )
 
 
-def _initialize_ar_poisson_emissions(
+def _init_ar_poisson_emissions(
     observations: jax.Array,  # (T, N)
     num_states: int,
     num_lags: int,
@@ -296,7 +296,7 @@ def _initialize_ar_poisson_emissions(
         num_lags * num_dims,
     )  # (T-L, L*N)
 
-    assignments = _initialize_ar_state_assignments(
+    assignments = _init_ar_state_assignments(
         predictors,
         current,
         num_states,
@@ -321,10 +321,8 @@ def init_arhmm_poisson(
     self_transition_prob: float = 0.9,
 ) -> Model:
 
-    emissions = _initialize_ar_poisson_emissions(
-        observations, num_states, num_lags=num_lags, key=key
-    )
-    return _initialize(
+    emissions = _init_ar_poisson_emissions(observations, num_states, num_lags=num_lags, key=key)
+    return _init(
         num_states,
         emissions,
         self_transition_prob=self_transition_prob,
