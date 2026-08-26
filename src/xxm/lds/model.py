@@ -108,7 +108,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
         return latents, observations
 
-    def compute_prior_mean_latents(self, num_steps: int) -> jax.Array:
+    def compute_prior_means(self, num_steps: int) -> jax.Array:
         """Compute the mean latent trajectory under the model's prior."""
 
         def step(

@@ -76,7 +76,7 @@ def test_laplace_newton_steps_do_not_decrease_objective():
     )
 
     initial_params = _NewtonSearchParams(
-        latents=model.compute_prior_mean_latents(num_steps),
+        latents=model.compute_prior_means(num_steps),
     )
 
     search = NewtonSearch[_NewtonSearchParams](

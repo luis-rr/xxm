@@ -142,7 +142,7 @@ def infer_laplace(
     num_steps = observations.shape[0]
 
     if initial_latents is None:
-        latents = model.compute_prior_mean_latents(num_steps)
+        latents = model.compute_prior_means(num_steps)
     else:
         latents = initial_latents
 
