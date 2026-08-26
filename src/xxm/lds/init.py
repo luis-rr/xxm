@@ -1,12 +1,12 @@
 import jax
 from jax import numpy as jnp
 
-from xxm.core.gaussian.emissions import GaussianEmissions, PoissonEmissions
-from xxm.fit import gaussian as gaussian_fit, poisson as poisson_fit
+from xxm.core.emissions.gaussian import GaussianEmissions, PoissonEmissions
+from xxm.optim import gaussian as gaussian_fit, poisson as poisson_fit
 from xxm.core.affine import Affine
-from xxm.stats.gaussian import Gaussian
+from xxm.core.dists.gaussian import Gaussian
 
-from ..fit.loop import unstack_models
+from ..optim.loop import unstack_models
 from .core import GaussianInitialModel, LinearGaussianDynamicsModel, Model
 
 

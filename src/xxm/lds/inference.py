@@ -3,10 +3,10 @@ import typing
 import jax
 from jax import numpy as jnp
 
-from xxm.core.gaussian.chain import GaussianChain as Chain
-from xxm.core.gaussian.chain import GaussianChainMarginals as Posterior
-from xxm.core.gaussian.emissions import LaplaceEmissionsT, QuadraticEmissionsT
-from xxm.newton import NewtonSearch
+from xxm.core.chains.gaussian import GaussianChain as Chain
+from xxm.core.chains.gaussian import GaussianChainMarginals as Posterior
+from xxm.core.emissions.gaussian import LaplaceEmissionsT, QuadraticEmissionsT
+from xxm.optim.newton import NewtonSearch
 
 from .core import Model
 

@@ -7,8 +7,8 @@ import typing
 import jax
 import jax.numpy as jnp
 
-from xxm.core.discrete.chain import DiscreteChainMarginals as Posterior
-from xxm.stats.categorical import Categorical
+from xxm.core.chains.discrete import DiscreteChainMarginals as Posterior
+from xxm.core.dists.categorical import Categorical
 
 
 class Emissions(typing.Protocol):

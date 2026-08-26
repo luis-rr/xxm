@@ -1,18 +1,18 @@
 import jax
 from jax import numpy as jnp
 
-from xxm.core.discrete.emissions import (
+from xxm.core.emissions.discrete import (
     GaussianEmissions,
     PoissonEmissions,
 )
-from xxm.core.discrete.emissions_ar import (
+from xxm.core.emissions.discrete_ar import (
     AREmissions,
     lagged_observations,
 )
-from xxm.fit import gaussian as gaussian_fit, poisson as poisson_fit
-from xxm.stats.categorical import Categorical
-from xxm.stats.gaussian import LinearGaussian
-from xxm.stats.poisson import LinearPoisson
+from xxm.optim import gaussian as gaussian_fit, poisson as poisson_fit
+from xxm.core.dists.categorical import Categorical
+from xxm.core.dists.gaussian import LinearGaussian
+from xxm.core.dists.poisson import LinearPoisson
 
 from .core import DiscreteInitialModel, DiscreteTransitionModel, Emissions, Model
 

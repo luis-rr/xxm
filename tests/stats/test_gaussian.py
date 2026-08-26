@@ -2,9 +2,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from xxm.fit import gaussian as gaussian_fit
+from xxm.optim import gaussian as gaussian_fit
 from xxm.core.affine import Affine
-from xxm.stats.gaussian import Gaussian, LinearGaussian
+from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 
 ATOL = 1e-5
 

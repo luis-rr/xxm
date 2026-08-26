@@ -5,11 +5,11 @@ import typing
 import jax
 from jax import numpy as jnp
 
-from xxm.fit import gaussian as gaussian_fit, poisson as poisson_fit
-from xxm.stats.gaussian import Gaussian, LinearGaussian
-from xxm.stats.poisson import LinearPoisson, Poisson
+from xxm.optim import gaussian as gaussian_fit, poisson as poisson_fit
+from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.dists.poisson import LinearPoisson, Poisson
 
-from .chain import GaussianChainMarginals, GaussianPotential
+from ..chains.gaussian import GaussianChainMarginals, GaussianPotential
 
 
 class Emissions(typing.Protocol):

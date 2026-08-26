@@ -4,11 +4,11 @@ import typing
 
 import jax
 
-from xxm.core.gaussian.emissions import LaplaceEmissionsT, QuadraticEmissionsT
+from xxm.core.emissions.gaussian import LaplaceEmissionsT, QuadraticEmissionsT
 
-from ..fit.loop import Fit, FitCollection
-from ..fit.loop import fit_many as _fit_many
-from ..fit.loop import fit_one as _fit_one
+from ..optim.loop import Fit, FitCollection
+from ..optim.loop import fit_many as _fit_many
+from ..optim.loop import fit_one as _fit_one
 from .core import Model
 from .inference import inference_exact, inference_laplace
 

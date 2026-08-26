@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-import xxm.core.discrete.chain
+import xxm.core.chains.discrete
 
 jax.config.update('jax_enable_x64', True)
 
@@ -75,7 +75,7 @@ def _stack_static_transition(transition_probs: jax.Array, num_time_steps: int) -
 def test_forward_backward_matches_exact_enumeration() -> None:
     num_time_steps = 3
 
-    chain = xxm.core.discrete.chain.DiscreteChain(
+    chain = xxm.core.chains.discrete.DiscreteChain(
         initial_probs=jnp.array([0.6, 0.4]),
         transition_probs=_stack_static_transition(
             jnp.array(
@@ -142,13 +142,13 @@ def test_normalization_and_finiteness_invariants() -> None:
         )
     )
 
-    chain = xxm.core.discrete.chain.DiscreteChain(
+    chain = xxm.core.chains.discrete.DiscreteChain(
         initial_probs=initial_probs,
         transition_probs=transition_probs,
         state_log_potentials=state_log_potentials,
     )
 
-    messages = xxm.core.discrete.chain._forward_backward(chain)
+    messages = xxm.core.chains.discrete._forward_backward(chain)
 
     np.testing.assert_allclose(
         np.asarray(messages.forward_messages.sum(axis=1)),
@@ -202,7 +202,7 @@ def test_marginal_consistency_between_state_and_pair_posteriors() -> None:
         )
     )
 
-    chain = xxm.core.discrete.chain.DiscreteChain(
+    chain = xxm.core.chains.discrete.DiscreteChain(
         initial_probs=initial_probs,
         transition_probs=transition_probs,
         state_log_potentials=state_log_potentials,
@@ -241,13 +241,13 @@ def test_log_normalizer_matches_scaling_and_exact_enumeration() -> None:
         ]
     )
 
-    chain = xxm.core.discrete.chain.DiscreteChain(
+    chain = xxm.core.chains.discrete.DiscreteChain(
         initial_probs=initial_probs,
         transition_probs=transition_probs,
         state_log_potentials=state_log_potentials,
     )
 
-    messages = xxm.core.discrete.chain._forward_backward(chain)
+    messages = xxm.core.chains.discrete._forward_backward(chain)
     result, log_normalizer = chain.forward_backward()
     exact_state_posterior_probs, exact_pair_posterior_probs, exact_log_marginal_likelihood = (
         _enumerate_exact_posterior(
@@ -303,7 +303,7 @@ def test_time_varying_transitions_match_exact_enumeration() -> None:
         )
     )
 
-    chain = xxm.core.discrete.chain.DiscreteChain(
+    chain = xxm.core.chains.discrete.DiscreteChain(
         initial_probs=initial_probs,
         transition_probs=transition_probs,
         state_log_potentials=state_log_potentials,
@@ -338,7 +338,7 @@ def test_time_varying_transitions_match_exact_enumeration() -> None:
 
 
 def test_deterministic_transitions_concentrate_posterior_path() -> None:
-    chain = xxm.core.discrete.chain.DiscreteChain(
+    chain = xxm.core.chains.discrete.DiscreteChain(
         initial_probs=jnp.array([1.0, 0.0]),
         transition_probs=jnp.array(
             [
@@ -405,8 +405,8 @@ def test_forward_backward_is_jit_compatible() -> None:
         initial_probs: jax.Array,
         transition_probs: jax.Array,
         state_log_potentials: jax.Array,
-    ) -> tuple[xxm.core.discrete.chain.DiscreteChainMarginals, jax.Array]:
-        return xxm.core.discrete.chain.DiscreteChain(
+    ) -> tuple[xxm.core.chains.discrete.DiscreteChainMarginals, jax.Array]:
+        return xxm.core.chains.discrete.DiscreteChain(
             initial_probs=initial_probs,
             transition_probs=transition_probs,
             state_log_potentials=state_log_potentials,
@@ -480,8 +480,8 @@ def test_forward_backward_supports_batching_with_vmap() -> None:
         initial_probs: jax.Array,
         transition_probs: jax.Array,
         state_log_potentials: jax.Array,
-    ) -> tuple[xxm.core.discrete.chain.DiscreteChainMarginals, jax.Array]:
-        return xxm.core.discrete.chain.DiscreteChain(
+    ) -> tuple[xxm.core.chains.discrete.DiscreteChainMarginals, jax.Array]:
+        return xxm.core.chains.discrete.DiscreteChain(
             initial_probs=initial_probs,
             transition_probs=transition_probs,
             state_log_potentials=state_log_potentials,
@@ -566,8 +566,8 @@ def test_vmapped_forward_backward_is_jit_compatible() -> None:
         initial_probs: jax.Array,
         transition_probs: jax.Array,
         state_log_potentials: jax.Array,
-    ) -> tuple[xxm.core.discrete.chain.DiscreteChainMarginals, jax.Array]:
-        return xxm.core.discrete.chain.DiscreteChain(
+    ) -> tuple[xxm.core.chains.discrete.DiscreteChainMarginals, jax.Array]:
+        return xxm.core.chains.discrete.DiscreteChain(
             initial_probs=initial_probs,
             transition_probs=transition_probs,
             state_log_potentials=state_log_potentials,
@@ -616,7 +616,7 @@ def test_single_time_step_matches_direct_normalization() -> None:
         )
     )
 
-    chain = xxm.core.discrete.chain.DiscreteChain(
+    chain = xxm.core.chains.discrete.DiscreteChain(
         initial_probs=initial_probs,
         transition_probs=jnp.zeros((0, 2, 2)),
         state_log_potentials=state_log_potentials,
@@ -653,7 +653,7 @@ def test_single_state_chain() -> None:
         ]
     )
 
-    chain = xxm.core.discrete.chain.DiscreteChain(
+    chain = xxm.core.chains.discrete.DiscreteChain(
         initial_probs=jnp.ones(1),
         transition_probs=jnp.ones((2, 1, 1)),
         state_log_potentials=state_log_potentials,
@@ -679,7 +679,7 @@ def test_single_state_chain() -> None:
 
 
 def test_state_log_potential_offsets_only_shift_log_normalizer() -> None:
-    chain = xxm.core.discrete.chain.DiscreteChain(
+    chain = xxm.core.chains.discrete.DiscreteChain(
         initial_probs=jnp.array([0.6, 0.4]),
         transition_probs=jnp.array(
             [

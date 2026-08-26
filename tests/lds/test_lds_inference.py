@@ -3,7 +3,7 @@ import numpy as np
 from jax import numpy as jnp
 
 from tests.lds.lds_helpers import make_model, make_observations
-from xxm.core.gaussian.emissions import PoissonEmissions
+from xxm.core.emissions.gaussian import PoissonEmissions
 from xxm.lds.core import GaussianInitialModel, LinearGaussianDynamicsModel, Model
 from xxm.lds.inference import (
     _NewtonSearchModel,
@@ -12,10 +12,10 @@ from xxm.lds.inference import (
     inference_laplace,
     to_chain,
 )
-from xxm.newton import NewtonSearch
+from xxm.optim.newton import NewtonSearch
 from xxm.core.affine import Affine
-from xxm.stats.gaussian import Gaussian, LinearGaussian
-from xxm.stats.poisson import LinearPoisson
+from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.dists.poisson import LinearPoisson
 
 
 def make_scalar_poisson_model() -> Model[PoissonEmissions]:

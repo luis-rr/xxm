@@ -4,8 +4,8 @@ import jax
 import jax.numpy as jnp
 import jax.scipy as jsp
 
-from ..core.affine import Affine
-from .gaussian import Gaussian
+from xxm.core.affine import Affine
+from xxm.core.dists.gaussian import Gaussian
 
 
 class Poisson(typing.NamedTuple):

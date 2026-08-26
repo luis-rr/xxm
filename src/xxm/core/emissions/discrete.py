@@ -2,11 +2,11 @@ import typing
 
 import jax
 
-from xxm.core.discrete.chain import DiscretePotential
+from xxm.core.chains.discrete import DiscretePotential
 from xxm.hmm.core import Posterior
-from xxm.fit import gaussian as gaussian_fit, poisson as poisson_fit
-from xxm.stats.gaussian import Gaussian
-from xxm.stats.poisson import Poisson
+from xxm.optim import gaussian as gaussian_fit, poisson as poisson_fit
+from xxm.core.dists.gaussian import Gaussian
+from xxm.core.dists.poisson import Poisson
 
 
 class GaussianEmissions(typing.NamedTuple):

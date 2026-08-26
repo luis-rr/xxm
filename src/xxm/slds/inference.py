@@ -4,8 +4,8 @@ import jax
 import jax.numpy as jnp
 import jax.scipy as jsp
 
-from xxm.core.discrete.chain import DiscreteChain, DiscreteChainMarginals
-from xxm.core.gaussian.chain import (
+from xxm.core.chains.discrete import DiscreteChain, DiscreteChainMarginals
+from xxm.core.chains.gaussian import (
     GaussianChain,
     GaussianChainMarginals,
     GaussianPairPotential,

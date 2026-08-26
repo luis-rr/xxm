@@ -4,10 +4,10 @@ import jax
 import numpy as np
 from jax import numpy as jnp
 
-from xxm.core.gaussian.emissions import GaussianEmissions, PoissonEmissions
+from xxm.core.emissions.gaussian import GaussianEmissions, PoissonEmissions
 from xxm.core.affine import Affine
-from xxm.stats.gaussian import LinearGaussian
-from xxm.stats.poisson import LinearPoisson
+from xxm.core.dists.gaussian import LinearGaussian
+from xxm.core.dists.poisson import LinearPoisson
 
 
 class MockPosterior(typing.NamedTuple):

@@ -28,7 +28,7 @@ import jax.numpy as jnp
 import jax.scipy.linalg as jsp_linalg
 
 from xxm.core.affine import Affine
-from xxm.stats.gaussian import Gaussian, LinearGaussian
+from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 
 
 def _precision_and_log_det(

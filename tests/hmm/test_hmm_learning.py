@@ -2,13 +2,13 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from xxm.core.discrete.chain import DiscreteChainMarginals
-from xxm.core.discrete.emissions import GaussianEmissions, PoissonEmissions
+from xxm.core.chains.discrete import DiscreteChainMarginals
+from xxm.core.emissions.discrete import GaussianEmissions, PoissonEmissions
 from xxm.hmm.core import DiscreteInitialModel, DiscreteTransitionModel, Model
 from xxm.hmm.learning import em_step
-from xxm.stats.categorical import Categorical
-from xxm.stats.gaussian import Gaussian
-from xxm.stats.poisson import Poisson
+from xxm.core.dists.categorical import Categorical
+from xxm.core.dists.gaussian import Gaussian
+from xxm.core.dists.poisson import Poisson
 
 jax.config.update('jax_enable_x64', True)
 

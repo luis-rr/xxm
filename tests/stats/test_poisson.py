@@ -4,10 +4,10 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from xxm.fit import poisson as poisson_fit
+from xxm.optim import poisson as poisson_fit
 from xxm.core.affine import Affine
-from xxm.stats.gaussian import Gaussian
-from xxm.stats.poisson import LinearPoisson, Poisson
+from xxm.core.dists.gaussian import Gaussian
+from xxm.core.dists.poisson import LinearPoisson, Poisson
 
 ATOL = 1e-5
 FIT_ATOL = 1e-4

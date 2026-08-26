@@ -2,13 +2,13 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from xxm.core.gaussian.chain import (
+from xxm.core.chains.gaussian import (
     GaussianChain,
     GaussianPairPotential,
     GaussianPotential,
 )
 from xxm.core.affine import Affine
-from xxm.stats.gaussian import Gaussian, LinearGaussian
+from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 
 jax.config.update('jax_enable_x64', True)
 
