@@ -51,7 +51,7 @@ class ContinuousPotentials(typing.NamedTuple):
 
         return chain
 
-    def inference(
+    def infer(
         self,
         state_probs: jax.Array,
     ) -> tuple[GaussianChainMarginals, jax.Array]:
@@ -61,7 +61,7 @@ class ContinuousPotentials(typing.NamedTuple):
         self,
         state_probs: jax.Array,
     ) -> jax.Array:
-        posterior, _ = self.inference(state_probs)
+        posterior, _ = self.infer(state_probs)
         return self.get_expected_state_log_potentials(posterior)
 
     def get_expected_state_log_potentials(
@@ -95,7 +95,7 @@ class DiscretePotentials(typing.NamedTuple):
 
         return chain
 
-    def inference(
+    def infer(
         self,
         state_log_potentials: jax.Array,
     ) -> tuple[DiscreteChainMarginals, jax.Array]:
@@ -105,7 +105,7 @@ class DiscretePotentials(typing.NamedTuple):
         self,
         state_log_potentials: jax.Array,
     ) -> jax.Array:
-        posterior, _ = self.inference(state_log_potentials)
+        posterior, _ = self.infer(state_log_potentials)
         return posterior.state_probs
 
     def prior(self) -> tuple[DiscreteChainMarginals, jax.Array]:
@@ -116,7 +116,7 @@ class DiscretePotentials(typing.NamedTuple):
             dtype=self.initial.dtype,
         )
 
-        posterior, log_normalizer = self.inference(state_log_potentials)
+        posterior, log_normalizer = self.infer(state_log_potentials)
 
         return posterior, log_normalizer
 
@@ -170,11 +170,11 @@ def infer_variational(
     )
 
     def step(_, disc_posterior):
-        cont_posterior, _ = cont_potentials.inference(disc_posterior.state_probs)
+        cont_posterior, _ = cont_potentials.infer(disc_posterior.state_probs)
 
         state_log_potentials = cont_potentials.get_expected_state_log_potentials(cont_posterior)
 
-        disc_posterior, _ = disc_potentials.inference(state_log_potentials)
+        disc_posterior, _ = disc_potentials.infer(state_log_potentials)
 
         return disc_posterior
 
@@ -187,7 +187,7 @@ def infer_variational(
         disc_posterior,
     )
 
-    cont_posterior, cont_log_normalizer = cont_potentials.inference(disc_posterior.state_probs)
+    cont_posterior, cont_log_normalizer = cont_potentials.infer(disc_posterior.state_probs)
 
     posterior = Posterior(
         discrete=disc_posterior,
