@@ -1,7 +1,9 @@
 import typing
+from collections.abc import Callable
 
 import jax
 from jax import numpy as jnp
+from jax_tqdm.scan_pbar import scan_tqdm
 
 ModelT = typing.TypeVar('ModelT')
 DataT = typing.TypeVar('DataT')
@@ -89,75 +91,154 @@ def unstack_models(value: ModelT) -> tuple[ModelT, ...]:
     return tuple(take(i) for i in range(num_items))
 
 
+FitStep = Callable[
+    [ModelT, DataT],
+    tuple[ModelT, jax.Array],
+]
+
+_ScanStep = Callable[
+    [ModelT, jax.Array],
+    tuple[ModelT, jax.Array],
+]
+
+_ProgressDecorator = Callable[
+    [_ScanStep[ModelT]],
+    _ScanStep[ModelT],
+]
+
+Progress = bool | str | _ProgressDecorator[ModelT]
+
+Objective = Callable[
+    [ModelT, DataT],
+    jax.Array,
+]
+
+
+def _add_progress_bar(
+    step: _ScanStep,
+    num_iters: int,
+    progress: Progress[ModelT],
+) -> _ScanStep:
+    """Wrap a scan step with a progress bar if requested."""
+
+    if progress is True:
+        decorated = scan_tqdm(
+            num_iters,
+            tqdm_type='auto',
+        )(step)
+
+    elif progress is False:
+        decorated = step
+
+    elif isinstance(progress, str):
+        decorated = scan_tqdm(
+            num_iters,
+            tqdm_type='auto',
+            desc=progress,
+        )(step)
+
+    else:
+        decorated = progress(step)
+
+    return decorated
+
+
+def _scan(
+    model: ModelT,
+    *,
+    num_iters: int,
+    step: _ScanStep[ModelT],
+    progress: Progress[ModelT],
+) -> tuple[ModelT, jax.Array]:
+    """Run a fitting scan with optional progress reporting."""
+
+    scan_step = _add_progress_bar(
+        step,
+        num_iters,
+        progress,
+    )
+
+    return jax.lax.scan(
+        scan_step,
+        model,
+        xs=jnp.arange(num_iters),
+    )
+
+
 def fit_one(
     model: ModelT,
     data: DataT,
+    *,
     num_iters: int,
-    step: typing.Callable[
-        [ModelT, DataT],
-        tuple[ModelT, jax.Array],
-    ],
-    objective: typing.Callable[
-        [ModelT, DataT],
-        jax.Array,
-    ],
+    step: FitStep[ModelT, DataT],
+    objective: Objective[ModelT, DataT],
+    progress: Progress[ModelT] = False,
 ) -> Fit[ModelT]:
     """Fit a single model with the given step function."""
 
-    def _step(model, _):
-        new_model, value = step(model, data)
-        return new_model, value
+    def _step(
+        model: ModelT,
+        _: jax.Array,
+    ) -> tuple[ModelT, jax.Array]:
+        return step(model, data)
 
-    model, objective_trace = jax.lax.scan(
-        _step,
+    model, objective_trace = _scan(
         model,
-        xs=None,
-        length=num_iters,
+        num_iters=num_iters,
+        step=_step,
+        progress=progress,
     )
 
     final_value = objective(model, data)
 
-    objective_trace = jnp.concatenate(
-        [
-            objective_trace,
-            final_value[None],
-        ]
-    )
-
     return Fit(
         model=model,
-        objective_trace=objective_trace,
+        objective_trace=jnp.concatenate(
+            [
+                objective_trace,
+                final_value[None],
+            ]
+        ),
     )
 
 
 def fit_many(
     models: tuple[ModelT, ...],
     data: DataT,
+    *,
     num_iters: int,
-    step: typing.Callable[
-        [ModelT, DataT],
-        tuple[ModelT, jax.Array],
-    ],
-    objective: typing.Callable[
-        [ModelT, DataT],
-        jax.Array,
-    ],
+    step: FitStep[ModelT, DataT],
+    objective: Objective[ModelT, DataT],
+    progress: Progress[ModelT] = False,
 ) -> FitCollection[ModelT]:
     """Fit multiple models independently."""
 
-    batched_models = stack_models(models)
+    stacked_models = stack_models(models)
 
-    batched_fit = jax.vmap(
-        lambda model: fit_one(
-            model,
-            data,
-            num_iters,
-            step,
-            objective,
-        )
-    )(batched_models)
+    def _step(
+        models: ModelT,
+        _: jax.Array,
+    ) -> tuple[ModelT, jax.Array]:
+        return jax.vmap(lambda model: step(model, data))(models)
+
+    stacked_models, objective_traces = _scan(
+        stacked_models,
+        num_iters=num_iters,
+        step=_step,
+        progress=progress,
+    )
+
+    final_values = jax.vmap(lambda model: objective(model, data))(stacked_models)
+
+    objective_traces = jnp.concatenate(
+        [
+            objective_traces,
+            final_values[None, :],
+        ],
+        axis=0,
+    )
 
     return FitCollection(
-        models=unstack_models(batched_fit.model),
-        objective_traces=batched_fit.objective_trace,
+        models=unstack_models(stacked_models),
+        objective_traces=objective_traces.T,
     )

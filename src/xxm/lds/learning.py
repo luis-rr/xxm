@@ -59,14 +59,16 @@ def fit_em(
     model: Model[QuadraticEmissionsT],
     observations: jax.Array,
     num_iters: int,
+    progress: bool | str = 'EM',
 ) -> Fit[Model[QuadraticEmissionsT]]:
 
     return _fit_one(
         model,
         observations,
-        num_iters,
+        num_iters=num_iters,
         step=em_step,
         objective=lambda m, o: infer_exact(m, o)[1],
+        progress=progress,
     )
 
 
@@ -74,14 +76,16 @@ def fit_em_many(
     models: tuple[Model[QuadraticEmissionsT], ...],
     observations: jax.Array,
     num_iters: int,
+    progress: bool | str = 'Multi-EM',
 ) -> FitCollection[Model[QuadraticEmissionsT]]:
 
     return _fit_many(
         models,
         observations,
-        num_iters,
+        num_iters=num_iters,
         step=em_step,
         objective=lambda m, o: infer_exact(m, o)[1],
+        progress=progress,
     )
 
 
@@ -89,14 +93,16 @@ def fit_laplace_em(
     model: Model[LaplaceEmissionsT],
     observations: jax.Array,
     num_iters: int,
+    progress: bool | str = 'Laplace EM',
 ) -> Fit[Model[LaplaceEmissionsT]]:
 
     return _fit_one(
         model,
         observations,
-        num_iters,
+        num_iters=num_iters,
         step=laplace_em_step,
         objective=lambda m, o: infer_laplace(m, o)[1],
+        progress=progress,
     )
 
 
@@ -104,12 +110,14 @@ def fit_laplace_em_many(
     models: tuple[Model[LaplaceEmissionsT], ...],
     observations: jax.Array,
     num_iters: int,
+    progress: bool | str = 'Multi-Laplace EM',
 ) -> FitCollection[Model[LaplaceEmissionsT]]:
 
     return _fit_many(
         models,
         observations,
-        num_iters,
+        num_iters=num_iters,
         step=laplace_em_step,
         objective=lambda m, o: infer_laplace(m, o)[1],
+        progress=progress,
     )

@@ -31,12 +31,14 @@ def fit_em(
     model: Model,
     observations: jax.Array,
     num_iters: int,
+    progress: bool | str = 'EM',
 ) -> Fit[Model]:
 
     return _fit_one(
         model,
         observations,
-        num_iters,
+        num_iters=num_iters,
         step=em_step,
         objective=lambda m, o: infer_exact(m, o)[1],
+        progress=progress,
     )
