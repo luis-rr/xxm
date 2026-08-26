@@ -12,7 +12,7 @@ from xxm.core.chains.gaussian import (
     GaussianPotential,
 )
 
-from .core import Model, Posterior
+from .model import Model, Posterior
 
 
 class ContinuousPotentials(typing.NamedTuple):

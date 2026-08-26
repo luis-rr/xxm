@@ -3,7 +3,7 @@ import typing
 import jax
 
 from xxm.core.chains.discrete import DiscretePotential
-from xxm.hmm.core import Posterior
+from xxm.hmm.model import Posterior
 from xxm.optim import gaussian as gaussian_fit, poisson as poisson_fit
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson

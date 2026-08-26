@@ -5,8 +5,8 @@ import jax.numpy as jnp
 
 from xxm.core.chains.discrete import DiscreteChainMarginals
 from xxm.core.chains.gaussian import GaussianChainMarginals, GaussianPairPotential
-from xxm.hmm.core import DiscreteInitialModel, DiscreteTransitionModel
-from xxm.lds.core import EmissionsT, GaussianInitialModel
+from xxm.hmm.model import DiscreteInitialModel, DiscreteTransitionModel
+from xxm.lds.model import EmissionsT, GaussianInitialModel
 from xxm.optim import gaussian as gaussian_fit
 from xxm.core.dists.gaussian import LinearGaussian
 

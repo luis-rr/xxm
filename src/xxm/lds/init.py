@@ -7,7 +7,7 @@ from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian
 
 from ..optim.loop import unstack_models
-from .core import GaussianInitialModel, LinearGaussianDynamicsModel, Model
+from .model import GaussianInitialModel, LinearGaussianDynamicsModel, Model
 
 
 def _covariance(

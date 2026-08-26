@@ -14,7 +14,7 @@ from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
 
-from .core import DiscreteInitialModel, DiscreteTransitionModel, Emissions, Model
+from .model import DiscreteInitialModel, DiscreteTransitionModel, Emissions, Model
 
 
 def _kmeans(

@@ -11,12 +11,12 @@ from xxm.core.chains.gaussian import (
     GaussianPotential,
 )
 from xxm.core.emissions.continuous import GaussianEmissions
-from xxm.hmm.core import (
+from xxm.hmm.model import (
     DiscreteInitialModel,
     DiscreteTransitionModel,
 )
-from xxm.lds.core import GaussianInitialModel
-from xxm.slds.core import (
+from xxm.lds.model import GaussianInitialModel
+from xxm.slds.model import (
     Model,
     Posterior,
     SwitchingLinearGaussianDynamicsModel,

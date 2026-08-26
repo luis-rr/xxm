@@ -4,7 +4,7 @@ import numpy as np
 
 from xxm.core.chains.discrete import DiscreteChainMarginals
 from xxm.core.emissions.discrete import GaussianEmissions, PoissonEmissions
-from xxm.hmm.core import DiscreteInitialModel, DiscreteTransitionModel, Model
+from xxm.hmm.model import DiscreteInitialModel, DiscreteTransitionModel, Model
 from xxm.hmm.learning import em_step
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian
