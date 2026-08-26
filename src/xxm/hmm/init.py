@@ -141,7 +141,7 @@ def _initialize_gaussian_emissions(
     )
 
 
-def initialize_hmm_gaussian(
+def init_hmm_gaussian(
     num_states: int,
     observations: jax.Array,
     key: jax.Array,
@@ -215,7 +215,7 @@ def _initialize_ar_gaussian_emissions(
     return AREmissions(model)
 
 
-def initialize_arhmm_gaussian(
+def init_arhmm_gaussian(
     num_states: int,
     observations: jax.Array,
     lag: int,
@@ -259,7 +259,7 @@ def _initialize_poisson_emissions(
     )
 
 
-def initialize_hmm_poisson(
+def init_hmm_poisson(
     num_states: int,
     observations: jax.Array,
     key: jax.Array,
@@ -311,7 +311,7 @@ def _initialize_ar_poisson_emissions(
     return AREmissions(model)
 
 
-def initialize_arhmm_poisson(
+def init_arhmm_poisson(
     num_states: int,
     observations: jax.Array,
     max_lag: int,

@@ -7,10 +7,10 @@ import numpy as np
 import pytest
 
 from xxm.hmm.init import (
-    initialize_arhmm_gaussian,
-    initialize_arhmm_poisson,
-    initialize_hmm_gaussian,
-    initialize_hmm_poisson,
+    init_arhmm_gaussian,
+    init_arhmm_poisson,
+    init_hmm_gaussian,
+    init_hmm_poisson,
 )
 from xxm.hmm.learning import em_step as hmm_em_step
 from xxm.lds.init import init_pca_gaussian as initialize_lds_gaussian
@@ -54,28 +54,28 @@ POISSON_OBSERVATIONS = jnp.array(
 MODEL_CASES = [
     ModelCase(
         name='hmm-gaussian',
-        initialize=initialize_hmm_gaussian,
+        initialize=init_hmm_gaussian,
         em_step=hmm_em_step,
         observations=GAUSSIAN_OBSERVATIONS,
         init_kwargs={'num_states': 2, 'key': jax.random.key(0)},
     ),
     ModelCase(
         name='hmm-poisson',
-        initialize=initialize_hmm_poisson,
+        initialize=init_hmm_poisson,
         em_step=hmm_em_step,
         observations=POISSON_OBSERVATIONS,
         init_kwargs={'num_states': 2, 'key': jax.random.key(0)},
     ),
     ModelCase(
         name='arhmm-gaussian',
-        initialize=initialize_arhmm_gaussian,
+        initialize=init_arhmm_gaussian,
         em_step=hmm_em_step,
         observations=GAUSSIAN_OBSERVATIONS,
         init_kwargs={'num_states': 2, 'lag': 1, 'key': jax.random.key(0)},
     ),
     ModelCase(
         name='arhmm-poisson',
-        initialize=initialize_arhmm_poisson,
+        initialize=init_arhmm_poisson,
         em_step=hmm_em_step,
         observations=POISSON_OBSERVATIONS,
         init_kwargs={'num_states': 2, 'max_lag': 1, 'key': jax.random.key(0)},
