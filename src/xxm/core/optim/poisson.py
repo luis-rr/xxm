@@ -64,7 +64,7 @@ class _NewtonSearchParams(typing.NamedTuple):
 class _NewtonSearchModel(typing.NamedTuple):
     """Quantities held fixed while fitting a Poisson linear model."""
 
-    observations: jax.Array  # (T, O)
+    values: jax.Array  # (T, O)
     input_means: jax.Array  # (T, I)
     input_covariances: jax.Array | None  # (T, I, I)
     sample_weights: jax.Array  # (T,)
@@ -88,11 +88,11 @@ class _NewtonSearchModel(typing.NamedTuple):
         linear_model = params.to_linear_model()
 
         if self.input_covariances is None:
-            log_probs = linear_model.conditional(self.input_means).log_prob_each(self.observations)
+            log_probs = linear_model.conditional(self.input_means).log_prob_each(self.values)
 
         else:
             log_probs = linear_model.expected_log_prob_each(
-                observations=self.observations,
+                values=self.values,
                 inputs=Gaussian(
                     mean=self.input_means,
                     covariance=self.input_covariances,
@@ -116,7 +116,7 @@ class _NewtonSearchModel(typing.NamedTuple):
         """Compute the Newton direction independently for all outputs."""
         expected_rates = self._expected_rates(params)
 
-        weighted_observations = self.sample_weights[:, None] * self.observations
+        weighted_observations = self.sample_weights[:, None] * self.values
         weighted_rates = self.sample_weights[:, None] * expected_rates
 
         gradient_bias = jnp.sum(
@@ -221,14 +221,14 @@ class _NewtonSearchModel(typing.NamedTuple):
 
 
 def from_samples(
-    observations: jax.Array,  # (T, N)
+    values: jax.Array,  # (T, N)
 ) -> Poisson:
-    rates = jnp.mean(observations, axis=0)
+    rates = jnp.mean(values, axis=0)
     return Poisson(log_rates=jnp.log(jnp.maximum(rates, EPS)))
 
 
 def from_samples_weighted(
-    observations: jax.Array,  # (T, N)
+    values: jax.Array,  # (T, N)
     weights: jax.Array,  # (T, ...)
 ) -> Poisson:
     """Fit one weighted Poisson model per batch entry of ``weights``."""
@@ -238,7 +238,7 @@ def from_samples_weighted(
         jnp.einsum(
             't...,tn->...n',
             weights,
-            observations,
+            values,
         )
         / counts[..., None]
     )
@@ -249,19 +249,19 @@ def from_samples_weighted(
 
 
 def from_samples_grouped(
-    observations: jax.Array,  # (T, N)
+    values: jax.Array,  # (T, N)
     assignments: jax.Array,  # (T,)
     num_groups: int,
 ) -> Poisson:  # K-batched
-    """Fit one distribution to each group of assigned observations."""
+    """Fit one distribution to each group of assigned values."""
     weights = jax.nn.one_hot(
         assignments,
         num_groups,
-        dtype=jnp.result_type(observations, jnp.float32),
+        dtype=jnp.result_type(values, jnp.float32),
     )  # (T, K)
 
     return from_samples_weighted(
-        observations=observations,
+        values=values,
         weights=weights,
     )
 
@@ -287,7 +287,7 @@ def _initial_affine(
 
     else:
         bias = from_samples_weighted(
-            observations=outputs,
+            values=outputs,
             weights=weights,
         ).log_rates  # (..., O)
 
@@ -363,7 +363,7 @@ def _linear_from_moments(
     centered_affine = initial_affine.shift(center)
 
     model = _NewtonSearchModel(
-        observations=outputs,
+        values=outputs,
         input_means=centered_means,
         input_covariances=input_covariances,
         sample_weights=sample_weights,

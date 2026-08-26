@@ -122,7 +122,7 @@ def _init_gaussian_emissions(
     )  # (T,)
 
     gaussian = gaussian_fit.from_samples_grouped(
-        observations=observations,
+        values=observations,
         assignments=assignments,
         num_groups=num_states,
     )
@@ -251,7 +251,7 @@ def _init_poisson_emissions(
     )  # (T,)
 
     poisson = poisson_fit.from_samples_grouped(
-        observations=observations,
+        values=observations,
         assignments=assignments,
         num_groups=num_states,
     )

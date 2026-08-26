@@ -47,7 +47,7 @@ def test_expected_log_likelihood_matches_gaussian_moment_formula():
     )
 
     actual = linear_model.expected_log_prob(
-        observations=jnp.array([[2.0]]),
+        values=jnp.array([[2.0]]),
         inputs=Gaussian(mean=jnp.array([[1.0]]), covariance=jnp.array([[[0.5]]])),
     )
 
@@ -65,7 +65,7 @@ def test_deterministic_inputs_match_zero_covariance_marginals():
 
     deterministic = linear_model.conditional(means).log_prob_each(observations)
     zero_covariance = linear_model.expected_log_prob_each(
-        observations=observations,
+        values=observations,
         inputs=Gaussian(mean=means, covariance=jnp.zeros((2, 1, 1))),
     )
 
@@ -109,7 +109,7 @@ def test_fit_weighted_matches_weighted_sample_means():
 
 def test_fit_weighted_keeps_zero_rates_finite():
     fit = poisson_fit.from_samples_weighted(
-        observations=jnp.zeros((2, 1)),
+        values=jnp.zeros((2, 1)),
         weights=jnp.ones((2, 1)),
     )
 
@@ -208,11 +208,11 @@ def test_public_routines_are_jittable():
 
         log_likelihoods = Poisson(log_rates=log_rates).log_prob_broadcast(observations)
         expected_per_output = linear_model.expected_log_prob_each(
-            observations=observations,
+            values=observations,
             inputs=inputs,
         )
         expected_total = linear_model.expected_log_prob(
-            observations=observations,
+            values=observations,
             inputs=inputs,
         )
         fitted = poisson_fit.from_samples_weighted(observations, weights)

@@ -78,7 +78,7 @@ class PoissonEmissions(typing.NamedTuple):
     def fit_params(self, observations: jax.Array, posterior: Posterior) -> 'PoissonEmissions':
         return self._replace(
             model=poisson_fit.from_samples_weighted(
-                observations=observations,
+                values=observations,
                 weights=posterior.state_probs,
             ),
         )

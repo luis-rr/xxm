@@ -8,25 +8,25 @@ EPS: float = 1e-8
 
 
 def from_samples(
-    observations: jax.Array,  # (T, N)
+    values: jax.Array,  # (T, N)
 ) -> Gaussian:
     """Fit a Gaussian from samples along the first axis."""
-    mean = jnp.mean(observations, axis=0)
-    residuals = observations - mean
+    mean = jnp.mean(values, axis=0)
+    residuals = values - mean
     covariance = (
         jnp.einsum(
             't...i,t...j->...ij',
             residuals,
             residuals,
         )
-        / observations.shape[0]
+        / values.shape[0]
     )
 
     return Gaussian(mean=mean, covariance=covariance)
 
 
 def from_samples_weighted(
-    observations: jax.Array,  # (T, N)
+    values: jax.Array,  # (T, N)
     weights: jax.Array,  # (T, ...)
 ) -> Gaussian:
     """Fit one weighted Gaussian for each batch entry of ``weights``."""
@@ -37,13 +37,13 @@ def from_samples_weighted(
     mean = jnp.einsum(
         't...,tn->...n',
         normalized,
-        observations,
+        values,
     )
     second_moment = jnp.einsum(
         't...,ti,tj->...ij',
         normalized,
-        observations,
-        observations,
+        values,
+        values,
     )
 
     covariance = second_moment - mean[..., :, None] * mean[..., None, :]
@@ -53,19 +53,19 @@ def from_samples_weighted(
 
 
 def from_samples_grouped(
-    observations: jax.Array,  # (T, N)
+    values: jax.Array,  # (T, N)
     assignments: jax.Array,  # (T,)
     num_groups: int,
 ) -> Gaussian:  # K-batched
-    """Fit one Gaussian to each group of assigned observations."""
+    """Fit one Gaussian to each group of assigned values."""
     weights = jax.nn.one_hot(
         assignments,
         num_groups,
-        dtype=observations.dtype,
+        dtype=values.dtype,
     )  # (T, K)
 
     return from_samples_weighted(
-        observations=observations,
+        values=values,
         weights=weights,
     )
 
