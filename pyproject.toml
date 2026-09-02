@@ -26,8 +26,19 @@ dev = [
 [tool.setuptools.packages.find]
 where = ['src']
 
+[tool.setuptools.package-data]
+nocte = ['py.typed']
+
 [tool.ruff.format]
 quote-style = 'single'
 
 [tool.ruff.lint]
 extend-select = ['I']
+
+[tool.pyright]
+exclude = [
+    '**/node_modules',
+    '**/__pycache__',
+    '**/__editable__.*',
+    '**/.*',
+]
