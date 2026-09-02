@@ -53,10 +53,11 @@ Model families compose these pieces:
 
 Within each model family, responsibilities remain distinct:
 
-* `model` defines the generative model and its parameters;
+* `core` defines the generative model and its parameters;
 * `inference` computes posterior quantities for fixed model parameters;
 * `learning` updates model parameters and orchestrates repeated inference and fitting;
 * `init` constructs useful starting models from data or simple assumptions.
+* `model` exposes convenience API objects
 
 Generative-model logic should live on the mathematical components where it is intrinsic. Examples include sampling, conditional distributions, conversion to chain potentials, and sufficient-statistic-based parameter updates.
 
@@ -131,6 +132,7 @@ src/xxm/
 ├── hmm/
 │   ├── __init__.py
 │   ├── model.py
+│   ├── core.py
 │   ├── inference.py
 │   ├── learning.py
 │   └── init.py
@@ -138,6 +140,7 @@ src/xxm/
 ├── lds/
 │   ├── __init__.py
 │   ├── model.py
+│   ├── core.py
 │   ├── inference.py
 │   ├── learning.py
 │   └── init.py
@@ -145,6 +148,7 @@ src/xxm/
 └── slds/
     ├── __init__.py
     ├── model.py
+│   ├── core.py
     ├── inference.py
     ├── learning.py
     └── init.py
@@ -177,22 +181,22 @@ Circular dependencies should be treated as an architectural problem rather than 
 
 ### Public API
 
-`xxm` is research-oriented and does not strongly hide its implementation. Lower-level mathematical components remain accessible for inspection, experimentation, and extension.
+`xxm` is research-oriented and does not strongly hide its implementation. Lower-level mathematical components remain accessible for inspection, experimentation, composition, and extension.
 
 Package `__init__.py` files and explicit `__all__` definitions provide the recommended and discoverable API.
 
 Principles:
 
 * `__init__.py` files act as API manifests rather than implementation modules.
-* Recommended symbols are re-exported from semantic namespaces such as `xxm.hmm`, `xxm.lds`, `xxm.slds`, and relevant `xxm.core` subpackages.
+* Recommended symbols are re-exported from semantic namespaces such as `xxm.hmm`, `xxm.lds`, `xxm.slds`.
 * Deeper modules remain ordinary usable Python modules.
 * Highly technical implementation details may use leading underscores where useful.
-* Internal code imports definitions from their owning modules rather than back through the top-level `xxm` facade.
+* Internal code imports definitions from their owning modules rather than back through package facades.
 * Avoid lazy imports, dynamic exports, generated namespaces, automatic discovery, and import-time side effects.
 * Recommended APIs should be easy to discover through normal IDE completion and static analysis.
 * Until the first stable release, APIs may change directly.
 
-Model-family namespaces should expose the functions and objects needed to construct, initialize, infer, fit, sample from, and inspect the model.
+Model-family namespaces expose the core model representation together with the functions needed to initialize, infer, fit, sample from, and inspect it. Algorithm-specific names remain explicit at this level, for example `infer_exact`, `infer_laplace`, or `fit_variational_em`.
 
 For example:
 
@@ -201,8 +205,45 @@ import xxm.hmm as hmm
 
 model = hmm.init_gaussian(...)
 fit = hmm.fit_em(model, observations, ...)
-posterior, log_normalizer = hmm.infer_exact(fit.model, observations)
+posterior, log_normalizer = hmm.infer_exact(
+    fit.model,
+    observations,
+)
 ```
+
+In addition, each supported concrete model has a lightweight facade class, such as `GaussianHMM` or `PoissonLDS`. These classes wrap the corresponding core model without introducing a second parameter representation.
+
+Facade classes provide a compact model-oriented API:
+
+* `from_params` constructor hides unnecessary nesting in the core representation;
+* other named constuctors such as `from_kmeans`, or `from_pca` expose ways to initialize the model.
+* `sample` generates data from the model
+* `infer` invokes the inference algorithm appropriate for that concrete model
+* `fit` invokes its corresponding learning procedure
+* `model` exposes the wrapped core model when lower-level composition or algorithm-specific access is needed
+
+For example:
+
+```python
+import xxm
+
+model = xxm.GaussianLDS.from_pca(
+    observations,
+    latent_dim=3,
+)
+
+fit = model.fit(
+    observations,
+    num_iters=50,
+)
+
+posterior, log_normalizer = fit.model.infer(observations)
+```
+
+The facade API improves discoverability and removes the need for users to map concrete model types to their corresponding inference and learning functions. It does not replace the model-family API: explicit algorithmic functions and core model representations remain recommended interfaces when finer control, composition, or inspection is useful.
+
+Facade methods should remain thin wrappers around the existing model-family implementation. They should not duplicate model state, introduce runtime algorithm dispatch, or grow into a separate modelling framework.
+
 
 ## JAX and model representation
 

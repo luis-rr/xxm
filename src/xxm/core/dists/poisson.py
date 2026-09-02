@@ -82,6 +82,13 @@ class Poisson(typing.NamedTuple):
 
         return self.log_prob(values)
 
+    def mixture_mean(self, weights: jax.Array) -> jax.Array:
+        """Mean of a mixture over the last batch dimension."""
+        return jnp.sum(
+            weights[..., :, None] * self.rates,
+            axis=-2,
+        )
+
 
 class LinearPoisson(typing.NamedTuple):
     """A linear Poisson model ``y | x ~ Poisson(exp(A x + b))``.

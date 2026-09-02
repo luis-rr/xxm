@@ -34,6 +34,10 @@ class Emissions(typing.Protocol):
 class GaussianEmissions(typing.NamedTuple):
     model: Gaussian  # K-batched
 
+    @property
+    def num_states(self) -> int:
+        return self.model.batch_shape[0]
+
     def log_likelihoods(self, observations: jax.Array) -> jax.Array:
 
         return self.model.log_prob_broadcast(observations)
@@ -68,6 +72,10 @@ class GaussianEmissions(typing.NamedTuple):
 
 class PoissonEmissions(typing.NamedTuple):
     model: Poisson  # K-batched
+
+    @property
+    def num_states(self) -> int:
+        return self.model.batch_shape[0]
 
     def log_likelihoods(self, observations: jax.Array) -> jax.Array:
         return self.model.log_prob_broadcast(observations)
