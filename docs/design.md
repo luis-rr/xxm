@@ -167,7 +167,6 @@ More precisely:
 * `core` does not depend on complete model families;
 * HMM and LDS depend on reusable mathematical components in `core`;
 * HMM and LDS should not depend on one another;
-* SLDS model and inference code should depend on shared components rather than HMM or LDS orchestration;
 * SLDS initialization may compose HMM or LDS initialization and fitting routines where this is mathematically useful;
 * model components do not depend on inference algorithms;
 * inference does not depend on learning;
