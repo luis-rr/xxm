@@ -9,15 +9,6 @@ repos:
 
   - repo: local
     hooks:
-      - id: pytest
-        name: pytest
-        entry: python -m pytest
-        language: system
-        pass_filenames: false
-        always_run: true
-
-  - repo: local
-    hooks:
       - id: check-src-tests-not-executable
         name: check src/tests not executable
         entry: bash -c 'bad=$(git ls-files -s src tests | grep "^100755 " || true); [ -z "$bad" ] || { echo "Executable files under src/ or tests/:"; echo "$bad"; exit 1; }'
@@ -32,3 +23,12 @@ repos:
         language: system
         pass_filenames: false
         types: [python]
+
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: python -m pytest
+        language: system
+        pass_filenames: false
+        always_run: true
