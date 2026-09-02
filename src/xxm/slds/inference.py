@@ -68,7 +68,9 @@ class DiscreteFactors(typing.NamedTuple):
         num_switch_steps: int,
     ) -> typing.Self:
 
-        transition_probs = model.transitions.model.broadcast((num_switch_steps - 1,)).probs
+        transition_probs = model.transitions.model.broadcast(
+            (num_switch_steps - 1,)
+        ).probs
 
         return cls(
             chain=DiscreteChain.from_markov_prior(

@@ -21,7 +21,7 @@ def make_posterior(
     state_marginals: jnp.ndarray,
     pair_marginals: jnp.ndarray,
 ) -> tuple[DiscreteChainMarginals, jax.Array]:
-    T, K = state_marginals.shape
+    _T, _K = state_marginals.shape
 
     return (
         DiscreteChainMarginals(
@@ -36,7 +36,7 @@ def make_posterior(
 
 
 def test_m_step_initial_probs():
-    posterior, log_normalizer = make_posterior(
+    posterior, _log_normalizer = make_posterior(
         state_marginals=jnp.array(
             [
                 [0.8, 0.2],
@@ -76,12 +76,14 @@ def test_m_step_transition_probs():
         ]
     )
 
-    posterior, log_normalizer = make_posterior(
+    posterior, _log_normalizer = make_posterior(
         state_marginals,
         pair_marginals,
     )
 
-    transitions = CategoricalTransitions(Categorical(probs=jnp.array([[0.5, 0.5], [0.5, 0.5]])))
+    transitions = CategoricalTransitions(
+        Categorical(probs=jnp.array([[0.5, 0.5], [0.5, 0.5]]))
+    )
 
     result = transitions.fit_params(posterior)
 
@@ -141,7 +143,7 @@ def test_poisson_m_step():
         ]
     )
 
-    posterior, log_normalizer = make_posterior(
+    posterior, _log_normalizer = make_posterior(
         state_marginals=jnp.array(
             [
                 [1.0, 0.0],
@@ -216,7 +218,7 @@ def test_gaussian_m_step():
         ]
     )
 
-    posterior, log_normalizer = make_posterior(
+    posterior, _log_normalizer = make_posterior(
         state_marginals=jnp.array(
             [
                 [1.0, 0.0],

@@ -255,7 +255,9 @@ def test_poisson_log_likelihood_matches_known_scalar_value():
 def test_poisson_log_likelihood_handles_zero_count():
     emissions = PoissonEmissions(
         model=LinearPoisson(
-            affine=Affine(coefficients=jnp.zeros((1, 1)), bias=jnp.array([jnp.log(2.0)])),
+            affine=Affine(
+                coefficients=jnp.zeros((1, 1)), bias=jnp.array([jnp.log(2.0)])
+            ),
         ),
     )
 
@@ -297,7 +299,9 @@ def test_poisson_local_potential_matches_value_gradient_and_hessian():
     precision = potential.precision_blocks[0, 0, 0]
     information = potential.information_vectors[0, 0]
 
-    quadratic_value = -0.5 * precision * x0**2 + information * x0 + potential.log_constant
+    quadratic_value = (
+        -0.5 * precision * x0**2 + information * x0 + potential.log_constant
+    )
     quadratic_gradient = -precision * x0 + information
     quadratic_hessian = -precision
 
@@ -314,7 +318,9 @@ def test_poisson_fit_recovers_known_parameters():
 
     true_emissions = PoissonEmissions(
         model=LinearPoisson(
-            affine=Affine(coefficients=jnp.array([[jnp.log(2.0)]]), bias=jnp.array([jnp.log(2.0)])),
+            affine=Affine(
+                coefficients=jnp.array([[jnp.log(2.0)]]), bias=jnp.array([jnp.log(2.0)])
+            ),
         ),
     )
 

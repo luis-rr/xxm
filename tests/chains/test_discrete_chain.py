@@ -30,7 +30,9 @@ def _enumerate_exact_posterior(
     log_weights = np.empty(len(state_sequences), dtype=float)
 
     for sequence_index, sequence in enumerate(state_sequences):
-        log_weight = np.log(initial_probs[sequence[0]]) + state_log_potentials[0, sequence[0]]
+        log_weight = (
+            np.log(initial_probs[sequence[0]]) + state_log_potentials[0, sequence[0]]
+        )
 
         for time_index in range(1, t):
             prev_state = sequence[time_index - 1]
@@ -69,7 +71,9 @@ def _enumerate_exact_posterior(
 
 
 def _stack_static_transition(transition_probs: jax.Array, num_steps: int) -> jax.Array:
-    return jnp.repeat(transition_probs[None, :, :], repeats=max(0, num_steps - 1), axis=0)
+    return jnp.repeat(
+        transition_probs[None, :, :], repeats=max(0, num_steps - 1), axis=0
+    )
 
 
 def test_forward_backward_matches_exact_enumeration() -> None:
@@ -98,18 +102,22 @@ def test_forward_backward_matches_exact_enumeration() -> None:
     )
 
     result, log_normalizer = chain.forward_backward()
-    exact_state_posterior_probs, exact_pair_posterior_probs, exact_log_marginal_likelihood = (
-        _enumerate_exact_posterior(
-            initial_probs=np.asarray(chain.initial_probs),
-            transition_probs=np.asarray(chain.transition_probs),
-            state_log_potentials=np.asarray(chain.state_log_potentials),
-        )
+    (
+        exact_state_posterior_probs,
+        exact_pair_posterior_probs,
+        exact_log_marginal_likelihood,
+    ) = _enumerate_exact_posterior(
+        initial_probs=np.asarray(chain.initial_probs),
+        transition_probs=np.asarray(chain.transition_probs),
+        state_log_potentials=np.asarray(chain.state_log_potentials),
     )
 
     np.testing.assert_allclose(
         np.asarray(result.state_probs), exact_state_posterior_probs, atol=ATOL
     )
-    np.testing.assert_allclose(np.asarray(result.pair_probs), exact_pair_posterior_probs, atol=ATOL)
+    np.testing.assert_allclose(
+        np.asarray(result.pair_probs), exact_pair_posterior_probs, atol=ATOL
+    )
     np.testing.assert_allclose(
         float(log_normalizer),
         exact_log_marginal_likelihood,
@@ -207,7 +215,7 @@ def test_marginal_consistency_between_state_and_pair_posteriors() -> None:
         transition_probs=transition_probs,
         state_log_potentials=state_log_potentials,
     )
-    result, log_normalizer = chain.forward_backward()
+    result, _log_normalizer = chain.forward_backward()
 
     for time_index in range(chain.state_log_potentials.shape[0] - 1):
         np.testing.assert_allclose(
@@ -249,12 +257,14 @@ def test_log_normalizer_matches_scaling_and_exact_enumeration() -> None:
 
     messages = xxm.core.chains.discrete._forward_backward(chain)
     result, log_normalizer = chain.forward_backward()
-    exact_state_posterior_probs, exact_pair_posterior_probs, exact_log_marginal_likelihood = (
-        _enumerate_exact_posterior(
-            initial_probs=np.asarray(chain.initial_probs),
-            transition_probs=np.asarray(chain.transition_probs),
-            state_log_potentials=np.asarray(chain.state_log_potentials),
-        )
+    (
+        exact_state_posterior_probs,
+        exact_pair_posterior_probs,
+        exact_log_marginal_likelihood,
+    ) = _enumerate_exact_posterior(
+        initial_probs=np.asarray(chain.initial_probs),
+        transition_probs=np.asarray(chain.transition_probs),
+        state_log_potentials=np.asarray(chain.state_log_potentials),
     )
 
     np.testing.assert_allclose(
@@ -309,12 +319,14 @@ def test_time_varying_transitions_match_exact_enumeration() -> None:
         state_log_potentials=state_log_potentials,
     )
     result, log_normalizer = chain.forward_backward()
-    exact_state_posterior_probs, exact_pair_posterior_probs, exact_log_marginal_likelihood = (
-        _enumerate_exact_posterior(
-            initial_probs=np.asarray(chain.initial_probs),
-            transition_probs=np.asarray(chain.transition_probs),
-            state_log_potentials=np.asarray(chain.state_log_potentials),
-        )
+    (
+        exact_state_posterior_probs,
+        exact_pair_posterior_probs,
+        exact_log_marginal_likelihood,
+    ) = _enumerate_exact_posterior(
+        initial_probs=np.asarray(chain.initial_probs),
+        transition_probs=np.asarray(chain.transition_probs),
+        state_log_potentials=np.asarray(chain.state_log_potentials),
     )
 
     np.testing.assert_allclose(
@@ -350,7 +362,7 @@ def test_deterministic_transitions_concentrate_posterior_path() -> None:
         state_log_potentials=jnp.zeros((4, 2)),
     )
 
-    result, log_normalizer = chain.forward_backward()
+    result, _log_normalizer = chain.forward_backward()
 
     expected_state_posterior_probs = np.array(
         [

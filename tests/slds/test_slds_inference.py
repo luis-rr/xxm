@@ -135,7 +135,9 @@ def _single_state_model() -> Model:
         ),
         dynamics=GaussianLinearSwitchingDynamics(
             model=LinearGaussian(
-                affine=Affine(coefficients=jnp.array([[[0.8]]]), bias=jnp.array([[0.2]])),
+                affine=Affine(
+                    coefficients=jnp.array([[[0.8]]]), bias=jnp.array([[0.2]])
+                ),
                 covariance=jnp.array([[[0.5]]]),
             ),
         ),
@@ -194,7 +196,8 @@ def test_single_state_slds_matches_gaussian_chain():
     pair_potentials = model.dynamics.compute_pair_potentials().weighted_sum(state_probs)
     initial_potential = GaussianPotential.from_moments(
         Gaussian(
-            mean=model.latent_initial.model.mean, covariance=model.latent_initial.model.covariance
+            mean=model.latent_initial.model.mean,
+            covariance=model.latent_initial.model.covariance,
         ),
     )
     observation_potential = model.emissions.compute_potential(observations)
@@ -277,7 +280,7 @@ def test_inference_exact_is_jittable():
         static_argnames=('num_iters',),
     )
 
-    jitted, jitted_log_normalizer = inference_jit(
+    jitted, _jitted_log_normalizer = inference_jit(
         model,
         observations,
         num_iters=2,

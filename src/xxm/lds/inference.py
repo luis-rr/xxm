@@ -83,7 +83,9 @@ class _NewtonSearchModel(
     def objective(self, params: _NewtonSearchParams) -> jax.Array:
         """Evaluate the log joint at a latent trajectory."""
 
-        return self.latent_chain.log_potential(params.latents) + self.emissions.log_likelihood(
+        return self.latent_chain.log_potential(
+            params.latents
+        ) + self.emissions.log_likelihood(
             self.observations,
             params.latents,
         )

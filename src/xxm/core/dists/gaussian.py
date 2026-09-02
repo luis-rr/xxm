@@ -141,7 +141,9 @@ class Gaussian(typing.NamedTuple):
             axis=-1,
         )  # (...)
 
-        return -0.5 * (self.variable_dim * jnp.log(2.0 * jnp.pi) + log_det + mahalanobis)
+        return -0.5 * (
+            self.variable_dim * jnp.log(2.0 * jnp.pi) + log_det + mahalanobis
+        )
 
     def log_prob_broadcast(
         self,

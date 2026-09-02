@@ -28,6 +28,8 @@ def test_init_pca_gaussian_many_returns_one_model_per_floor():
 def test_init_pca_gaussian_is_jittable():
     observations = jnp.arange(24.0).reshape(8, 3)
 
-    model = jax.jit(init_pca_gaussian, static_argnames='latent_dim')(observations, latent_dim=2)
+    model = jax.jit(init_pca_gaussian, static_argnames='latent_dim')(
+        observations, latent_dim=2
+    )
 
     assert model.emissions.model.covariance.shape == (3, 3)

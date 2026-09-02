@@ -83,8 +83,12 @@ def linear_from_moments(
     Expectations may include both posterior uncertainty and averaging
     over samples. Leading batch dimensions are supported.
     """
-    input_covariance = input_second_moment - input_mean[..., :, None] * input_mean[..., None, :]
-    output_covariance = output_second_moment - output_mean[..., :, None] * output_mean[..., None, :]
+    input_covariance = (
+        input_second_moment - input_mean[..., :, None] * input_mean[..., None, :]
+    )
+    output_covariance = (
+        output_second_moment - output_mean[..., :, None] * output_mean[..., None, :]
+    )
     output_input_covariance = (
         output_input_moment - output_mean[..., :, None] * input_mean[..., None, :]
     )
@@ -157,8 +161,12 @@ def linear_from_pairs_weighted(
         input_mean=jnp.einsum('t...,ti->...i', normalized, inputs),
         output_mean=jnp.einsum('t...,to->...o', normalized, outputs),
         input_second_moment=jnp.einsum('t...,ti,tj->...ij', normalized, inputs, inputs),
-        output_second_moment=jnp.einsum('t...,to,tp->...op', normalized, outputs, outputs),
-        output_input_moment=jnp.einsum('t...,to,ti->...oi', normalized, outputs, inputs),
+        output_second_moment=jnp.einsum(
+            't...,to,tp->...op', normalized, outputs, outputs
+        ),
+        output_input_moment=jnp.einsum(
+            't...,to,ti->...oi', normalized, outputs, inputs
+        ),
         ridge=ridge,
     )
 

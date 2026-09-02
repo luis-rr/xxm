@@ -127,7 +127,9 @@ class GaussianPotential(typing.NamedTuple):
             precision_blocks=precision,
             information_vectors=information,
             log_constant=(
-                -0.5 * quadratic - 0.5 * log_det_covariance - 0.5 * d * jnp.log(2.0 * jnp.pi)
+                -0.5 * quadratic
+                - 0.5 * log_det_covariance
+                - 0.5 * d * jnp.log(2.0 * jnp.pi)
             ),
         )
 
@@ -284,7 +286,10 @@ class GaussianPairPotential(typing.NamedTuple):
         if lin_gaussian.affine.coefficients.ndim < 2:
             raise ValueError('matrix must have shape (..., N, N)')
 
-        if lin_gaussian.affine.coefficients.shape[-2] != lin_gaussian.affine.coefficients.shape[-1]:
+        if (
+            lin_gaussian.affine.coefficients.shape[-2]
+            != lin_gaussian.affine.coefficients.shape[-1]
+        ):
             raise ValueError('matrix must have shape (..., N, N)')
 
         n = lin_gaussian.affine.coefficients.shape[-1]
@@ -530,11 +535,19 @@ class GaussianChain(typing.NamedTuple):
             (num_steps, latent_dim),
             dtype=dtype,
         )
-        information_vectors = information_vectors.at[0].add(initial_potential.information_vectors)
-        information_vectors = information_vectors.at[:-1].add(pair_potentials.left_information)
-        information_vectors = information_vectors.at[1:].add(pair_potentials.right_information)
+        information_vectors = information_vectors.at[0].add(
+            initial_potential.information_vectors
+        )
+        information_vectors = information_vectors.at[:-1].add(
+            pair_potentials.left_information
+        )
+        information_vectors = information_vectors.at[1:].add(
+            pair_potentials.right_information
+        )
 
-        log_constant = initial_potential.log_constant + jnp.sum(pair_potentials.log_constant)
+        log_constant = initial_potential.log_constant + jnp.sum(
+            pair_potentials.log_constant
+        )
 
         return cls(
             diagonal_precision_blocks=diagonal,
@@ -573,9 +586,13 @@ class GaussianChain(typing.NamedTuple):
             )
 
         return GaussianChain(
-            diagonal_precision_blocks=(self.diagonal_precision_blocks + potential.precision_blocks),
+            diagonal_precision_blocks=(
+                self.diagonal_precision_blocks + potential.precision_blocks
+            ),
             lower_precision_blocks=self.lower_precision_blocks,
-            information_vectors=(self.information_vectors + potential.information_vectors),
+            information_vectors=(
+                self.information_vectors + potential.information_vectors
+            ),
             log_constant=(self.log_constant + jnp.sum(potential.log_constant)),
         )
 
@@ -588,7 +605,9 @@ class GaussianChain(typing.NamedTuple):
         expected_shape = (self.num_steps, self.variable_dim)
 
         if latent.shape != expected_shape:
-            raise ValueError(f'latent must have shape {expected_shape}. Got shape {latent.shape}')
+            raise ValueError(
+                f'latent must have shape {expected_shape}. Got shape {latent.shape}'
+            )
 
         diagonal_terms = jnp.einsum(
             'ti,tij,tj->',
@@ -836,7 +855,9 @@ class _GaussianChainFactorization(typing.NamedTuple):
 
             conditional_covariance = _inverse_from_cholesky(cholesky)
 
-            covariance = conditional_covariance + coefficient @ next_covariance @ coefficient.T
+            covariance = (
+                conditional_covariance + coefficient @ next_covariance @ coefficient.T
+            )
 
             cross_covariance = coefficient @ next_covariance
 

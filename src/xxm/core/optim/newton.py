@@ -11,7 +11,9 @@ import jax.numpy as jnp
 
 
 class FreeParams(typing.Protocol):
-    def take_step(self, direction: typing.Self, step_size: jax.Array) -> typing.Self: ...
+    def take_step(
+        self, direction: typing.Self, step_size: jax.Array
+    ) -> typing.Self: ...
     def relative_change_from(self, other: typing.Self) -> jax.Array: ...
     def where(self, mask: jax.Array, other: typing.Self) -> typing.Self: ...
 
@@ -55,17 +57,21 @@ class NewtonSearch(typing.NamedTuple, typing.Generic[FreeParamsT]):
             done=jnp.zeros_like(current_objective, dtype=bool),
         )
 
-    def _newton_step(self, search_state: NewtonState[FreeParamsT]) -> NewtonState[FreeParamsT]:
+    def _newton_step(
+        self, search_state: NewtonState[FreeParamsT]
+    ) -> NewtonState[FreeParamsT]:
         """Perform one damped Newton iteration."""
         active = ~search_state.done
         direction = self.model.newton_direction(search_state.params)
 
-        candidate_params, candidate_objective, accepted = self._backtracking_line_search(
-            params=search_state.params,
-            direction=direction,
-            current_objective=search_state.objective,
-            active=active,
-            max_iter=self.max_line_search_iters,
+        candidate_params, candidate_objective, accepted = (
+            self._backtracking_line_search(
+                params=search_state.params,
+                direction=direction,
+                current_objective=search_state.objective,
+                active=active,
+                max_iter=self.max_line_search_iters,
+            )
         )
 
         updated = active & accepted
@@ -79,7 +85,9 @@ class NewtonSearch(typing.NamedTuple, typing.Generic[FreeParamsT]):
 
         relative_change = next_params.relative_change_from(search_state.params)
 
-        next_done = search_state.done | (active & ((relative_change <= self.tol) | ~accepted))
+        next_done = search_state.done | (
+            active & ((relative_change <= self.tol) | ~accepted)
+        )
 
         return NewtonState(
             iteration=search_state.iteration + 1,
@@ -178,7 +186,9 @@ class LineSearch(typing.NamedTuple, typing.Generic[FreeParamsT]):
 
             return (search.iteration < max_iter) & jnp.any(rejected)
 
-        def backtrack(search: LineSearchState[FreeParamsT]) -> LineSearchState[FreeParamsT]:
+        def backtrack(
+            search: LineSearchState[FreeParamsT],
+        ) -> LineSearchState[FreeParamsT]:
             rejected = self.active & ~search.is_accepted(self.current_objective)
 
             step_size = jnp.where(

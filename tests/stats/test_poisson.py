@@ -77,7 +77,9 @@ def test_sample_weights_ignore_zero_weight_samples():
     # coefficients are zero, matching a Poisson(rate=1.0) for both samples.
     observations = jnp.array([[2.0], [100.0]])
     means = jnp.zeros((2, 1))
-    linear_model = LinearPoisson(affine=Affine(coefficients=jnp.zeros((1, 1)), bias=jnp.zeros(1)))
+    linear_model = LinearPoisson(
+        affine=Affine(coefficients=jnp.zeros((1, 1)), bias=jnp.zeros(1))
+    )
     weights = jnp.array([1.0, 0.0])
 
     log_probs = linear_model.conditional(means).log_prob_each(observations)
@@ -170,7 +172,9 @@ def test_fit_weighted_linear_recovers_state_specific_two_point_mles():
         inputs=inputs,
         outputs=outputs,
         weights=weights,
-        initial_affine=Affine(coefficients=jnp.zeros((2, 1, 1)), bias=jnp.zeros((2, 1))),
+        initial_affine=Affine(
+            coefficients=jnp.zeros((2, 1, 1)), bias=jnp.zeros((2, 1))
+        ),
     )
 
     expected_coefficients = np.array([[[np.log(2.0)]], [[-np.log(2.0)]]])
@@ -203,7 +207,9 @@ def test_public_routines_are_jittable():
         weights,
         log_rates,
     ):
-        linear_model = LinearPoisson(affine=Affine(coefficients=coefficients, bias=bias))
+        linear_model = LinearPoisson(
+            affine=Affine(coefficients=coefficients, bias=bias)
+        )
         inputs = Gaussian(mean=means, covariance=covariances)
 
         log_likelihoods = Poisson(log_rates=log_rates).log_prob_broadcast(observations)
@@ -267,7 +273,9 @@ def test_public_routines_are_jittable():
             inputs=inputs,
             outputs=outputs,
             weights=weights,
-            initial_affine=Affine(coefficients=jnp.zeros((2, 1, 1)), bias=jnp.zeros((2, 1))),
+            initial_affine=Affine(
+                coefficients=jnp.zeros((2, 1, 1)), bias=jnp.zeros((2, 1))
+            ),
             max_iter=2,
             ridge=0.1,
         )

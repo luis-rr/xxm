@@ -87,7 +87,9 @@ class _NewtonSearchModel(typing.NamedTuple):
         linear_model = params.to_linear_model()
 
         if self.input_covariances is None:
-            log_probs = linear_model.conditional(self.input_means).log_prob_each(self.values)
+            log_probs = linear_model.conditional(self.input_means).log_prob_each(
+                self.values
+            )
 
         else:
             log_probs = linear_model.expected_log_prob_each(
@@ -104,7 +106,12 @@ class _NewtonSearchModel(typing.NamedTuple):
         )
 
         weight_sum = jnp.sum(self.weights)
-        penalty = 0.5 * self.ridge * weight_sum * jnp.sum(params.affine.coefficients**2, axis=-1)
+        penalty = (
+            0.5
+            * self.ridge
+            * weight_sum
+            * jnp.sum(params.affine.coefficients**2, axis=-1)
+        )
 
         return log_likelihood - penalty
 
@@ -142,10 +149,13 @@ class _NewtonSearchModel(typing.NamedTuple):
                 params.affine.coefficients,
             )
 
-            gradient_coefficients = weighted_observations.T @ self.input_means - jnp.einsum(
-                'to,toi->oi',
-                weighted_rates,
-                shifted_means,
+            gradient_coefficients = (
+                weighted_observations.T @ self.input_means
+                - jnp.einsum(
+                    'to,toi->oi',
+                    weighted_rates,
+                    shifted_means,
+                )
             )
 
             precision_coefficients = jnp.einsum(
@@ -169,7 +179,9 @@ class _NewtonSearchModel(typing.NamedTuple):
         ridge_precision = self.ridge * weight_sum
         input_dim = params.affine.coefficients.shape[-1]
 
-        gradient_coefficients = gradient_coefficients - ridge_precision * params.affine.coefficients
+        gradient_coefficients = (
+            gradient_coefficients - ridge_precision * params.affine.coefficients
+        )
         precision_coefficients = (
             precision_coefficients
             + ridge_precision
@@ -352,7 +364,9 @@ def _linear_from_moments(
 
     weight_sum = jnp.sum(weights)
 
-    center = jnp.sum(weights[:, None] * input_means, axis=0) / jnp.maximum(weight_sum, 1e-8)  # (I,)
+    center = jnp.sum(weights[:, None] * input_means, axis=0) / jnp.maximum(
+        weight_sum, 1e-8
+    )  # (I,)
 
     centered_means = input_means - center  # (T, I)
 

@@ -21,7 +21,9 @@ from xxm.lds.model import Model
 
 def make_scalar_poisson_model() -> Model[PoissonEmissions]:
     return Model(
-        initial=GaussianInitial(model=Gaussian(mean=jnp.zeros(1), covariance=jnp.eye(1))),
+        initial=GaussianInitial(
+            model=Gaussian(mean=jnp.zeros(1), covariance=jnp.eye(1))
+        ),
         dynamics=GaussianLinearDynamics(
             model=LinearGaussian(
                 affine=Affine(coefficients=jnp.eye(1), bias=jnp.zeros(1)),
@@ -29,7 +31,9 @@ def make_scalar_poisson_model() -> Model[PoissonEmissions]:
             ),
         ),
         emissions=PoissonEmissions(
-            model=LinearPoisson(affine=Affine(coefficients=jnp.ones((1, 1)), bias=jnp.zeros(1))),
+            model=LinearPoisson(
+                affine=Affine(coefficients=jnp.ones((1, 1)), bias=jnp.zeros(1))
+            ),
         ),
     )
 
@@ -58,7 +62,7 @@ def test_exact_inference_is_jittable():
 def test_laplace_recovers_known_scalar_map():
     model = make_scalar_poisson_model()
 
-    posterior, log_normalizer = infer_laplace(model, jnp.array([[1.0]]))
+    posterior, _log_normalizer = infer_laplace(model, jnp.array([[1.0]]))
 
     np.testing.assert_allclose(posterior.means, [[0.0]], atol=1e-6)
 

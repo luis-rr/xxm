@@ -163,7 +163,9 @@ def init_pca_gaussian(
     return Model(
         initial=initial_from_latents(latents, covariance_floor),
         dynamics=dynamics_from_latents(latents, covariance_floor),
-        emissions=gaussian_emissions_from_latents(observations, latents, covariance_floor),
+        emissions=gaussian_emissions_from_latents(
+            observations, latents, covariance_floor
+        ),
     )
 
 

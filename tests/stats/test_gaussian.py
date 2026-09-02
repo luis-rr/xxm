@@ -18,7 +18,9 @@ def test_log_likelihoods_matches_univariate_gaussians():
     means = jnp.array([[0.0], [1.0]])
     covariances = jnp.array([[[1.0]], [[4.0]]])
 
-    actual = Gaussian(mean=means, covariance=covariances).log_prob_broadcast(observations)
+    actual = Gaussian(mean=means, covariance=covariances).log_prob_broadcast(
+        observations
+    )
 
     expected = np.array(
         [
@@ -122,9 +124,9 @@ def test_public_routines_are_jittable():
 
     @jax.jit
     def run(observations, means, covariances, weights, inputs, outputs):
-        log_likelihoods = Gaussian(mean=means, covariance=covariances).log_prob_broadcast(
-            observations
-        )
+        log_likelihoods = Gaussian(
+            mean=means, covariance=covariances
+        ).log_prob_broadcast(observations)
         weighted_fit = gaussian_fit.from_samples_weighted(
             observations,
             weights,

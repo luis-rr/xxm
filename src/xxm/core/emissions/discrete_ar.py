@@ -37,11 +37,16 @@ from xxm.core.optim import poisson as poisson_fit
 from xxm.core.posteriors import DiscretePosterior
 
 
-def lagged_observations(observations: jax.Array, num_lags: int) -> jax.Array:  # (T-L, L, N)
+def lagged_observations(
+    observations: jax.Array, num_lags: int
+) -> jax.Array:  # (T-L, L, N)
     """Return histories ordered from lag 1 to lag L."""
 
     return jnp.stack(
-        [observations[num_lags - i - 1 : observations.shape[0] - i - 1] for i in range(num_lags)],
+        [
+            observations[num_lags - i - 1 : observations.shape[0] - i - 1]
+            for i in range(num_lags)
+        ],
         axis=1,
     )
 
@@ -154,7 +159,9 @@ class AREmissions(typing.NamedTuple, typing.Generic[ConditionalModelT]):
     ) -> jax.Array:  # (T, K)
         conditional = self.conditional(observations)
 
-        log_probs = conditional.log_prob(observations[self.num_lags :, None, :])  # (T-L, K)
+        log_probs = conditional.log_prob(
+            observations[self.num_lags :, None, :]
+        )  # (T-L, K)
 
         padding = jnp.zeros(
             (self.num_lags, self.num_states),

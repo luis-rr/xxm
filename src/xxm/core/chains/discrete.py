@@ -98,7 +98,9 @@ class DiscreteChain(typing.NamedTuple):
         potential: DiscretePotential,
     ) -> DiscreteChain:
         if potential.batch_shape != (self.num_steps,):
-            raise ValueError(f'Potential must have shape (T, K). Got shape {potential.batch_shape}')
+            raise ValueError(
+                f'Potential must have shape (T, K). Got shape {potential.batch_shape}'
+            )
 
         if potential.num_states != self.num_states:
             raise ValueError(
@@ -254,12 +256,16 @@ class _DiscreteChainMessages(typing.NamedTuple):
         ) -> jax.Array:
             observation_offset = jnp.max(next_state_log_potential)
 
-            next_observation_weights = jnp.exp(next_state_log_potential - observation_offset)
+            next_observation_weights = jnp.exp(
+                next_state_log_potential - observation_offset
+            )
 
             future_weights = next_observation_weights * next_backward_messages
 
             unnormalized_pair_probs = (
-                current_forward_messages[:, None] * transition_probs * future_weights[None, :]
+                current_forward_messages[:, None]
+                * transition_probs
+                * future_weights[None, :]
             )
 
             normalization_scale = jnp.exp(observation_offset - next_log_normalizer)
@@ -418,15 +424,21 @@ def _backward_pass(
 
         observation_offset = jnp.max(next_state_log_potential)
 
-        next_observation_weights = jnp.exp(next_state_log_potential - observation_offset)
+        next_observation_weights = jnp.exp(
+            next_state_log_potential - observation_offset
+        )
 
-        weighted_future_probs = next_observation_weights * backward_messages_at_next_time
+        weighted_future_probs = (
+            next_observation_weights * backward_messages_at_next_time
+        )
 
         propagated_backward_messages = transition_probs @ weighted_future_probs
 
         normalization_scale = jnp.exp(observation_offset - next_log_normalizer)
 
-        backward_messages_at_current_time = propagated_backward_messages * normalization_scale
+        backward_messages_at_current_time = (
+            propagated_backward_messages * normalization_scale
+        )
 
         return (
             backward_messages_at_current_time,

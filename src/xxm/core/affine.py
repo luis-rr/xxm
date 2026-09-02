@@ -36,7 +36,9 @@ class Affine(typing.NamedTuple):
 
     def norm(self) -> jax.Array:
         """Return the parameter norm for each output."""
-        return jnp.sqrt(jnp.sum(self.coefficients**2, axis=-1) + self.bias**2)  # TODO batch?
+        return jnp.sqrt(
+            jnp.sum(self.coefficients**2, axis=-1) + self.bias**2
+        )  # TODO batch?
 
     def shift(self, center: jax.Array) -> 'Affine':
 

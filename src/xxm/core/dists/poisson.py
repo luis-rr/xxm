@@ -143,7 +143,11 @@ class LinearPoisson(typing.NamedTuple):
     ) -> jax.Array:
         """Expected Poisson log probability under Gaussian input marginals."""
         mean, variance = self.log_rate_moments(inputs)
-        return values * mean - jnp.exp(mean + 0.5 * variance) - jsp.special.gammaln(values + 1)
+        return (
+            values * mean
+            - jnp.exp(mean + 0.5 * variance)
+            - jsp.special.gammaln(values + 1)
+        )
 
     def expected_log_prob(
         self,

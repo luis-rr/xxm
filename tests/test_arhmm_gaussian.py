@@ -356,7 +356,9 @@ def test_ar_gaussian_methods_are_jittable():
     )
 
     fit_params_jit = jax.jit(
-        lambda emissions, observations, posterior: emissions.fit_params(observations, posterior)
+        lambda emissions, observations, posterior: emissions.fit_params(
+            observations, posterior
+        )
     )
 
     sample_jit = jax.jit(lambda emissions, key, states: emissions.sample(key, states))
