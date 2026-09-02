@@ -5,8 +5,8 @@ import jax
 from xxm.core.optim.loop import Fit
 from xxm.core.optim.loop import fit_one as _fit_one
 
+from .core import Model
 from .inference import infer_exact
-from .model import Model
 
 
 def em_step(

@@ -5,7 +5,7 @@ from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.emissions.continuous import GaussianEmissions
 from xxm.core.models.gaussian import GaussianInitial, GaussianLinearDynamics
-from xxm.lds.model import Model
+from xxm.lds.core import Model
 
 
 def make_model() -> Model[GaussianEmissions]:

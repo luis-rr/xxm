@@ -8,7 +8,7 @@ from xxm.core.chains.gaussian import GaussianChainMarginals as Posterior
 from xxm.core.emissions.continuous import LaplaceEmissionsT, QuadraticEmissionsT
 from xxm.core.optim.newton import NewtonSearch
 
-from .model import Model
+from .core import Model
 
 
 def to_chain(

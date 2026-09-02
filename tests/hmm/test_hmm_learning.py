@@ -8,8 +8,8 @@ from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
 from xxm.core.emissions.discrete import GaussianEmissions, PoissonEmissions
 from xxm.core.models.discrete import CategoricalInitial, CategoricalTransitions
+from xxm.hmm.core import Model
 from xxm.hmm.learning import em_step
-from xxm.hmm.model import Model
 
 jax.config.update('jax_enable_x64', True)
 

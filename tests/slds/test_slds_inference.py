@@ -16,13 +16,13 @@ from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.emissions.continuous import GaussianEmissions
 from xxm.core.models.discrete import CategoricalInitial
 from xxm.core.models.gaussian import GaussianInitial
-from xxm.hmm.model import CategoricalTransitions
-from xxm.slds.inference import infer_variational
-from xxm.slds.model import (
+from xxm.hmm.core import CategoricalTransitions
+from xxm.slds.core import (
     GaussianLinearSwitchingDynamics,
     Model,
     Posterior,
 )
+from xxm.slds.inference import infer_variational
 
 ATOL = 1e-5
 

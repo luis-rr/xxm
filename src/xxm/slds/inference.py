@@ -18,7 +18,7 @@ from xxm.core.chains.gaussian import (
     GaussianChainMarginals as ContinuousPosterior,
 )
 
-from .model import Model, Posterior
+from .core import Model, Posterior
 
 
 class ContinuousFactors(typing.NamedTuple):

@@ -9,6 +9,7 @@ from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.continuous import PoissonEmissions
 from xxm.core.models.gaussian import GaussianInitial, GaussianLinearDynamics
 from xxm.core.optim.newton import NewtonSearch
+from xxm.lds.core import Model
 from xxm.lds.inference import (
     _NewtonSearchModel,
     _NewtonSearchParams,
@@ -16,7 +17,6 @@ from xxm.lds.inference import (
     infer_laplace,
     to_chain,
 )
-from xxm.lds.model import Model
 
 
 def make_scalar_poisson_model() -> Model[PoissonEmissions]:

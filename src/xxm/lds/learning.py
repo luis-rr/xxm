@@ -9,8 +9,8 @@ from xxm.core.optim.loop import Fit, FitCollection
 from xxm.core.optim.loop import fit_many as _fit_many
 from xxm.core.optim.loop import fit_one as _fit_one
 
+from .core import Model
 from .inference import infer_exact, infer_laplace
-from .model import Model
 
 ModelT = typing.TypeVar('ModelT')
 PosteriorT = typing.TypeVar('PosteriorT')

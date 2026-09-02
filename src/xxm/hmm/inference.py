@@ -2,7 +2,7 @@ import jax
 from jax import numpy as jnp
 
 from xxm.core.chains.discrete import DiscreteChain as Chain
-from xxm.hmm.model import Model, Posterior
+from xxm.hmm.core import Model, Posterior
 
 
 def to_chain(
