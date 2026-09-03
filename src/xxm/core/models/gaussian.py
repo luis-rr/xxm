@@ -45,5 +45,47 @@ class GaussianLinearDynamics(typing.NamedTuple):
 
         return self._replace(model=model)
 
-    def sample(self, key: jax.Array, previous: jax.Array) -> jax.Array:
-        return self.model.conditional(previous).sample(key=key)
+    def sample_next(
+        self,
+        key: jax.Array,
+        previous: jax.Array,
+    ) -> jax.Array:
+        """Sample the next latent conditional on the previous latent."""
+        return self.model.sample(
+            key,
+            previous,
+        )
+
+    def sample(
+        self,
+        key: jax.Array,
+        initial_latent: jax.Array,
+        num_steps: int,
+    ) -> jax.Array:
+        """Sample a latent trajectory conditional on its initial value."""
+
+        def step(carry, _):
+            latent, key = carry
+
+            key, sample_key = jax.random.split(key)
+            latent = self.sample_next(
+                sample_key,
+                latent,
+            )
+
+            return (latent, key), latent
+
+        _, subsequent_latents = jax.lax.scan(
+            step,
+            (initial_latent, key),
+            xs=None,
+            length=num_steps - 1,
+        )
+
+        return jnp.concatenate(
+            [
+                initial_latent[None],
+                subsequent_latents,
+            ],
+            axis=0,
+        )

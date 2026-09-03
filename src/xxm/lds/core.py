@@ -69,42 +69,14 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         key: jax.Array,
         num_steps: int,
     ) -> tuple[jax.Array, jax.Array]:
-        """Sample latent and observations from the LDS."""
-        key, initial_key, observation_key = jax.random.split(key, 3)
+        """Sample latents and observations from the LDS."""
+        key_initial, key_latents, key_observations = jax.random.split(key, 3)
 
-        initial_latent = self.initial.sample(initial_key)
+        initial_latent = self.initial.sample(key_initial)
 
-        def sample_step(
-            carry: tuple[jax.Array, jax.Array],
-            _: None,
-        ) -> tuple[
-            tuple[jax.Array, jax.Array],
-            jax.Array,
-        ]:
-            previous_latent, key = carry
+        latents = self.dynamics.sample(key_latents, initial_latent, num_steps)
 
-            key, latent_key = jax.random.split(key)
-
-            latent = self.dynamics.sample(latent_key, previous_latent)
-
-            return (latent, key), latent
-
-        _, remaining_latents = jax.lax.scan(
-            sample_step,
-            (initial_latent, key),
-            None,
-            length=num_steps - 1,
-        )
-
-        latents = jnp.concatenate(
-            [initial_latent[None], remaining_latents],
-            axis=0,
-        )
-
-        observations = self.emissions.sample(
-            observation_key,
-            latents,
-        )
+        observations = self.emissions.sample(key_observations, latents)
 
         return latents, observations
 

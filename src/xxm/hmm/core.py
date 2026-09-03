@@ -5,7 +5,6 @@ from __future__ import annotations
 import typing
 
 import jax
-import jax.numpy as jnp
 
 from xxm.core.chains.discrete import DiscreteChainMarginals as Posterior
 from xxm.core.emissions.discrete import Emissions
@@ -45,35 +44,13 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         num_steps: int,
     ) -> tuple[jax.Array, jax.Array]:
         """Sample latent states and observations from an HMM."""
-
-        key_initial, key_scan, key_observation = jax.random.split(key, 3)
+        key_initial, key_states, key_observations = jax.random.split(key, 3)
 
         initial_state = self.initial.sample(key_initial)
 
-        def step(carry, _):
-            state, key = carry
-            key, key_transition = jax.random.split(key)
+        states = self.transitions.sample(key_states, initial_state, num_steps)
 
-            state = self.transitions.sample(
-                key_transition,
-                state,
-            )
-
-            return (state, key), state
-
-        _, subsequent_states = jax.lax.scan(
-            step,
-            (initial_state, key_scan),
-            xs=None,
-            length=num_steps - 1,
-        )
-
-        states = jnp.concatenate([initial_state[None], subsequent_states])
-
-        observations = self.emissions.sample(
-            key_observation,
-            states,
-        )
+        observations = self.emissions.sample(key_observations, states)
 
         return states, observations
 

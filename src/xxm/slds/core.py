@@ -56,7 +56,7 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         cross = posterior.continuous.raw_cross_moments()
 
         def fit_state(weights_k):
-            total = jnp.sum(weights_k)
+            total = jnp.sum(weights_k)  # TODO handle zero posterior mass
 
             input_mean = jnp.einsum('t,ti->i', weights_k, means[:-1]) / total
             output_mean = jnp.einsum('t,ti->i', weights_k, means[1:]) / total
@@ -91,6 +91,42 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
             model=linear_gaussian,
         )
 
+    def sample_next(
+        self,
+        key: jax.Array,
+        previous: jax.Array,
+        state: jax.Array,
+    ) -> jax.Array:
+        """Sample the next latent conditional on the current state."""
+        return self.model.select(state).sample(
+            key,
+            previous,
+        )
+
+    def sample(
+        self,
+        key: jax.Array,
+        initial_latent: jax.Array,
+        states: jax.Array,
+    ) -> jax.Array:
+        """Sample a latent trajectory conditional on switching states."""
+
+        def step(carry, state):
+            latent, key = carry
+
+            key, sample_key = jax.random.split(key)
+
+            latent = self.sample_next(sample_key, latent, state)
+
+            return (latent, key), latent
+
+        _, subsequent_latents = jax.lax.scan(step, (initial_latent, key), states)
+
+        return jnp.concatenate(
+            [initial_latent[None], subsequent_latents],
+            axis=0,
+        )
+
 
 class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     state_initial: CategoricalInitial
@@ -116,3 +152,30 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
             dynamics=self.dynamics.fit_params(posterior),
             emissions=self.emissions.fit_params(observations, posterior.continuous),
         )
+
+    def sample(
+        self,
+        key: jax.Array,
+        num_steps: int,
+    ) -> tuple[jax.Array, jax.Array, jax.Array]:
+        """Sample switching states, continuous latents, and observations."""
+
+        if num_steps < 2:
+            raise ValueError('SLDS sampling requires at least two time steps.')
+
+        (
+            key_state_initial,
+            key_states,
+            key_latent_initial,
+            key_latents,
+            key_observations,
+        ) = jax.random.split(key, 5)
+
+        initial_state = self.state_initial.sample(key_state_initial)
+        states = self.transitions.sample(key_states, initial_state, num_steps - 1)
+
+        initial_latent = self.latent_initial.sample(key_latent_initial)
+        latents = self.dynamics.sample(key_latents, initial_latent, states)
+
+        observations = self.emissions.sample(key_observations, latents)
+        return states, latents, observations

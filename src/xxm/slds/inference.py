@@ -17,6 +17,7 @@ from xxm.core.chains.gaussian import (
 from xxm.core.chains.gaussian import (
     GaussianChainMarginals as ContinuousPosterior,
 )
+from xxm.core.emissions.continuous import QuadraticEmissionsT
 
 from .core import Model, Posterior
 
@@ -30,7 +31,7 @@ class ContinuousFactors(typing.NamedTuple):
     @classmethod
     def from_model(
         cls,
-        model: Model,
+        model: Model[QuadraticEmissionsT],
         observations: jax.Array,
     ) -> typing.Self:
         return cls(
@@ -64,7 +65,7 @@ class DiscreteFactors(typing.NamedTuple):
     @classmethod
     def from_model(
         cls,
-        model: Model,
+        model: Model[QuadraticEmissionsT],
         num_switch_steps: int,
     ) -> typing.Self:
 
@@ -107,7 +108,7 @@ class SwitchingFactors(typing.NamedTuple):
     @classmethod
     def from_model(
         cls,
-        model: Model,
+        model: Model[QuadraticEmissionsT],
     ) -> typing.Self:
 
         dynamics = model.dynamics.compute_pair_potentials()
@@ -140,7 +141,7 @@ class SwitchingFactors(typing.NamedTuple):
 
 
 def infer_variational(
-    model: Model,
+    model: Model[QuadraticEmissionsT],
     observations: jax.Array,
     num_iters: int,
 ) -> tuple[Posterior, jax.Array]:
