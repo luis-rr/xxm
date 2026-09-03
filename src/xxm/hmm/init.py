@@ -164,13 +164,21 @@ def init_gaussian(
 
 def _init_ar_state_assignments(
     key: jax.Array,
-    predictors: jax.Array,  # (T-L, L*N)
+    predictors: jax.Array,  # (T-L, L, N)
     current: jax.Array,  # (T-L, N)
     num_states: int,
 ) -> jax.Array:  # (T-L,)
     """Initialize AR states by clustering predictors and current observations."""
+    flat_predictors = predictors.reshape(
+        predictors.shape[0],
+        -1,
+    )  # (T-L, L*N)
+
     features = jnp.concatenate(
-        [predictors, current],
+        [
+            flat_predictors,
+            current,
+        ],
         axis=-1,
     )  # (T-L, (L+1)*N)
 
@@ -187,19 +195,12 @@ def _init_ar_gaussian_emissions(
     num_states: int,
     num_lags: int,
 ) -> AREmissions[LinearGaussian]:
-    history = lagged_observations(
+    predictors = lagged_observations(
         observations,
         num_lags=num_lags,
     )  # (T-L, L, N)
 
     current = observations[num_lags:]  # (T-L, N)
-
-    num_samples, _, num_dims = history.shape
-
-    predictors = history.reshape(
-        num_samples,
-        num_lags * num_dims,
-    )  # (T-L, L*N)
 
     assignments = _init_ar_state_assignments(
         key=key,
@@ -290,19 +291,12 @@ def _init_ar_poisson_emissions(
     num_states: int,
     num_lags: int,
 ) -> AREmissions[LinearPoisson]:
-    history = lagged_observations(
+    predictors = lagged_observations(
         observations,
         num_lags=num_lags,
     )  # (T-L, L, N)
 
     current = observations[num_lags:]  # (T-L, N)
-
-    num_samples, _, num_dims = history.shape
-
-    predictors = history.reshape(
-        num_samples,
-        num_lags * num_dims,
-    )  # (T-L, L*N)
 
     assignments = _init_ar_state_assignments(
         key=key,

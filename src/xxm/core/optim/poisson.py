@@ -408,6 +408,15 @@ def linear_from_marginals(
     ridge: float = 0.0,
 ) -> LinearPoisson:
     """Fit from Gaussian input marginals."""
+    if initial_affine is not None and initial_affine.input_shape != (
+        inputs.variable_dim,
+    ):
+        raise ValueError(
+            'Gaussian marginal fitting requires a vector-shaped affine input; '
+            f'expected {(inputs.variable_dim,)}, '
+            f'got {initial_affine.input_shape}'
+        )
+
     return _linear_from_moments(
         outputs=outputs,
         input_means=inputs.mean,
@@ -421,8 +430,35 @@ def linear_from_marginals(
     )
 
 
+def _prepare_pair_inputs(
+    inputs: jax.Array,
+    initial_affine: Affine | None,
+) -> tuple[jax.Array, tuple[int, ...], Affine | None]:
+    """Flatten paired deterministic inputs for numerical optimization."""
+    if inputs.ndim < 2:
+        raise ValueError('inputs must have shape (T, *input_shape)')
+
+    input_shape = inputs.shape[1:]
+
+    flat_inputs = inputs.reshape(
+        inputs.shape[0],
+        -1,
+    )  # (T, input_size)
+
+    if initial_affine is not None:
+        if initial_affine.input_shape != input_shape:
+            raise ValueError(
+                'initial_affine input shape must match inputs; '
+                f'expected {input_shape}, got {initial_affine.input_shape}'
+            )
+
+        initial_affine = initial_affine.input_reshape((initial_affine.input_size,))
+
+    return flat_inputs, input_shape, initial_affine
+
+
 def linear_from_pairs(
-    inputs: jax.Array,  # (T, I)
+    inputs: jax.Array,  # (T, *input_shape)
     outputs: jax.Array,  # (T, O)
     initial_affine: Affine | None = None,
     max_iter: int = 20,
@@ -430,10 +466,15 @@ def linear_from_pairs(
     max_line_search_iters: int = 20,
     ridge: float = 0.0,
 ) -> LinearPoisson:
-    """Fit from paired input-output samples."""
-    return _linear_from_moments(
+    """Fit from paired deterministic input-output samples."""
+    flat_inputs, input_shape, initial_affine = _prepare_pair_inputs(
+        inputs,
+        initial_affine,
+    )
+
+    model = _linear_from_moments(
         outputs=outputs,
-        input_means=inputs,
+        input_means=flat_inputs,
         input_covariances=None,
         weights=None,
         initial_affine=initial_affine,
@@ -443,9 +484,11 @@ def linear_from_pairs(
         ridge=ridge,
     )
 
+    return model.reshape_input(input_shape)
+
 
 def linear_from_pairs_weighted(
-    inputs: jax.Array,  # (T, I)
+    inputs: jax.Array,  # (T, *input_shape)
     outputs: jax.Array,  # (T, O)
     weights: jax.Array,  # (T, K)
     initial_affine: Affine | None = None,
@@ -455,6 +498,10 @@ def linear_from_pairs_weighted(
     ridge: float = 0.0,
 ) -> LinearPoisson:
     """Fit one weighted model for each weight column."""
+    flat_inputs, input_shape, initial_affine = _prepare_pair_inputs(
+        inputs,
+        initial_affine,
+    )
 
     def fit_state(
         state_weights: jax.Array,  # (T,)
@@ -462,7 +509,7 @@ def linear_from_pairs_weighted(
     ) -> LinearPoisson:
         return _linear_from_moments(
             outputs=outputs,
-            input_means=inputs,
+            input_means=flat_inputs,
             input_covariances=None,
             weights=state_weights,
             initial_affine=state_affine,
@@ -473,22 +520,28 @@ def linear_from_pairs_weighted(
         )
 
     if initial_affine is None:
-        return jax.vmap(
-            lambda state_weights: fit_state(state_weights, None),
+        model = jax.vmap(
+            lambda state_weights: fit_state(
+                state_weights,
+                None,
+            ),
             in_axes=1,
         )(weights)
 
-    return jax.vmap(
-        fit_state,
-        in_axes=(1, 0),
-    )(
-        weights,
-        initial_affine,
-    )
+    else:
+        model = jax.vmap(
+            fit_state,
+            in_axes=(1, 0),
+        )(
+            weights,
+            initial_affine,
+        )
+
+    return model.reshape_input(input_shape)
 
 
 def linear_from_pairs_grouped(
-    inputs: jax.Array,  # (T, I)
+    inputs: jax.Array,  # (T, *input_shape)
     outputs: jax.Array,  # (T, O)
     assignments: jax.Array,  # (T,)
     num_groups: int,
@@ -503,7 +556,7 @@ def linear_from_pairs_grouped(
         assignments,
         num_groups,
         dtype=jnp.result_type(inputs, outputs, jnp.float32),
-    )  # (T, K)
+    )
 
     return linear_from_pairs_weighted(
         inputs=inputs,

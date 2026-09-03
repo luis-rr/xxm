@@ -140,6 +140,12 @@ class GaussianPotential(typing.NamedTuple):
         observations: jax.Array,  # (T, N)
     ) -> GaussianPotential:
         """Construct the potential over inputs induced by a linear Gaussian likelihood."""
+        if model.input_ndim != 1:
+            raise ValueError(
+                'Gaussian potentials require a vector-shaped linear input; '
+                f'got {model.input_shape}'
+            )
+
         coefficients = model.affine.coefficients  # (N, D)
         residuals = observations - model.affine.bias  # (T, N)
 
@@ -163,17 +169,12 @@ class GaussianPotential(typing.NamedTuple):
 
         information_vectors = whitened_residuals @ whitened_coefficients  # (T, D)
 
-        quadratic_terms = jnp.sum(
-            whitened_residuals**2,
-            axis=-1,
-        )  # (T,)
+        quadratic_terms = jnp.sum(whitened_residuals**2, axis=-1)  # (T,)
 
-        log_det_covariance = _log_det_from_cholesky(
-            cholesky,
-        )  # ()
+        log_det_covariance = _log_det_from_cholesky(cholesky)  # ()
 
         num_steps = observations.shape[0]
-        variable_dim = model.affine.input_dim
+        variable_dim = model.input_size
 
         return cls(
             precision_blocks=jnp.broadcast_to(
@@ -185,7 +186,7 @@ class GaussianPotential(typing.NamedTuple):
             * (
                 quadratic_terms
                 + log_det_covariance
-                + model.affine.output_dim * jnp.log(2.0 * jnp.pi)
+                + model.output_dim * jnp.log(2.0 * jnp.pi)
             ),
         )
 
@@ -283,8 +284,11 @@ class GaussianPairPotential(typing.NamedTuple):
         cls,
         lin_gaussian: LinearGaussian,
     ) -> GaussianPairPotential:
-        if lin_gaussian.affine.coefficients.ndim < 2:
-            raise ValueError('matrix must have shape (..., N, N)')
+        if lin_gaussian.input_ndim != 1:
+            raise ValueError(
+                'Gaussian pair potentials require vector-shaped inputs; '
+                f'got {lin_gaussian.input_shape}'
+            )
 
         if (
             lin_gaussian.affine.coefficients.shape[-2]
@@ -312,7 +316,11 @@ class GaussianPairPotential(typing.NamedTuple):
 
         precision, log_det_covariance = _precision_and_log_det(lin_gaussian.covariance)
 
-        matrix_t = jnp.swapaxes(lin_gaussian.affine.coefficients, -1, -2)
+        matrix_t = jnp.swapaxes(
+            lin_gaussian.affine.coefficients,
+            -1,
+            -2,
+        )
 
         precision_matrix = precision @ lin_gaussian.affine.coefficients
 
@@ -333,7 +341,11 @@ class GaussianPairPotential(typing.NamedTuple):
             ),
             right_information=precision_bias,
             log_constant=(
-                -0.5 * jnp.sum(lin_gaussian.affine.bias * precision_bias, axis=-1)
+                -0.5
+                * jnp.sum(
+                    lin_gaussian.affine.bias * precision_bias,
+                    axis=-1,
+                )
                 - 0.5 * log_det_covariance
                 - 0.5 * n * jnp.log(2.0 * jnp.pi)
             ),

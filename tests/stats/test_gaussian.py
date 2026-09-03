@@ -194,3 +194,35 @@ def test_linear_gaussian_conditional_broadcasts_covariance():
         output_dim,
         output_dim,
     )
+
+
+def test_fit_linear_preserves_structured_input_shape():
+    inputs = jnp.array(
+        [
+            [[0.0], [0.0]],
+            [[1.0], [0.0]],
+            [[0.0], [1.0]],
+            [[1.0], [1.0]],
+        ]
+    )  # (T, L, I)
+
+    outputs = 2.0 * inputs[:, 0] - 3.0 * inputs[:, 1] + 1.0
+
+    fit = gaussian_fit.linear_from_pairs(
+        inputs,
+        outputs,
+    )
+
+    np.testing.assert_allclose(
+        fit.affine.coefficients,
+        [[[2.0], [-3.0]]],
+        atol=ATOL,
+    )
+
+    np.testing.assert_allclose(
+        fit.affine.bias,
+        [1.0],
+        atol=ATOL,
+    )
+
+    assert fit.input_shape == (2, 1)

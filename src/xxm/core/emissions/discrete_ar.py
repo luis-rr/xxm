@@ -51,21 +51,6 @@ def lagged_observations(
     )
 
 
-def flatten_ar_coefficients(
-    coefficients: jax.Array,  # (..., L, O, I)
-) -> jax.Array:  # (..., O, L*I)
-    """Flatten lagged AR coefficients into a standard affine input dimension."""
-    coefficients = jnp.swapaxes(
-        coefficients,
-        -3,
-        -2,
-    )  # (..., O, L, I)
-
-    return coefficients.reshape(
-        coefficients.shape[:-2] + (coefficients.shape[-2] * coefficients.shape[-1],)
-    )  # (..., O, L*I)
-
-
 ConditionalModelT = typing.TypeVar(
     'ConditionalModelT',
     LinearGaussian,
@@ -98,10 +83,23 @@ def _fit_ar_model(
     typing.assert_never(model)
 
 
-class AREmissions(typing.NamedTuple, typing.Generic[ConditionalModelT]):
-    """State-dependent autoregressive emissions."""
+class AREmissions(
+    typing.NamedTuple,
+    typing.Generic[ConditionalModelT],
+):
+    r"""
+    State-dependent autoregressive emissions with structured lagged inputs.
 
-    model: ConditionalModelT  # K-batched, input dimension L*N
+    The conditional model maps predictors of shape ``(L, N)`` to outputs of shape
+    ``(N,)``, where ``L`` is the number of lags and ``N`` the observationdimension.
+
+    Predictors are ordered from most recent to oldest observation, so
+    ``x_t = (y_{t-1}, ..., y_{t-L})``.
+
+    For an affine conditional model, coefficients therefore have shape ``(K, N, L, N)``.
+    """
+
+    model: ConditionalModelT  # K-batched, input shape (L, N)
 
     @property
     def num_states(self) -> int:
@@ -113,19 +111,29 @@ class AREmissions(typing.NamedTuple, typing.Generic[ConditionalModelT]):
 
     @property
     def num_lags(self) -> int:
-        return self.model.input_dim // self.output_dim
+        if len(self.model.input_shape) != 2:
+            raise ValueError(
+                'autoregressive emissions require model input shape (L, N); '
+                f'got {self.model.input_shape}'
+            )
 
-    def predictors(
-        self,
-        observations: jax.Array,  # (T, N)
-    ) -> jax.Array:  # (T-L, L*N)
-        """Construct flattened autoregressive predictors."""
-        history = lagged_observations(observations, self.num_lags)  # (T-L, L, N)
+        num_lags, input_dim = self.model.input_shape
 
-        return history.reshape(
-            history.shape[0],
-            self.num_lags * self.output_dim,
-        )  # (T-L, L*N)
+        if input_dim != self.output_dim:
+            raise ValueError(
+                'autoregressive input variable dimension must match output dimension; '
+                f'got input shape {self.model.input_shape} '
+                f'and output dimension {self.output_dim}'
+            )
+
+        return num_lags
+
+    def predictors(self, observations: jax.Array) -> jax.Array:  # (T-L, L, N)
+        """Construct autoregressive predictors ordered from lag 1 to lag L."""
+        return lagged_observations(
+            observations,
+            self.num_lags,
+        )
 
     @typing.overload
     def conditional(
@@ -145,18 +153,15 @@ class AREmissions(typing.NamedTuple, typing.Generic[ConditionalModelT]):
         observations: jax.Array,
     ) -> Gaussian | Poisson: ...
 
-    def conditional(
-        self,
-        observations: jax.Array,
-    ) -> Gaussian | Poisson:
+    def conditional(self, observations: jax.Array) -> Gaussian | Poisson:
         """Conditional distribution for each time point and state."""
-        predictors = self.predictors(observations)
-        return self.model.conditional(predictors[:, None, :])
+        predictors = self.predictors(
+            observations,
+        )  # (T-L, L, N)
 
-    def log_likelihoods(
-        self,
-        observations: jax.Array,  # (T, N)
-    ) -> jax.Array:  # (T, K)
+        return self.model.conditional(predictors[:, None, ...])  # (T-L, K)
+
+    def log_likelihoods(self, observations: jax.Array) -> jax.Array:  # (T, K)
         conditional = self.conditional(observations)
 
         log_probs = conditional.log_prob(
@@ -169,14 +174,14 @@ class AREmissions(typing.NamedTuple, typing.Generic[ConditionalModelT]):
         )  # (L, K)
 
         return jnp.concatenate(
-            [padding, log_probs],
+            [
+                padding,
+                log_probs,
+            ],
             axis=0,
         )  # (T, K)
 
-    def compute_potential(
-        self,
-        observations: jax.Array,  # (T, N)
-    ) -> DiscretePotential:
+    def compute_potential(self, observations: jax.Array) -> DiscretePotential:
         return DiscretePotential(
             log_values=self.log_likelihoods(observations),
         )
@@ -186,8 +191,12 @@ class AREmissions(typing.NamedTuple, typing.Generic[ConditionalModelT]):
         observations: jax.Array,  # (T, N)
         posterior: DiscretePosterior,
     ) -> typing.Self:
-        predictors = self.predictors(observations)  # (T-L, L*N)
+        predictors = self.predictors(
+            observations,
+        )  # (T-L, L, N)
+
         current = observations[self.num_lags :]  # (T-L, N)
+
         weights = posterior.state_probs[self.num_lags :]  # (T-L, K)
 
         model = _fit_ar_model(
@@ -196,31 +205,23 @@ class AREmissions(typing.NamedTuple, typing.Generic[ConditionalModelT]):
             outputs=current,
             weights=weights,
         )
-        return self._replace(model=model)
 
-    def permute(
-        self,
-        permutation: jax.Array,  # (K,)
-    ) -> typing.Self:
+        return self._replace(
+            model=model,
+        )
+
+    def permute(self, permutation: jax.Array) -> typing.Self:
         return self._replace(
             model=self.model.select(permutation),
         )
 
-    def sample(
-        self,
-        key: jax.Array,
-        states: jax.Array,  # (T,)
-    ) -> jax.Array:  # (T, N)
+    def sample(self, key: jax.Array, states: jax.Array) -> jax.Array:  # (T, N)
         def step(carry, state):
             history, key = carry  # (L, N)
 
             key, key_observation = jax.random.split(key)
 
-            predictors = history.reshape(
-                self.num_lags * self.output_dim,
-            )  # (L*N,)
-
-            conditional = self.model.select(state).conditional(predictors)
+            conditional = self.model.select(state).conditional(history)
 
             observation = conditional.sample(key_observation)  # (N,)
 
@@ -235,7 +236,10 @@ class AREmissions(typing.NamedTuple, typing.Generic[ConditionalModelT]):
             return (new_history, key), observation
 
         initial_history = jnp.zeros(
-            (self.num_lags, self.output_dim),
+            (
+                self.num_lags,
+                self.output_dim,
+            ),
             dtype=self.model.dtype,
         )  # (L, N)
 

@@ -292,3 +292,42 @@ def test_public_routines_are_jittable():
     assert marginal_result[-1].affine.coefficients.shape == (1, 1)
     assert deterministic_result[0].affine.coefficients.shape == (1, 1)
     assert deterministic_result[1].affine.coefficients.shape == (2, 1, 1)
+
+
+def test_fit_linear_preserves_structured_input_shape():
+    inputs = jnp.array(
+        [
+            [[0.0]],
+            [[1.0]],
+        ]
+    )  # (T, L, I)
+
+    outputs = jnp.array(
+        [
+            [1.0],
+            [2.0],
+        ]
+    )
+
+    fit = poisson_fit.linear_from_pairs(
+        inputs=inputs,
+        outputs=outputs,
+        initial_affine=Affine(
+            coefficients=jnp.zeros((1, 1, 1)),
+            bias=jnp.zeros(1),
+        ),
+    )
+
+    np.testing.assert_allclose(
+        fit.affine.coefficients,
+        [[[np.log(2.0)]]],
+        atol=FIT_ATOL,
+    )
+
+    np.testing.assert_allclose(
+        fit.affine.bias,
+        [0.0],
+        atol=FIT_ATOL,
+    )
+
+    assert fit.input_shape == (1, 1)

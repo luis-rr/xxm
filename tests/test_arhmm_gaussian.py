@@ -27,14 +27,14 @@ def _flatten_lagged_coefficients(coefficients: jax.Array) -> jax.Array:
 
 
 def _make_emissions(
-    coefficients: jax.Array,  # (K, L, N, N)
-    biases: jax.Array,  # (K, N)
-    covariances: jax.Array,  # (K, N, N)
+    coefficients: jax.Array,  # (K, N_out, L, N_in)
+    biases: jax.Array,  # (K, N_out)
+    covariances: jax.Array,  # (K, N_out, N_out)
 ) -> AREmissions[LinearGaussian]:
     return AREmissions(
         model=LinearGaussian(
             affine=Affine(
-                coefficients=_flatten_lagged_coefficients(coefficients),
+                coefficients=coefficients,
                 bias=biases,
             ),
             covariance=covariances,
@@ -44,19 +44,23 @@ def _make_emissions(
 
 def test_ar_gaussian_properties():
     emissions = _make_emissions(
-        coefficients=jnp.zeros((3, 2, 4, 4)),
+        coefficients=jnp.zeros((3, 4, 2, 4)),
         biases=jnp.zeros((3, 4)),
-        covariances=jnp.tile(jnp.eye(4), (3, 1, 1)),
+        covariances=jnp.tile(
+            jnp.eye(4),
+            (3, 1, 1),
+        ),
     )
 
     assert emissions.num_states == 3
     assert emissions.num_lags == 2
     assert emissions.output_dim == 4
+    assert emissions.model.input_shape == (2, 4)
 
 
 def test_ar_gaussian_lagged_observations():
     emissions = _make_emissions(
-        coefficients=jnp.zeros((1, 2, 1, 1)),
+        coefficients=jnp.zeros((1, 1, 2, 1)),
         biases=jnp.zeros((1, 1)),
         covariances=jnp.ones((1, 1, 1)),
     )
@@ -70,7 +74,10 @@ def test_ar_gaussian_lagged_observations():
         ]
     )
 
-    history = lagged_observations(observations, num_lags=emissions.num_lags)
+    history = lagged_observations(
+        observations,
+        num_lags=emissions.num_lags,
+    )
 
     expected = jnp.array(
         [
@@ -79,7 +86,11 @@ def test_ar_gaussian_lagged_observations():
         ]
     )
 
-    np.testing.assert_allclose(history, expected, atol=ATOL)
+    np.testing.assert_allclose(
+        history,
+        expected,
+        atol=ATOL,
+    )
 
 
 def test_ar_gaussian_conditional_means_known_solution():
@@ -87,8 +98,14 @@ def test_ar_gaussian_conditional_means_known_solution():
         coefficients=jnp.array(
             [
                 [
-                    [[1.0, 0.0], [0.0, 2.0]],
-                    [[0.5, 0.0], [0.0, -1.0]],
+                    [
+                        [1.0, 0.0],
+                        [0.5, 0.0],
+                    ],
+                    [
+                        [0.0, 2.0],
+                        [0.0, -1.0],
+                    ],
                 ]
             ]
         ),
@@ -114,7 +131,11 @@ def test_ar_gaussian_conditional_means_known_solution():
         ]
     )
 
-    np.testing.assert_allclose(means, expected, atol=ATOL)
+    np.testing.assert_allclose(
+        means,
+        expected,
+        atol=ATOL,
+    )
 
 
 def test_ar_gaussian_log_likelihoods_known_solution():
@@ -154,8 +175,10 @@ def test_ar_gaussian_log_likelihoods_shortest_valid_sequence():
         coefficients=jnp.array(
             [
                 [
-                    [[0.5]],
-                    [[0.25]],
+                    [
+                        [0.5],
+                        [0.25],
+                    ]
                 ]
             ]
         ),
@@ -197,15 +220,18 @@ def test_ar_gaussian_fit_recovers_known_ar2_parameters():
     observations = jnp.asarray(values)[:, None]
 
     posterior = DiscreteChainMarginals(
-        # Important: posterior has length T, including the padded
-        # first L time points.
         state_probs=jnp.ones((observations.shape[0], 1)),
-        # Mock pair marginals and log normalizer, since they are not used in the fit.
-        pair_probs=jnp.ones((observations.shape[0] - 1, 1, 1)),
+        pair_probs=jnp.ones(
+            (
+                observations.shape[0] - 1,
+                1,
+                1,
+            )
+        ),
     )
 
     emissions = _make_emissions(
-        coefficients=jnp.zeros((1, 2, 1, 1)),
+        coefficients=jnp.zeros((1, 1, 2, 1)),
         biases=jnp.zeros((1, 1)),
         covariances=jnp.ones((1, 1, 1)),
     )
@@ -215,15 +241,15 @@ def test_ar_gaussian_fit_recovers_known_ar2_parameters():
         posterior,
     )
 
-    expected_coefficients = _flatten_lagged_coefficients(
-        jnp.array(
+    expected_coefficients = jnp.array(
+        [
             [
                 [
-                    [[coefficient_1]],
-                    [[coefficient_2]],
+                    [coefficient_1],
+                    [coefficient_2],
                 ]
             ]
-        )
+        ]
     )
 
     np.testing.assert_allclose(
@@ -238,8 +264,6 @@ def test_ar_gaussian_fit_recovers_known_ar2_parameters():
         atol=FIT_ATOL,
     )
 
-    # The data are deterministic, so residual variance should be
-    # approximately zero.
     np.testing.assert_allclose(
         fitted.model.covariance,
         0.0,
@@ -319,8 +343,10 @@ def test_ar_gaussian_methods_are_jittable():
         coefficients=jnp.array(
             [
                 [
-                    [[0.5]],
-                    [[0.2]],
+                    [
+                        [0.5],
+                        [0.2],
+                    ]
                 ]
             ]
         ),
@@ -340,8 +366,13 @@ def test_ar_gaussian_methods_are_jittable():
 
     posterior = DiscreteChainMarginals(
         state_probs=jnp.ones((observations.shape[0], 1)),
-        # Mock pair marginals and log normalizer, since they are not used in the fit.
-        pair_probs=jnp.ones((observations.shape[0] - 1, 1, 1)),
+        pair_probs=jnp.ones(
+            (
+                observations.shape[0] - 1,
+                1,
+                1,
+            )
+        ),
     )
 
     states = jnp.zeros(5, dtype=int)
@@ -357,52 +388,66 @@ def test_ar_gaussian_methods_are_jittable():
 
     fit_params_jit = jax.jit(
         lambda emissions, observations, posterior: emissions.fit_params(
-            observations, posterior
+            observations,
+            posterior,
         )
     )
 
-    sample_jit = jax.jit(lambda emissions, key, states: emissions.sample(key, states))
+    sample_jit = jax.jit(
+        lambda emissions, key, states: emissions.sample(
+            key,
+            states,
+        )
+    )
 
     np.testing.assert_allclose(
-        conditional_means_jit(emissions, observations),
+        conditional_means_jit(
+            emissions,
+            observations,
+        ),
         emissions.conditional(observations).mean,
         atol=ATOL,
     )
 
     np.testing.assert_allclose(
-        log_likelihoods_jit(emissions, observations),
+        log_likelihoods_jit(
+            emissions,
+            observations,
+        ),
         emissions.log_likelihoods(observations),
         atol=ATOL,
     )
 
-    fitted = fit_params_jit(
+    fitted_jit = fit_params_jit(
         emissions,
         observations,
         posterior,
     )
-    fitted_eager = emissions.fit_params(
+    fitted = emissions.fit_params(
         observations,
         posterior,
     )
 
-    np.testing.assert_allclose(
-        fitted.model.affine.coefficients,
-        fitted_eager.model.affine.coefficients,
-        atol=ATOL,
-    )
-    np.testing.assert_allclose(
-        fitted.model.affine.bias,
-        fitted_eager.model.affine.bias,
-        atol=ATOL,
-    )
-    np.testing.assert_allclose(
-        fitted.model.covariance,
-        fitted_eager.model.covariance,
-        atol=ATOL,
-    )
+    for actual, expected in zip(
+        jax.tree_util.tree_leaves(fitted_jit),
+        jax.tree_util.tree_leaves(fitted),
+        strict=True,
+    ):
+        np.testing.assert_allclose(
+            actual,
+            expected,
+            atol=ATOL,
+        )
 
     np.testing.assert_allclose(
-        sample_jit(emissions, key, states),
-        emissions.sample(key, states),
+        sample_jit(
+            emissions,
+            key,
+            states,
+        ),
+        emissions.sample(
+            key,
+            states,
+        ),
         atol=ATOL,
     )

@@ -103,8 +103,16 @@ class LinearPoisson(typing.NamedTuple):
         return self.affine.batch_shape
 
     @property
-    def input_dim(self) -> int:
-        return self.affine.input_dim
+    def input_shape(self) -> tuple[int, ...]:
+        return self.affine.input_shape
+
+    @property
+    def input_ndim(self) -> int:
+        return self.affine.input_ndim
+
+    @property
+    def input_size(self) -> int:
+        return self.affine.input_size
 
     @property
     def output_dim(self) -> int:
@@ -112,44 +120,45 @@ class LinearPoisson(typing.NamedTuple):
 
     @property
     def dtype(self) -> jax.typing.DTypeLike:
-        return jnp.result_type(self.affine.dtype, self.affine.bias.dtype)
+        return jnp.result_type(
+            self.affine.dtype,
+            self.affine.bias.dtype,
+        )
 
-    def select(self, index) -> 'LinearPoisson':
+    def reshape_input(self, input_shape: tuple[int, ...]) -> typing.Self:
+        """Return the same model with a different affine input shape."""
+        return self._replace(
+            affine=self.affine.input_reshape(input_shape),
+        )
+
+    def select(self, index) -> typing.Self:
         """Index into the batch dimensions."""
         return self.__class__(
             affine=self.affine.select(index),
         )
 
-    def astype(self, dtype: jax.typing.DTypeLike) -> 'LinearPoisson':
-        return self._replace(
-            affine=self.affine.astype(dtype),
-        )
+    def astype(self, dtype: jax.typing.DTypeLike) -> typing.Self:
+        return self._replace(affine=self.affine.astype(dtype))
 
     def log_rates(self, values: jax.Array) -> jax.Array:
         return self.affine.apply(values)
 
     def conditional(self, values: jax.Array) -> Poisson:
-        """Conditional distribution of outputs for deterministic input values."""
+        """Conditional distribution of outputs for deterministic inputs."""
         return Poisson(log_rates=self.log_rates(values))
 
     def log_rate_moments(self, values: Gaussian) -> tuple[jax.Array, jax.Array]:
-        """Gaussian moments of each linear predictor under Gaussian input values."""
-        return (
-            values.affine_mean(self.affine),
-            values.affine_variance(self.affine),
-        )
+        """Gaussian moments of each linear predictor under Gaussian inputs."""
+        return (values.affine_mean(self.affine), values.affine_variance(self.affine))
 
     def expected_rates(self, values: Gaussian) -> jax.Array:
         mean, variance = self.log_rate_moments(values)
         return jnp.exp(mean + 0.5 * variance)
 
-    def expected_log_prob_each(
-        self,
-        values: jax.Array,
-        inputs: Gaussian,
-    ) -> jax.Array:
+    def expected_log_prob_each(self, values: jax.Array, inputs: Gaussian) -> jax.Array:
         """Expected Poisson log probability under Gaussian input marginals."""
         mean, variance = self.log_rate_moments(inputs)
+
         return (
             values * mean
             - jnp.exp(mean + 0.5 * variance)

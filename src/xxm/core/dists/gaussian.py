@@ -60,14 +60,25 @@ class Gaussian(typing.NamedTuple):
             shape=sample_shape + self.batch_shape,
         )
 
+    def _validate_affine_input(
+        self,
+        affine: Affine,
+    ) -> None:
+        if affine.input_shape != (self.variable_dim,):
+            raise ValueError(
+                'Gaussian affine transformations require vector-shaped inputs; '
+                f'expected input shape {(self.variable_dim,)}, '
+                f'got {affine.input_shape}'
+            )
+
     def affine_mean(
         self,
         affine: Affine,
     ) -> jax.Array:
         """
-        Calculate the mean of the distribution of y when:
-            y = A x + b, x ~ N(self.mean, self.covariance)
+        Compute the mean of y = A x + b for x distributed according to self.
         """
+        self._validate_affine_input(affine)
         return affine.apply(self.mean)
 
     def affine_covariance(
@@ -75,26 +86,26 @@ class Gaussian(typing.NamedTuple):
         affine: Affine,
     ) -> jax.Array:
         """
-        Calculate the covariance of the distribution of y when:
-            y = A x + b, x ~ N(self.mean, self.covariance)
+        Compute the covariance of y = A x + b for x distributed according to self.
         """
+        self._validate_affine_input(affine)
 
-        covariance = jnp.einsum(
+        return jnp.einsum(
             '...oi,...ij,...pj->...op',
             affine.coefficients,
             self.covariance,
             affine.coefficients,
         )
-        return covariance
 
     def affine_variance(
         self,
         affine: Affine,
     ) -> jax.Array:
         """
-        Calculate the variance (diagonal of the covariance) of the distribution of y when:
-            y = A x + b, x ~ N(self.mean, self.covariance)
+        Compute the marginal variances of y = A x + b for x distributed according to self.
         """
+        self._validate_affine_input(affine)
+
         return jnp.einsum(
             '...oi,...ij,...oj->...o',
             affine.coefficients,
@@ -169,6 +180,9 @@ class LinearGaussian(typing.NamedTuple):
 
         y | x ~ N(A x + b, Q)
 
+    Inputs are allowed to be tensor-shaped, which resolves as a tensor contraction
+    and matrix-vector multiplication.
+
     Leading dimensions are batch dimensions and must be shared between attributes.
     """
 
@@ -183,8 +197,16 @@ class LinearGaussian(typing.NamedTuple):
         return affine_shape
 
     @property
-    def input_dim(self) -> int:
-        return self.affine.input_dim
+    def input_shape(self) -> tuple[int, ...]:
+        return self.affine.input_shape
+
+    @property
+    def input_ndim(self) -> int:
+        return self.affine.input_ndim
+
+    @property
+    def input_size(self) -> int:
+        return self.affine.input_size
 
     @property
     def output_dim(self) -> int:
@@ -194,33 +216,48 @@ class LinearGaussian(typing.NamedTuple):
     def dtype(self) -> jax.typing.DTypeLike:
         return jnp.result_type(self.affine.dtype, self.covariance)
 
-    def select(self, index) -> 'LinearGaussian':
+    def reshape_input(
+        self,
+        input_shape: tuple[int, ...],
+    ) -> typing.Self:
+        """Return the same model with a different affine input shape."""
+        return self._replace(
+            affine=self.affine.input_reshape(input_shape),
+        )
+
+    def select(self, index) -> typing.Self:
         """Index into the batch dimensions."""
         return self.__class__(
             affine=self.affine.select(index),
             covariance=self.covariance[index],
         )
 
-    def astype(self, dtype: jax.typing.DTypeLike) -> 'LinearGaussian':
+    def astype(
+        self,
+        dtype: jax.typing.DTypeLike,
+    ) -> typing.Self:
         return self._replace(
             affine=self.affine.astype(dtype),
             covariance=self.covariance.astype(dtype),
         )
 
-    def conditional_mean(self, values: jax.Array) -> jax.Array:
+    def conditional_mean(
+        self,
+        values: jax.Array,
+    ) -> jax.Array:
         """Conditional mean for deterministic input values."""
         return self.affine.apply(values)
 
     def conditional(
         self,
-        values: jax.Array,  # (..., I)
+        values: jax.Array,  # (..., *input_shape)
     ) -> Gaussian:
         """Conditional output distribution for deterministic inputs."""
         mean = self.conditional_mean(values)  # (..., O)
 
         covariance = jnp.broadcast_to(
             self.covariance,
-            mean.shape[:-1] + (self.affine.output_dim, self.affine.output_dim),
+            mean.shape[:-1] + (self.output_dim, self.output_dim),
         )  # (..., O, O)
 
         return Gaussian(
@@ -238,10 +275,10 @@ class LinearGaussian(typing.NamedTuple):
     def add_covariance_jitter(
         self,
         jitter: float,
-    ) -> 'LinearGaussian':
+    ) -> typing.Self:
         """Add isotropic jitter to the output covariance."""
         identity = jnp.eye(
-            self.affine.output_dim,
+            self.output_dim,
             dtype=self.covariance.dtype,
         )
 

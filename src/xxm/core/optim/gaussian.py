@@ -105,11 +105,7 @@ def linear_from_moments(
     )
     coefficients = jnp.swapaxes(coefficients, -2, -1)
 
-    bias = output_mean - jnp.einsum(
-        '...oi,...i->...o',
-        coefficients,
-        input_mean,
-    )
+    bias = output_mean - jnp.einsum('...oi,...i->...o', coefficients, input_mean)
 
     noise_covariance = (
         output_covariance
@@ -129,55 +125,83 @@ def linear_from_moments(
 
 
 def linear_from_pairs(
-    inputs: jax.Array,  # (T, I)
+    inputs: jax.Array,  # (T, *input_shape)
     outputs: jax.Array,  # (T, O)
     ridge: float = 0.0,
-) -> 'LinearGaussian':
-    """Fit ``y = A x + b + noise`` from paired samples."""
-    n = inputs.shape[0]
+) -> LinearGaussian:
+    """Fit a linear Gaussian model from paired samples."""
+    if inputs.ndim < 2:
+        raise ValueError('inputs must have shape (T, *input_shape)')
 
-    return linear_from_moments(
-        input_mean=jnp.mean(inputs, axis=0),
+    input_shape = inputs.shape[1:]
+    flat_inputs = inputs.reshape(
+        inputs.shape[0],
+        -1,
+    )  # (T, input_size)
+
+    num_samples = inputs.shape[0]
+
+    model = linear_from_moments(
+        input_mean=jnp.mean(flat_inputs, axis=0),
         output_mean=jnp.mean(outputs, axis=0),
-        input_second_moment=jnp.einsum('t...i,t...j->...ij', inputs, inputs) / n,
-        output_second_moment=jnp.einsum('t...o,t...p->...op', outputs, outputs) / n,
-        output_input_moment=jnp.einsum('t...o,t...i->...oi', outputs, inputs) / n,
+        input_second_moment=(
+            jnp.einsum('ti,tj->ij', flat_inputs, flat_inputs) / num_samples
+        ),
+        output_second_moment=(jnp.einsum('to,tp->op', outputs, outputs) / num_samples),
+        output_input_moment=(
+            jnp.einsum('to,ti->oi', outputs, flat_inputs) / num_samples
+        ),
         ridge=ridge,
     )
 
+    return model.reshape_input(input_shape)
+
 
 def linear_from_pairs_weighted(
-    inputs: jax.Array,  # (T, I)
+    inputs: jax.Array,  # (T, *input_shape)
     outputs: jax.Array,  # (T, O)
     weights: jax.Array,  # (T, ...)
     ridge: float = 0.0,
-) -> 'LinearGaussian':
+) -> LinearGaussian:
     """Fit one weighted model for each batch entry of ``weights``."""
+    if inputs.ndim < 2:
+        raise ValueError('inputs must have shape (T, *input_shape)')
+
+    input_shape = inputs.shape[1:]
+    flat_inputs = inputs.reshape(
+        inputs.shape[0],
+        -1,
+    )  # (T, input_size)
+
     total = jnp.sum(weights, axis=0)
     counts = jnp.where(total > 0, total, EPS)
     normalized = weights / counts[None, ...]
 
-    return linear_from_moments(
-        input_mean=jnp.einsum('t...,ti->...i', normalized, inputs),
+    model = linear_from_moments(
+        input_mean=jnp.einsum('t...,ti->...i', normalized, flat_inputs),
         output_mean=jnp.einsum('t...,to->...o', normalized, outputs),
-        input_second_moment=jnp.einsum('t...,ti,tj->...ij', normalized, inputs, inputs),
+        input_second_moment=jnp.einsum(
+            't...,ti,tj->...ij', normalized, flat_inputs, flat_inputs
+        ),
         output_second_moment=jnp.einsum(
             't...,to,tp->...op', normalized, outputs, outputs
         ),
         output_input_moment=jnp.einsum(
-            't...,to,ti->...oi', normalized, outputs, inputs
+            't...,to,ti->...oi', normalized, outputs, flat_inputs
         ),
         ridge=ridge,
     )
 
+    return model.reshape_input(input_shape)
+
 
 def linear_from_pairs_grouped(
-    inputs: jax.Array,  # (T, I)
+    inputs: jax.Array,  # (T, *input_shape)
     outputs: jax.Array,  # (T, O)
     assignments: jax.Array,  # (T,)
     num_groups: int,
     ridge: float = 0.0,
-) -> 'LinearGaussian':
+) -> LinearGaussian:
     """Fit one model to each assigned group."""
     weights = jax.nn.one_hot(
         assignments,

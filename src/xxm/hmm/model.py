@@ -13,10 +13,7 @@ from xxm.core.emissions.discrete import (
     GaussianEmissions,
     PoissonEmissions,
 )
-from xxm.core.emissions.discrete_ar import (
-    AREmissions,
-    flatten_ar_coefficients,
-)
+from xxm.core.emissions.discrete_ar import AREmissions
 from xxm.core.models.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
@@ -315,7 +312,6 @@ class GaussianARHMM:
 
     @property
     def states(self) -> LinearGaussian:
-        # TODO warn on lag: this exposes the flattened-lag coefficients, and is only useful for L=1.
         return self.model.emissions.model
 
     def states_conditional(self, observations: jax.Array) -> Gaussian:
@@ -327,9 +323,9 @@ class GaussianARHMM:
         *,
         initial_probs: jax.Array,
         transition_probs: jax.Array,
-        emission_coefficients: jax.Array,
-        emission_bias: jax.Array,
-        emission_covariances: jax.Array,
+        emission_coefficients: jax.Array,  # (K, O, L, I)
+        emission_bias: jax.Array,  # (K, O)
+        emission_covariances: jax.Array,  # (K, O, O)
     ) -> typing.Self:
         initial, transitions = _categorical_components_from_params(
             initial_probs,
@@ -343,7 +339,7 @@ class GaussianARHMM:
                 emissions=AREmissions(
                     model=LinearGaussian(
                         affine=Affine(
-                            coefficients=flatten_ar_coefficients(emission_coefficients),
+                            coefficients=emission_coefficients,
                             bias=emission_bias,
                         ),
                         covariance=emission_covariances,
@@ -451,7 +447,6 @@ class PoissonARHMM:
 
     @property
     def states(self) -> LinearPoisson:
-        # TODO warn on lag: this exposes the flattened-lag coefficients, and is only useful for L=1.
         return self.model.emissions.model
 
     def states_conditional(self, observations: jax.Array) -> Poisson:
@@ -463,8 +458,8 @@ class PoissonARHMM:
         *,
         initial_probs: jax.Array,
         transition_probs: jax.Array,
-        emission_coefficients: jax.Array,
-        emission_bias: jax.Array,
+        emission_coefficients: jax.Array,  # (K, O, L, I)
+        emission_bias: jax.Array,  # (K, O)
     ) -> typing.Self:
         initial, transitions = _categorical_components_from_params(
             initial_probs,
@@ -478,7 +473,7 @@ class PoissonARHMM:
                 emissions=AREmissions(
                     model=LinearPoisson(
                         affine=Affine(
-                            coefficients=flatten_ar_coefficients(emission_coefficients),
+                            coefficients=emission_coefficients,
                             bias=emission_bias,
                         )
                     )
