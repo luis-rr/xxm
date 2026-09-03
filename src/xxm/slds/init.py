@@ -226,6 +226,7 @@ def init_arhmm_gaussian(
     num_arhmm_iters: int = 10,
     self_transition_prob: float = 0.9,
     covariance_floor: float = 1e-2,
+    progress: bool | str = 'AR-HMM',
 ) -> Model[GaussianEmissions]:
     """
     Initialize a Gaussian SLDS by fitting an AR-HMM to PCA latents.
@@ -249,7 +250,7 @@ def init_arhmm_gaussian(
         arhmm,
         latents,
         num_iters=num_arhmm_iters,
-        progress=False,
+        progress=progress,
     ).model
 
     return _from_arhmm(

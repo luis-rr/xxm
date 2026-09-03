@@ -142,6 +142,11 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
             axis=0,
         )
 
+    def permute(self, permutation: jax.Array) -> typing.Self:
+        return self._replace(
+            model=self.model.select(permutation),
+        )
+
 
 class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     r"""Switching linear dynamical system.
@@ -217,3 +222,11 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         observations = self.emissions.sample(key_observations, latents)
 
         return states, latents, observations
+
+    def permute(self, permutation: jax.Array) -> typing.Self:
+        return self._replace(
+            state_initial=self.state_initial.permute(permutation),
+            transitions=self.transitions.permute(permutation),
+            latent_initial=self.latent_initial.permute(permutation),
+            dynamics=self.dynamics.permute(permutation),
+        )
