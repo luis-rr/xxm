@@ -40,3 +40,14 @@ def match_states_by_conditional_mean(
     )  # (K, K)
 
     return match_states(costs)
+
+
+def match_true_states(true_states: jax.Array, state_probs: jax.Array) -> jax.Array:
+
+    num_states = state_probs.shape[-1]
+
+    true_state_probs = jax.nn.one_hot(true_states, num_states)
+
+    costs = -(true_state_probs.T @ state_probs)
+
+    return match_states(costs)

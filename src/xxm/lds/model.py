@@ -192,8 +192,13 @@ class GaussianLDS:
             objective_traces=fit.objective_traces,
         )
 
+    def latent_mean(self, posterior: Posterior) -> jax.Array:
+        """Return the posterior mean latent trajectory."""
+        return posterior.means
+
     def observation_mean(self, posterior: Posterior) -> jax.Array:
-        return self.model.emissions.model.conditional(posterior.means).mean
+        """Return the posterior mean observation at each time point."""
+        return self.model.emissions.observation_mean(posterior)
 
 
 @jax.tree_util.register_dataclass
@@ -334,5 +339,10 @@ class PoissonLDS:
             objective_traces=fit.objective_traces,
         )
 
+    def latent_mean(self, posterior: Posterior) -> jax.Array:
+        """Return the posterior mean latent trajectory."""
+        return posterior.means
+
     def observation_mean(self, posterior: Posterior) -> jax.Array:
-        return self.model.emissions.model.conditional(posterior.means).rates
+        """Return the posterior mean observation at each time point."""
+        return self.model.emissions.observation_mean(posterior)

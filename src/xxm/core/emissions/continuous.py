@@ -121,6 +121,11 @@ class GaussianEmissions(typing.NamedTuple):
             model=model,
         )
 
+    def observation_mean(self, posterior: ContinuousPosterior) -> jax.Array:
+        return self.model.conditional_mean(
+            posterior.means,
+        )
+
 
 class PoissonEmissions(typing.NamedTuple):
     """Linear Poisson emissions for continuous latent variables."""
@@ -201,4 +206,12 @@ class PoissonEmissions(typing.NamedTuple):
 
         return self._replace(
             model=model,
+        )
+
+    def observation_mean(self, posterior: ContinuousPosterior) -> jax.Array:
+        return self.model.expected_rates(
+            Gaussian(
+                mean=posterior.means,
+                covariance=posterior.covariances,
+            )
         )

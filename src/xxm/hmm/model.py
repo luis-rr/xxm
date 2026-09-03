@@ -4,6 +4,7 @@ import dataclasses
 import typing
 
 import jax
+import jax.numpy as jnp
 
 from xxm.core.affine import Affine
 from xxm.core.dists.categorical import Categorical
@@ -68,6 +69,19 @@ class GaussianHMM:
     @property
     def states(self) -> Gaussian:
         return self.model.emissions.model
+
+    def most_likely_states(self, posterior: Posterior) -> jax.Array:
+        """Return the marginally most likely state at each time point."""
+        return jnp.argmax(
+            posterior.state_probs,
+            axis=-1,
+        )
+
+    def observation_mean(self, posterior: Posterior) -> jax.Array:
+        """Return the posterior mean observation at each time point."""
+        return self.states.mixture_mean(
+            posterior.state_probs,
+        )
 
     @classmethod
     def from_params(
@@ -189,6 +203,19 @@ class PoissonHMM:
     @property
     def states(self) -> Poisson:
         return self.model.emissions.model
+
+    def most_likely_states(self, posterior: Posterior) -> jax.Array:
+        """Return the marginally most likely state at each time point."""
+        return jnp.argmax(
+            posterior.state_probs,
+            axis=-1,
+        )
+
+    def observation_mean(self, posterior: Posterior) -> jax.Array:
+        """Return the posterior mean observation at each time point."""
+        return self.states.mixture_mean(
+            posterior.state_probs,
+        )
 
     @classmethod
     def from_params(
@@ -344,6 +371,25 @@ class GaussianARHMM:
         """
         return self.model.emissions.conditional(
             observations,
+        )
+
+    def most_likely_states(self, posterior: Posterior) -> jax.Array:
+        """Return the marginally most likely state at each modeled time point."""
+        return jnp.argmax(
+            posterior.state_probs,
+            axis=-1,
+        )
+
+    def observation_mean(
+        self,
+        observations: jax.Array,
+        posterior: Posterior,
+    ) -> jax.Array:
+        """Return the posterior mean observation conditional on the AR history."""
+        return self.states_conditional(
+            observations,
+        ).mixture_mean(
+            posterior.state_probs,
         )
 
     @classmethod
@@ -546,6 +592,25 @@ class PoissonARHMM:
         """
         return self.model.emissions.conditional(
             observations,
+        )
+
+    def most_likely_states(self, posterior: Posterior) -> jax.Array:
+        """Return the marginally most likely state at each modeled time point."""
+        return jnp.argmax(
+            posterior.state_probs,
+            axis=-1,
+        )
+
+    def observation_mean(
+        self,
+        observations: jax.Array,
+        posterior: Posterior,
+    ) -> jax.Array:
+        """Return the posterior mean observation conditional on the AR history."""
+        return self.states_conditional(
+            observations,
+        ).mixture_mean(
+            posterior.state_probs,
         )
 
     @classmethod
