@@ -134,7 +134,7 @@ def _validate_initialization(
         )
 
 
-def _pca_latents(
+def pca_latents(
     observations: jax.Array,
     latent_dim: int,
 ) -> jax.Array:
@@ -155,7 +155,7 @@ def init_pca_gaussian(
 ) -> Model[GaussianEmissions]:
     _validate_initialization(observations, latent_dim)
 
-    latents = _pca_latents(
+    latents = pca_latents(
         observations,
         latent_dim,
     )
@@ -194,7 +194,7 @@ def init_pca_poisson(
 ) -> Model[PoissonEmissions]:
     _validate_initialization(observations, latent_dim)
 
-    latents = _pca_latents(
+    latents = pca_latents(
         observations,
         latent_dim,
     )
