@@ -1,5 +1,3 @@
-import typing
-
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -9,13 +7,12 @@ from xxm.core.chains.discrete import DiscreteChainMarginals
 from xxm.core.chains.gaussian import (
     GaussianChain,
     GaussianChainMarginals,
-    GaussianPotential,
 )
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.emissions.continuous import GaussianEmissions
 from xxm.core.models.discrete import CategoricalInitial
-from xxm.core.models.gaussian import GaussianInitial
+from xxm.core.models.gaussian import StateConditionedGaussian
 from xxm.hmm.core import CategoricalTransitions
 from xxm.slds.core import (
     GaussianLinearSwitchingDynamics,
@@ -37,7 +34,7 @@ def _mock_gaussian_emissions(noise_covariance: jax.Array) -> GaussianEmissions:
 
 
 def test_switching_dynamics_fit_recovers_known_linear_gaussian_model():
-    # x[t+1] = 2 x[t] + 1 + eps, eps ~ N(0, 0.5)
+    # x[t] = 2 x[t-1] + 1 + eps, eps ~ N(0, 0.5)
     #
     # Starting from x0 ~ N(0, 1):
     #   E[x]   = [0, 1, 3]
@@ -51,8 +48,8 @@ def test_switching_dynamics_fit_recovers_known_linear_gaussian_model():
     )
 
     discrete = DiscreteChainMarginals(
-        state_probs=jnp.ones((2, 1)),
-        pair_probs=jnp.ones((1, 1, 1)),
+        state_probs=jnp.ones((3, 1)),
+        pair_probs=jnp.ones((2, 1, 1)),
     )
 
     posterior = Posterior(
@@ -62,16 +59,31 @@ def test_switching_dynamics_fit_recovers_known_linear_gaussian_model():
 
     dynamics = GaussianLinearSwitchingDynamics(
         model=LinearGaussian(
-            affine=Affine(coefficients=jnp.zeros((1, 1, 1)), bias=jnp.zeros((1, 1))),
+            affine=Affine(
+                coefficients=jnp.zeros((1, 1, 1)),
+                bias=jnp.zeros((1, 1)),
+            ),
             covariance=jnp.ones((1, 1, 1)),
         ),
     )
 
     fitted = dynamics.fit_params(posterior)
 
-    np.testing.assert_allclose(fitted.model.affine.coefficients, [[[2.0]]], atol=ATOL)
-    np.testing.assert_allclose(fitted.model.affine.bias, [[1.0]], atol=ATOL)
-    np.testing.assert_allclose(fitted.model.covariance, [[[0.5]]], atol=ATOL)
+    np.testing.assert_allclose(
+        fitted.model.affine.coefficients,
+        [[[2.0]]],
+        atol=ATOL,
+    )
+    np.testing.assert_allclose(
+        fitted.model.affine.bias,
+        [[1.0]],
+        atol=ATOL,
+    )
+    np.testing.assert_allclose(
+        fitted.model.covariance,
+        [[[0.5]]],
+        atol=ATOL,
+    )
 
 
 def test_switching_dynamics_fit_is_jittable():
@@ -82,44 +94,47 @@ def test_switching_dynamics_fit_is_jittable():
     )
 
     discrete = DiscreteChainMarginals(
-        state_probs=jnp.ones((2, 1)),
-        pair_probs=jnp.ones((1, 1, 1)),
+        state_probs=jnp.ones((3, 1)),
+        pair_probs=jnp.ones((2, 1, 1)),
     )
 
-    posterior = Posterior(discrete, continuous)
+    posterior = Posterior(
+        discrete=discrete,
+        continuous=continuous,
+    )
 
     dynamics = GaussianLinearSwitchingDynamics(
         model=LinearGaussian(
-            affine=Affine(coefficients=jnp.zeros((1, 1, 1)), bias=jnp.zeros((1, 1))),
+            affine=Affine(
+                coefficients=jnp.zeros((1, 1, 1)),
+                bias=jnp.zeros((1, 1)),
+            ),
             covariance=jnp.ones((1, 1, 1)),
         ),
     )
 
     fitted = jax.jit(lambda dynamics, posterior: dynamics.fit_params(posterior))(
-        dynamics, posterior
+        dynamics,
+        posterior,
     )
 
     jax.block_until_ready(fitted)
 
-    np.testing.assert_allclose(fitted.model.affine.coefficients, [[[2.0]]], atol=ATOL)
-    np.testing.assert_allclose(fitted.model.affine.bias, [[1.0]], atol=ATOL)
-    np.testing.assert_allclose(fitted.model.covariance, [[[0.5]]], atol=ATOL)
-
-
-class _IdentityGaussianEmissions(typing.NamedTuple):
-    covariance: jax.Array
-
-    def get_potential(
-        self,
-        observations: jax.Array,
-    ) -> GaussianPotential:
-        covariances = jnp.broadcast_to(
-            self.covariance,
-            (observations.shape[0],) + self.covariance.shape,
-        )
-        return GaussianPotential.from_moments(
-            Gaussian(mean=observations, covariance=covariances),
-        )
+    np.testing.assert_allclose(
+        fitted.model.affine.coefficients,
+        [[[2.0]]],
+        atol=ATOL,
+    )
+    np.testing.assert_allclose(
+        fitted.model.affine.bias,
+        [[1.0]],
+        atol=ATOL,
+    )
+    np.testing.assert_allclose(
+        fitted.model.covariance,
+        [[[0.5]]],
+        atol=ATOL,
+    )
 
 
 def _single_state_model() -> Model:
@@ -130,8 +145,11 @@ def _single_state_model() -> Model:
         transitions=CategoricalTransitions(
             Categorical(probs=jnp.array([[1.0]])),
         ),
-        latent_initial=GaussianInitial(
-            model=Gaussian(mean=jnp.array([0.0]), covariance=jnp.array([[1.0]])),
+        latent_initial=StateConditionedGaussian(
+            model=Gaussian(
+                mean=jnp.array([[0.0]]),
+                covariance=jnp.array([[[1.0]]]),
+            ),
         ),
         dynamics=GaussianLinearSwitchingDynamics(
             model=LinearGaussian(
@@ -162,8 +180,21 @@ def _two_state_model() -> Model:
                 )
             ),
         ),
-        latent_initial=GaussianInitial(
-            model=Gaussian(mean=jnp.array([0.0]), covariance=jnp.array([[1.0]])),
+        latent_initial=StateConditionedGaussian(
+            model=Gaussian(
+                mean=jnp.array(
+                    [
+                        [0.0],
+                        [0.0],
+                    ]
+                ),
+                covariance=jnp.array(
+                    [
+                        [[1.0]],
+                        [[1.0]],
+                    ]
+                ),
+            ),
         ),
         dynamics=GaussianLinearSwitchingDynamics(
             model=LinearGaussian(
@@ -190,15 +221,14 @@ def test_single_state_slds_matches_gaussian_chain():
         num_iters=3,
     )
 
-    # With K=1, q(z_t=0)=1 and the SLDS reduces to a Gaussian chain.
-    state_probs = jnp.ones((observations.shape[0] - 1, 1))
+    state_probs = jnp.ones((observations.shape[0], 1))
 
-    pair_potentials = model.dynamics.compute_pair_potentials().weighted_sum(state_probs)
-    initial_potential = GaussianPotential.from_moments(
-        Gaussian(
-            mean=model.latent_initial.model.mean,
-            covariance=model.latent_initial.model.covariance,
-        ),
+    initial_potential = model.latent_initial.compute_potentials().weighted_sum(
+        state_probs[0]
+    )
+
+    pair_potentials = model.dynamics.compute_pair_potentials().weighted_sum(
+        state_probs[1:]
     )
     observation_potential = model.emissions.compute_potential(observations)
 
@@ -250,9 +280,10 @@ def test_zero_iterations_uses_discrete_prior():
     #   p(z2) = [0.683, 0.317]
     expected = np.array(
         [
-            [0.700, 0.300],
-            [0.690, 0.310],
-            [0.683, 0.317],
+            [0.7000, 0.3000],
+            [0.6900, 0.3100],
+            [0.6830, 0.3170],
+            [0.6781, 0.3219],
         ]
     )
 

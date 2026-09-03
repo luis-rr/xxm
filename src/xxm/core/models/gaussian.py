@@ -3,6 +3,7 @@ import typing
 import jax
 from jax import numpy as jnp
 
+from xxm.core.chains.gaussian import GaussianPotential
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.posteriors import ContinuousPosterior
@@ -88,4 +89,43 @@ class GaussianLinearDynamics(typing.NamedTuple):
                 subsequent_latents,
             ],
             axis=0,
+        )
+
+
+class StateConditionedGaussian(typing.NamedTuple):
+    """Gaussian distribution conditioned on a discrete state."""
+
+    model: Gaussian  # K-batched
+
+    @property
+    def num_states(self) -> int:
+        return self.model.batch_shape[0]
+
+    def conditional(
+        self,
+        state: jax.Array,
+    ) -> Gaussian:
+        """Gaussian distribution conditional on the given state."""
+        return self.model.select(state)
+
+    def compute_potentials(self) -> GaussianPotential:
+        """Return one Gaussian potential per discrete state."""
+        return GaussianPotential.from_moments(
+            self.model,
+        )
+
+    def sample(
+        self,
+        key: jax.Array,
+        state: jax.Array,
+    ) -> jax.Array:
+        """Sample conditional on the given discrete state."""
+        return self.conditional(state).sample(key)
+
+    def permute(
+        self,
+        permutation: jax.Array,
+    ) -> typing.Self:
+        return self._replace(
+            model=self.model.select(permutation),
         )

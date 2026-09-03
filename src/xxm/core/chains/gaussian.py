@@ -233,6 +233,91 @@ class GaussianPotential(typing.NamedTuple):
             log_constant=log_constant,
         )
 
+    def weighted_sum(
+        self,
+        weights: jax.Array,  # (..., K)
+    ) -> typing.Self:
+        r"""Compute the weighted sum of batched log potentials.
+
+        Returns the Gaussian potential
+
+            sum_k weights[..., k] log f_k(x).
+
+        The potential must have one batch dimension of size ``K``.
+        """
+        if self.batch_shape != (weights.shape[-1],):
+            raise ValueError(
+                'last dimension of weights must match the potential batch dimension; '
+                f'expected {self.batch_shape}, got {weights.shape}'
+            )
+
+        return self.__class__(
+            precision_blocks=jnp.einsum(
+                '...k,kij->...ij',
+                weights,
+                self.precision_blocks,
+            ),
+            information_vectors=jnp.einsum(
+                '...k,ki->...i',
+                weights,
+                self.information_vectors,
+            ),
+            log_constant=jnp.einsum(
+                '...k,k->...',
+                weights,
+                self.log_constant,
+            ),
+        )
+
+    def expected_log_potentials(
+        self,
+        mean: jax.Array,  # (..., N)
+        second_moment: jax.Array,  # (..., N, N)
+    ) -> jax.Array:  # (..., K)
+        r"""Compute each batched log potential's Gaussian expectation.
+
+        Returns
+
+            E_q[log f_k(x)]
+
+        for each potential ``k``.
+        """
+        if len(self.batch_shape) != 1:
+            raise ValueError(
+                'expected_log_potentials requires one potential batch dimension; '
+                f'got {self.batch_shape}'
+            )
+
+        if mean.shape[-1] != self.variable_dim:
+            raise ValueError(
+                f'mean must have trailing dimension {self.variable_dim}; '
+                f'got {mean.shape}'
+            )
+
+        if second_moment.shape != mean.shape[:-1] + (
+            self.variable_dim,
+            self.variable_dim,
+        ):
+            raise ValueError(
+                'second_moment must have shape (..., N, N) matching mean; '
+                f'got {second_moment.shape}'
+            )
+
+        return (
+            -0.5
+            * jnp.einsum(
+                'kij,...ij->...k',
+                self.precision_blocks,
+                second_moment,
+            )
+            + jnp.einsum(
+                'ki,...i->...k',
+                self.information_vectors,
+                mean,
+            )
+            + self.log_constant
+        )
+
 
 class GaussianPairPotential(typing.NamedTuple):
     r"""Pairwise Gaussian potential in canonical form.

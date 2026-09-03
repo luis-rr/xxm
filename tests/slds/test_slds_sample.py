@@ -2,8 +2,19 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from xxm.core.affine import Affine
 from xxm.core.dists.categorical import Categorical
-from xxm.core.models.discrete import CategoricalTransitions
+from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.emissions.continuous import GaussianEmissions
+from xxm.core.models.discrete import (
+    CategoricalInitial,
+    CategoricalTransitions,
+)
+from xxm.slds.core import (
+    GaussianLinearSwitchingDynamics,
+    Model,
+    StateConditionedGaussian,
+)
 
 
 def test_categorical_transitions_sample_includes_initial():
@@ -30,19 +41,6 @@ def test_categorical_transitions_sample_includes_initial():
     )
 
 
-from xxm.core.affine import Affine
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian
-from xxm.core.emissions.continuous import GaussianEmissions
-from xxm.core.models.discrete import (
-    CategoricalInitial,
-)
-from xxm.core.models.gaussian import GaussianInitial
-from xxm.slds.core import (
-    GaussianLinearSwitchingDynamics,
-    Model,
-)
-
-
 def _make_model() -> Model:
     state_initial = CategoricalInitial(
         model=Categorical(
@@ -61,10 +59,20 @@ def _make_model() -> Model:
         )
     )
 
-    latent_initial = GaussianInitial(
+    latent_initial = StateConditionedGaussian(
         model=Gaussian(
-            mean=jnp.array([0.0]),
-            covariance=jnp.array([[1e-8]]),
+            mean=jnp.array(
+                [
+                    [5.0],
+                    [-5.0],
+                ]
+            ),
+            covariance=jnp.array(
+                [
+                    [[1e-8]],
+                    [[1e-8]],
+                ]
+            ),
         )
     )
 
@@ -146,18 +154,20 @@ def test_sample():
         num_steps=4,
     )
 
-    assert states.shape == (3,)
+    assert states.shape == (4,)
     assert latents.shape == (4, 1)
     assert observations.shape == (4, 1)
 
+    # z0 selects x0's initial distribution; subsequent states select the
+    # dynamics that generate x1, x2, and x3.
     np.testing.assert_array_equal(
         states,
-        jnp.array([0, 1, 1]),
+        jnp.array([0, 1, 1, 1]),
     )
 
     np.testing.assert_allclose(
         latents[:, 0],
-        jnp.array([0.0, 10.0, -10.0, -10.0]),
+        jnp.array([5.0, -10.0, -10.0, -10.0]),
         atol=1e-3,
     )
 
