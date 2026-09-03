@@ -90,13 +90,18 @@ class AREmissions(
     r"""
     State-dependent autoregressive emissions with structured lagged inputs.
 
-    The conditional model maps predictors of shape ``(L, N)`` to outputs of shape
-    ``(N,)``, where ``L`` is the number of lags and ``N`` the observationdimension.
+    The conditional model maps predictors of shape ``(L, N)`` to outputs of
+    shape ``(N,)``. Predictors are ordered from most recent to oldest,
+    ``(y[t-1], ..., y[t-L])``. For an affine conditional model, coefficients
+    therefore have shape ``(K, N, L, N)``.
 
-    Predictors are ordered from most recent to oldest observation, so
-    ``x_t = (y_{t-1}, ..., y_{t-L})``.
+    Likelihood and fitting methods receive a chronological sequence whose first
+    ``L`` observations are fixed conditioning history. Only the remaining
+    observations have associated latent states.
 
-    For an affine conditional model, coefficients therefore have shape ``(K, N, L, N)``.
+    Autonomous sampling uses an all-zero history. Conditional continuation
+    sampling accepts an explicit chronological history, ordered from oldest
+    to most recent.
     """
 
     model: ConditionalModelT  # K-batched, input shape (L, N)
@@ -121,15 +126,18 @@ class AREmissions(
 
         if input_dim != self.output_dim:
             raise ValueError(
-                'autoregressive input variable dimension must match output dimension; '
-                f'got input shape {self.model.input_shape} '
+                'autoregressive input variable dimension must match output '
+                f'dimension; got input shape {self.model.input_shape} '
                 f'and output dimension {self.output_dim}'
             )
 
         return num_lags
 
-    def predictors(self, observations: jax.Array) -> jax.Array:  # (T-L, L, N)
-        """Construct autoregressive predictors ordered from lag 1 to lag L."""
+    def predictors(
+        self,
+        observations: jax.Array,
+    ) -> jax.Array:  # (T-L, L, N)
+        """Construct predictors ordered from most recent to oldest."""
         return lagged_observations(
             observations,
             self.num_lags,
@@ -153,100 +161,147 @@ class AREmissions(
         observations: jax.Array,
     ) -> Gaussian | Poisson: ...
 
-    def conditional(self, observations: jax.Array) -> Gaussian | Poisson:
-        """Conditional distribution for each time point and state."""
+    def conditional(
+        self,
+        observations: jax.Array,
+    ) -> Gaussian | Poisson:
+        """Conditional distribution for each modeled time point and state."""
         predictors = self.predictors(
             observations,
         )  # (T-L, L, N)
 
-        return self.model.conditional(predictors[:, None, ...])  # (T-L, K)
-
-    def log_likelihoods(self, observations: jax.Array) -> jax.Array:  # (T, K)
-        conditional = self.conditional(observations)
-
-        log_probs = conditional.log_prob(
-            observations[self.num_lags :, None, :]
+        return self.model.conditional(
+            predictors[:, None, ...],
         )  # (T-L, K)
 
-        padding = jnp.zeros(
-            (self.num_lags, self.num_states),
-            dtype=log_probs.dtype,
-        )  # (L, K)
+    def log_likelihoods(
+        self,
+        observations: jax.Array,
+    ) -> jax.Array:  # (T-L, K)
+        """Emission log likelihoods conditional on the initial history."""
+        conditional = self.conditional(
+            observations,
+        )
 
-        return jnp.concatenate(
-            [
-                padding,
-                log_probs,
-            ],
-            axis=0,
-        )  # (T, K)
+        return conditional.log_prob(observations[self.num_lags :, None, :])
 
-    def compute_potential(self, observations: jax.Array) -> DiscretePotential:
+    def compute_potential(
+        self,
+        observations: jax.Array,
+    ) -> DiscretePotential:
+        """Construct potentials only for observations after the history."""
         return DiscretePotential(
             log_values=self.log_likelihoods(observations),
         )
 
     def fit_params(
         self,
-        observations: jax.Array,  # (T, N)
+        observations: jax.Array,
         posterior: DiscretePosterior,
     ) -> typing.Self:
+        """Fit AR parameters conditional on the initial observation history."""
         predictors = self.predictors(
             observations,
         )  # (T-L, L, N)
 
         current = observations[self.num_lags :]  # (T-L, N)
 
-        weights = posterior.state_probs[self.num_lags :]  # (T-L, K)
-
         model = _fit_ar_model(
             model=self.model,
             inputs=predictors,
             outputs=current,
-            weights=weights,
+            weights=posterior.state_probs,  # (T-L, K)
         )
 
         return self._replace(
             model=model,
         )
 
-    def permute(self, permutation: jax.Array) -> typing.Self:
+    def permute(
+        self,
+        permutation: jax.Array,
+    ) -> typing.Self:
         return self._replace(
             model=self.model.select(permutation),
         )
 
-    def sample(self, key: jax.Array, states: jax.Array) -> jax.Array:  # (T, N)
+    def sample_continuation(
+        self,
+        key: jax.Array,
+        states: jax.Array,
+        initial_history: jax.Array,
+    ) -> jax.Array:
+        """
+        Sample a continuation conditional on an explicit observation history.
+
+        ``initial_history`` has shape ``(L, N)`` and is chronological, from
+        oldest to most recent. Only newly generated observations are returned.
+        """
+        if initial_history.shape != (
+            self.num_lags,
+            self.output_dim,
+        ):
+            raise ValueError(
+                'initial_history must have shape '
+                f'({self.num_lags}, {self.output_dim}); '
+                f'got {initial_history.shape}'
+            )
+
+        # Conditional predictors are ordered most recent to oldest.
+        history = initial_history[::-1]
+
         def step(carry, state):
-            history, key = carry  # (L, N)
+            history, key = carry
 
             key, key_observation = jax.random.split(key)
 
-            conditional = self.model.select(state).conditional(history)
+            conditional = self.model.select(state).conditional(
+                history,
+            )
 
-            observation = conditional.sample(key_observation)  # (N,)
+            observation = conditional.sample(
+                key_observation,
+            )
 
-            new_history = jnp.concatenate(
+            history = jnp.concatenate(
                 [
                     observation[None, :],
                     history[:-1],
                 ],
                 axis=0,
-            )  # (L, N)
+            )
 
-            return (new_history, key), observation
+            return (history, key), observation
 
+        _, observations = jax.lax.scan(
+            step,
+            (history, key),
+            states,
+        )
+
+        return observations
+
+    def sample(
+        self,
+        key: jax.Array,
+        states: jax.Array,
+    ) -> jax.Array:
+        """
+        Sample observations autonomously from a zero prehistory.
+
+        The zero history is a deterministic simulation boundary condition, not
+        an assumption about the stationary distribution of the AR process.
+        """
         initial_history = jnp.zeros(
             (
                 self.num_lags,
                 self.output_dim,
             ),
             dtype=self.model.dtype,
-        )  # (L, N)
-
-        _, observations = jax.lax.scan(
-            step,
-            (initial_history, key),
-            states,
         )
 
-        return observations
+        return self.sample_continuation(
+            key,
+            states,
+            initial_history,
+        )

@@ -229,6 +229,12 @@ def init_gaussian_ar(
     num_lags: int,
     self_transition_prob: float = 0.9,
 ) -> Model:
+    """
+    Initialize a Gaussian AR-HMM conditional on the first ``num_lags`` values.
+
+    ``observations[:num_lags]`` provide the fixed autoregressive history.
+    Latent states correspond only to ``observations[num_lags:]``.
+    """
     emissions = _init_ar_gaussian_emissions(
         key=key,
         observations=observations,
@@ -322,13 +328,19 @@ def init_poisson_ar(
     num_lags: int,
     self_transition_prob: float = 0.9,
 ) -> Model:
+    """
+    Initialize a Poisson AR-HMM conditional on the first ``num_lags`` values.
 
+    ``observations[:num_lags]`` provide the fixed autoregressive history.
+    Latent states correspond only to ``observations[num_lags:]``.
+    """
     emissions = _init_ar_poisson_emissions(
         key=key,
         observations=observations,
         num_states=num_states,
         num_lags=num_lags,
     )
+
     return _init(
         emissions=emissions,
         num_states=num_states,

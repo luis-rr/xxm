@@ -289,13 +289,28 @@ class PoissonHMM:
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, eq=False)
 class GaussianARHMM:
-    """Autoregressive HMM with Gaussian emissions."""
+    r"""
+    Autoregressive HMM with Gaussian conditional emissions.
+
+    The first ``num_lags`` observations of a fitted or inferred sequence are
+    treated as fixed conditioning history and have no associated latent states.
+    The first latent state is drawn independently from ``initial_probs`` and
+    selects the regression generating the first observation after that history.
+
+    Conditional predictors have shape ``(L, N)`` and are ordered from most
+    recent to oldest observation. Affine coefficients therefore have shape
+    ``(K, N, L, N)``.
+
+    Autonomous sampling starts from a zero prehistory. An explicit
+    ``initial_history`` may instead be supplied to generate a continuation from
+    observed values.
+    """
 
     model: Model[AREmissions[LinearGaussian]]
 
     @property
     def num_states(self) -> int:
-        return self.model.emissions.num_states
+        return self.model.num_states
 
     @property
     def output_dim(self) -> int:
@@ -305,7 +320,10 @@ class GaussianARHMM:
     def num_lags(self) -> int:
         return self.model.emissions.num_lags
 
-    def permute(self, permutation: jax.Array) -> GaussianARHMM:
+    def permute(
+        self,
+        permutation: jax.Array,
+    ) -> GaussianARHMM:
         return GaussianARHMM(
             model=self.model.permute(permutation),
         )
@@ -314,8 +332,19 @@ class GaussianARHMM:
     def states(self) -> LinearGaussian:
         return self.model.emissions.model
 
-    def states_conditional(self, observations: jax.Array) -> Gaussian:
-        return self.model.emissions.conditional(observations)
+    def states_conditional(
+        self,
+        observations: jax.Array,
+    ) -> Gaussian:
+        """
+        Conditional distributions for observations following the AR history.
+
+        For an input sequence of length ``T``, the returned distributions have
+        ``T - num_lags`` time steps.
+        """
+        return self.model.emissions.conditional(
+            observations,
+        )
 
     @classmethod
     def from_params(
@@ -323,9 +352,9 @@ class GaussianARHMM:
         *,
         initial_probs: jax.Array,
         transition_probs: jax.Array,
-        emission_coefficients: jax.Array,  # (K, O, L, I)
-        emission_bias: jax.Array,  # (K, O)
-        emission_covariances: jax.Array,  # (K, O, O)
+        emission_coefficients: jax.Array,  # (K, N, L, N)
+        emission_bias: jax.Array,  # (K, N)
+        emission_covariances: jax.Array,  # (K, N, N)
     ) -> typing.Self:
         initial, transitions = _categorical_components_from_params(
             initial_probs,
@@ -358,6 +387,12 @@ class GaussianARHMM:
         *,
         self_transition_prob: float = 0.9,
     ) -> typing.Self:
+        """
+        Initialize from autoregressive regression pairs.
+
+        The first ``num_lags`` observations are used only as fixed conditioning
+        history.
+        """
         model = init_gaussian_ar(
             key=key,
             observations=observations,
@@ -368,13 +403,43 @@ class GaussianARHMM:
 
         return cls(model)
 
-    def sample(self, key: jax.Array, num_steps: int) -> tuple[jax.Array, jax.Array]:
-        return self.model.sample(
+    def sample(
+        self,
+        key: jax.Array,
+        num_steps: int,
+        *,
+        initial_history: jax.Array | None = None,
+    ) -> tuple[jax.Array, jax.Array]:
+        """
+        Sample states and observations from the AR-HMM.
+
+        If ``initial_history`` is omitted, generation uses a zero prehistory.
+        Otherwise it must have shape ``(L, N)`` and be ordered chronologically,
+        from oldest to most recent. Only the newly generated observations are
+        returned.
+        """
+        if initial_history is None:
+            return self.model.sample(
+                key,
+                num_steps,
+            )
+
+        return self.model.sample_continuation(
             key,
             num_steps,
+            initial_history,
         )
 
-    def infer(self, observations: jax.Array) -> tuple[Posterior, jax.Array]:
+    def infer(
+        self,
+        observations: jax.Array,
+    ) -> tuple[Posterior, jax.Array]:
+        """
+        Infer states conditional on the first ``num_lags`` observations.
+
+        For an input sequence of length ``T``, the posterior has
+        ``T - num_lags`` latent steps.
+        """
         return infer_exact(
             self.model,
             observations,
@@ -387,6 +452,7 @@ class GaussianARHMM:
         num_iters: int,
         progress: bool | str = 'EM',
     ) -> Fit[typing.Self]:
+        """Fit the conditional AR-HMM with expectation maximization."""
         fit = fit_em(
             self.model,
             observations,
@@ -408,6 +474,7 @@ class GaussianARHMM:
         num_iters: int,
         progress: bool | str = 'Multi-EM',
     ) -> FitCollection[typing.Self]:
+        """Fit multiple AR-HMM initializations to the same sequence."""
         fit = fit_em_many(
             tuple(model.model for model in models),
             observations,
@@ -424,13 +491,28 @@ class GaussianARHMM:
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, eq=False)
 class PoissonARHMM:
-    """Autoregressive HMM with Poisson emissions."""
+    r"""
+    Autoregressive HMM with Poisson conditional emissions.
+
+    The first ``num_lags`` observations of a fitted or inferred sequence are
+    treated as fixed conditioning history and have no associated latent states.
+    The first latent state is drawn independently from ``initial_probs`` and
+    selects the regression generating the first observation after that history.
+
+    Conditional predictors have shape ``(L, N)`` and are ordered from most
+    recent to oldest observation. Affine coefficients therefore have shape
+    ``(K, N, L, N)``.
+
+    Autonomous sampling starts from a zero prehistory. An explicit
+    ``initial_history`` may instead be supplied to generate a continuation from
+    observed values.
+    """
 
     model: Model[AREmissions[LinearPoisson]]
 
     @property
     def num_states(self) -> int:
-        return self.model.emissions.num_states
+        return self.model.num_states
 
     @property
     def output_dim(self) -> int:
@@ -440,7 +522,10 @@ class PoissonARHMM:
     def num_lags(self) -> int:
         return self.model.emissions.num_lags
 
-    def permute(self, permutation: jax.Array) -> PoissonARHMM:
+    def permute(
+        self,
+        permutation: jax.Array,
+    ) -> PoissonARHMM:
         return PoissonARHMM(
             model=self.model.permute(permutation),
         )
@@ -449,8 +534,19 @@ class PoissonARHMM:
     def states(self) -> LinearPoisson:
         return self.model.emissions.model
 
-    def states_conditional(self, observations: jax.Array) -> Poisson:
-        return self.model.emissions.conditional(observations)
+    def states_conditional(
+        self,
+        observations: jax.Array,
+    ) -> Poisson:
+        """
+        Conditional distributions for observations following the AR history.
+
+        For an input sequence of length ``T``, the returned distributions have
+        ``T - num_lags`` time steps.
+        """
+        return self.model.emissions.conditional(
+            observations,
+        )
 
     @classmethod
     def from_params(
@@ -458,8 +554,8 @@ class PoissonARHMM:
         *,
         initial_probs: jax.Array,
         transition_probs: jax.Array,
-        emission_coefficients: jax.Array,  # (K, O, L, I)
-        emission_bias: jax.Array,  # (K, O)
+        emission_coefficients: jax.Array,  # (K, N, L, N)
+        emission_bias: jax.Array,  # (K, N)
     ) -> typing.Self:
         initial, transitions = _categorical_components_from_params(
             initial_probs,
@@ -491,6 +587,12 @@ class PoissonARHMM:
         *,
         self_transition_prob: float = 0.9,
     ) -> typing.Self:
+        """
+        Initialize from autoregressive regression pairs.
+
+        The first ``num_lags`` observations are used only as fixed conditioning
+        history.
+        """
         model = init_poisson_ar(
             key=key,
             observations=observations,
@@ -501,13 +603,40 @@ class PoissonARHMM:
 
         return cls(model)
 
-    def sample(self, key: jax.Array, num_steps: int) -> tuple[jax.Array, jax.Array]:
-        return self.model.sample(
+    def sample(
+        self,
+        key: jax.Array,
+        num_steps: int,
+        *,
+        initial_history: jax.Array | None = None,
+    ) -> tuple[jax.Array, jax.Array]:
+        """
+        Sample states and observations from the AR-HMM.
+
+        If ``initial_history`` is omitted, generation uses a zero prehistory.
+        Otherwise it must have shape ``(L, N)`` and be ordered chronologically,
+        from oldest to most recent. Only the newly generated observations are
+        returned.
+        """
+        if initial_history is None:
+            return self.model.sample(
+                key,
+                num_steps,
+            )
+
+        return self.model.sample_continuation(
             key,
             num_steps,
+            initial_history,
         )
 
     def infer(self, observations: jax.Array) -> tuple[Posterior, jax.Array]:
+        """
+        Infer states conditional on the first ``num_lags`` observations.
+
+        For an input sequence of length ``T``, the posterior has
+        ``T - num_lags`` latent steps.
+        """
         return infer_exact(
             self.model,
             observations,
@@ -520,6 +649,7 @@ class PoissonARHMM:
         num_iters: int,
         progress: bool | str = 'EM',
     ) -> Fit[typing.Self]:
+        """Fit the conditional AR-HMM with expectation maximization."""
         fit = fit_em(
             self.model,
             observations,
@@ -541,6 +671,7 @@ class PoissonARHMM:
         num_iters: int,
         progress: bool | str = 'Multi-EM',
     ) -> FitCollection[typing.Self]:
+        """Fit multiple AR-HMM initializations to the same sequence."""
         fit = fit_em_many(
             tuple(model.model for model in models),
             observations,

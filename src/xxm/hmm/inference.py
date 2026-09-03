@@ -32,17 +32,17 @@ def infer_exact(
     model: Model,
     observations: jax.Array,
 ) -> tuple[Posterior, jax.Array]:
-    """Compute the exact posterior over latents."""
+    """
+    Compute the exact posterior over latent states.
 
-    latent_chain = to_chain(
-        model,
-        num_steps=observations.shape[0],
-    )
-
+    The number of latent steps is determined by the emission potential. This
+    equals the observation length for ordinary HMMs and excludes the fixed
+    conditioning history for autoregressive HMMs.
+    """
     observation_potential = model.emissions.compute_potential(observations)
 
-    posterior_chain = latent_chain.add_local_potential(
-        observation_potential,
-    )
+    latent_chain = to_chain(model, num_steps=observation_potential.log_values.shape[0])
+
+    posterior_chain = latent_chain.add_local_potential(observation_potential)
 
     return posterior_chain.forward_backward()

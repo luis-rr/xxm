@@ -161,13 +161,16 @@ def test_ar_gaussian_log_likelihoods_known_solution():
 
     expected = jnp.array(
         [
-            [0.0],
             [-0.5 * (constant + 1.0**2 / 4.0)],
             [-0.5 * (constant + 2.0**2 / 4.0)],
         ]
     )
 
-    np.testing.assert_allclose(log_likelihoods, expected, atol=ATOL)
+    np.testing.assert_allclose(
+        log_likelihoods,
+        expected,
+        atol=ATOL,
+    )
 
 
 def test_ar_gaussian_log_likelihoods_shortest_valid_sequence():
@@ -196,15 +199,18 @@ def test_ar_gaussian_log_likelihoods_shortest_valid_sequence():
 
     log_likelihoods = emissions.log_likelihoods(observations)
 
-    assert log_likelihoods.shape == (3, 1)
+    # history = (y1, y0) = (2, 1)
+    # mean = 0.5 * 2 + 0.25 * 1 = 1.25
+    # residual = 3 - 1.25 = 1.75
+    expected = -0.5 * (jnp.log(2 * jnp.pi) + 1.75**2)
+
+    assert log_likelihoods.shape == (1, 1)
 
     np.testing.assert_allclose(
-        log_likelihoods[:2],
-        0.0,
+        log_likelihoods[0, 0],
+        expected,
         atol=ATOL,
     )
-
-    assert jnp.isfinite(log_likelihoods[2, 0])
 
 
 def test_ar_gaussian_fit_recovers_known_ar2_parameters():
@@ -219,21 +225,23 @@ def test_ar_gaussian_fit_recovers_known_ar2_parameters():
 
     observations = jnp.asarray(values)[:, None]
 
-    posterior = DiscreteChainMarginals(
-        state_probs=jnp.ones((observations.shape[0], 1)),
-        pair_probs=jnp.ones(
-            (
-                observations.shape[0] - 1,
-                1,
-                1,
-            )
-        ),
-    )
-
     emissions = _make_emissions(
         coefficients=jnp.zeros((1, 1, 2, 1)),
         biases=jnp.zeros((1, 1)),
         covariances=jnp.ones((1, 1, 1)),
+    )
+
+    num_steps = observations.shape[0] - emissions.num_lags
+
+    posterior = DiscreteChainMarginals(
+        state_probs=jnp.ones((num_steps, 1)),
+        pair_probs=jnp.ones(
+            (
+                num_steps - 1,
+                1,
+                1,
+            )
+        ),
     )
 
     fitted = emissions.fit_params(
@@ -364,11 +372,13 @@ def test_ar_gaussian_methods_are_jittable():
         ]
     )
 
+    num_steps = observations.shape[0] - emissions.num_lags
+
     posterior = DiscreteChainMarginals(
-        state_probs=jnp.ones((observations.shape[0], 1)),
+        state_probs=jnp.ones((num_steps, 1)),
         pair_probs=jnp.ones(
             (
-                observations.shape[0] - 1,
+                num_steps - 1,
                 1,
                 1,
             )
@@ -423,6 +433,7 @@ def test_ar_gaussian_methods_are_jittable():
         observations,
         posterior,
     )
+
     fitted = emissions.fit_params(
         observations,
         posterior,
@@ -449,5 +460,49 @@ def test_ar_gaussian_methods_are_jittable():
             key,
             states,
         ),
+        atol=ATOL,
+    )
+
+
+def test_ar_gaussian_sample_uses_zero_history():
+    emissions = _make_emissions(
+        coefficients=jnp.array(
+            [
+                [
+                    [
+                        [0.5],
+                        [0.2],
+                    ]
+                ]
+            ]
+        ),
+        biases=jnp.array([[0.1]]),
+        covariances=jnp.array([[[0.5]]]),
+    )
+
+    states = jnp.zeros(5, dtype=int)
+    key = jax.random.key(0)
+
+    initial_history = jnp.zeros(
+        (
+            emissions.num_lags,
+            emissions.output_dim,
+        )
+    )
+
+    autonomous = emissions.sample(
+        key,
+        states,
+    )
+
+    continuation = emissions.sample_continuation(
+        key,
+        states,
+        initial_history,
+    )
+
+    np.testing.assert_allclose(
+        autonomous,
+        continuation,
         atol=ATOL,
     )

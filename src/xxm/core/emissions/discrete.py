@@ -11,12 +11,27 @@ from xxm.core.posteriors import DiscretePosterior
 
 
 class Emissions(typing.Protocol):
-    def log_likelihoods(self, observations: jax.Array) -> jax.Array: ...
+    """Emission capabilities shared by HMM inference and parameter fitting."""
+
+    def log_likelihoods(
+        self,
+        observations: jax.Array,
+    ) -> jax.Array: ...
+
+    def compute_potential(
+        self,
+        observations: jax.Array,
+    ) -> DiscretePotential: ...
 
     def fit_params(
         self,
         observations: jax.Array,
         posterior: DiscretePosterior,
+    ) -> typing.Self: ...
+
+    def permute(
+        self,
+        permutation: jax.Array,
     ) -> typing.Self: ...
 
     def sample(
@@ -25,10 +40,16 @@ class Emissions(typing.Protocol):
         states: jax.Array,
     ) -> jax.Array: ...
 
-    def permute(
+
+class ContinuationEmissions(Emissions, typing.Protocol):
+    """Emissions that can generate conditionally from an explicit history."""
+
+    def sample_continuation(
         self,
-        permutation: jax.Array,
-    ) -> typing.Self: ...
+        key: jax.Array,
+        states: jax.Array,
+        initial_history: jax.Array,
+    ) -> jax.Array: ...
 
 
 class GaussianEmissions(typing.NamedTuple):
