@@ -14,10 +14,8 @@ from xxm.core.chains.gaussian import (
     GaussianPairPotential,
     GaussianPotential,
 )
-from xxm.core.emissions.continuous import Emissions
+from xxm.core.emissions.continuous import EmissionsT
 from xxm.core.models.gaussian import GaussianInitial, GaussianLinearDynamics
-
-EmissionsT = typing.TypeVar('EmissionsT', bound=Emissions)
 
 
 def _gaussian_log_prob_residuals(

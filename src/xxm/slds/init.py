@@ -3,7 +3,10 @@ import jax.numpy as jnp
 
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import LinearGaussian
-from xxm.core.emissions.continuous import GaussianEmissions
+from xxm.core.emissions.continuous import (
+    EmissionsT,
+    GaussianEmissions,
+)
 from xxm.core.emissions.discrete_ar import AREmissions
 from xxm.core.models.discrete import CategoricalInitial
 from xxm.core.models.gaussian import StateConditionedGaussian
@@ -12,10 +15,7 @@ from xxm.hmm.core import Model as HMMModel
 from xxm.hmm.inference import infer_exact as infer_hmm
 from xxm.hmm.init import init_gaussian_ar
 from xxm.hmm.learning import fit_em as fit_hmm
-from xxm.lds.init import (
-    gaussian_emissions_from_latents,
-    pca_latents,
-)
+from xxm.lds.init import pca_latents
 
 from .core import GaussianLinearSwitchingDynamics, Model
 
@@ -95,10 +95,10 @@ def _state_conditioned_initial_from_latents(
 
 def _from_arhmm(
     latents: jax.Array,
-    emissions: GaussianEmissions,
+    emissions: EmissionsT,
     arhmm: HMMModel[AREmissions[LinearGaussian]],
     covariance_floor: float,
-) -> Model[GaussianEmissions]:
+) -> Model[EmissionsT]:
     """
     Construct an SLDS from a lag-1 Gaussian AR-HMM over latent values.
 
@@ -148,29 +148,15 @@ def _initialize_pca_arhmm(
     num_states: int,
     latent_dim: int,
     self_transition_prob: float,
-    covariance_floor: float,
-) -> tuple[
-    jax.Array,
-    GaussianEmissions,
-    HMMModel[AREmissions[LinearGaussian]],
-]:
-    """Initialize PCA latents, Gaussian emissions, and a lag-1 AR-HMM."""
+) -> tuple[jax.Array, HMMModel[AREmissions[LinearGaussian]]]:
+    """Initialize PCA latents and a lag-1 AR-HMM."""
     _validate_initialization(
         observations,
         num_states,
         latent_dim,
     )
 
-    latents = pca_latents(
-        observations,
-        latent_dim,
-    )
-
-    emissions = gaussian_emissions_from_latents(
-        observations,
-        latents,
-        covariance_floor,
-    )
+    latents = pca_latents(observations, latent_dim)
 
     arhmm = init_gaussian_ar(
         key=key,
@@ -180,7 +166,7 @@ def _initialize_pca_arhmm(
         self_transition_prob=self_transition_prob,
     )
 
-    return latents, emissions, arhmm
+    return latents, arhmm
 
 
 def init_pca_gaussian(
@@ -200,12 +186,17 @@ def init_pca_gaussian(
     initializer to obtain state-specific linear dynamics, without running
     AR-HMM EM.
     """
-    latents, emissions, arhmm = _initialize_pca_arhmm(
+    latents, arhmm = _initialize_pca_arhmm(
         key=key,
         observations=observations,
         num_states=num_states,
         latent_dim=latent_dim,
         self_transition_prob=self_transition_prob,
+    )
+
+    emissions = GaussianEmissions.from_latents(
+        latents=latents,
+        observations=observations,
         covariance_floor=covariance_floor,
     )
 
@@ -237,12 +228,17 @@ def init_arhmm_gaussian(
     SLDS. State occupancies across the fitted latent trajectory initialize the
     boundary distributions of ``z[0]`` and ``x[0] | z[0]``.
     """
-    latents, emissions, arhmm = _initialize_pca_arhmm(
+    latents, arhmm = _initialize_pca_arhmm(
         key=key,
         observations=observations,
         num_states=num_states,
         latent_dim=latent_dim,
         self_transition_prob=self_transition_prob,
+    )
+
+    emissions = GaussianEmissions.from_latents(
+        latents=latents,
+        observations=observations,
         covariance_floor=covariance_floor,
     )
 

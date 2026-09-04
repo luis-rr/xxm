@@ -12,7 +12,7 @@ from .core import Model
 
 
 def to_chain(
-    model: Model,
+    model: Model[QuadraticEmissionsT] | Model[LaplaceEmissionsT],
     num_steps: int,
 ) -> Chain:
     """Construct the Gaussian chain defined by the latent LDS prior."""

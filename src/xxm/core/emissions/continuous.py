@@ -35,6 +35,9 @@ class Emissions(typing.Protocol):
     ) -> typing.Self: ...
 
 
+EmissionsT = typing.TypeVar('EmissionsT', bound=Emissions)
+
+
 class QuadraticEmissions(Emissions, typing.Protocol):
     """Emissions with a quadratic log-likelihood, so that the posterior is Gaussian."""
 
@@ -143,6 +146,23 @@ class GaussianEmissions(typing.NamedTuple):
             ),
         )
 
+    @classmethod
+    def from_latents(
+        cls,
+        latents: jax.Array,
+        observations: jax.Array,
+        covariance_floor: float,
+    ) -> typing.Self:
+        """Fit Gaussian emissions to a known latent trajectory."""
+        model = gaussian_fit.linear_from_pairs(
+            latents,
+            observations,
+        )
+
+        model = model.add_covariance_jitter(covariance_floor)
+
+        return cls(model)
+
 
 class PoissonEmissions(typing.NamedTuple):
     """Linear Poisson emissions for continuous latent variables."""
@@ -243,3 +263,36 @@ class PoissonEmissions(typing.NamedTuple):
                 alignment.inverse(),
             ),
         )
+
+    @classmethod
+    def from_latents(
+        cls,
+        latents: jax.Array,
+        observations: jax.Array,
+    ) -> typing.Self:
+        """Fit Poisson emissions to a known latent trajectory."""
+
+        observation_dim = observations.shape[1]
+        latent_dim = latents.shape[1]
+
+        # Sensible intercept-only starting point.
+        mean_rates = jnp.maximum(
+            jnp.mean(observations, axis=0),
+            1e-6,
+        )
+
+        initial_affine = Affine(
+            coefficients=jnp.zeros(
+                (observation_dim, latent_dim),
+                dtype=latents.dtype,
+            ),
+            bias=jnp.log(mean_rates),
+        )
+
+        model = poisson_fit.linear_from_pairs(
+            outputs=observations,
+            inputs=latents,
+            initial_affine=initial_affine,
+        )
+
+        return cls(model)

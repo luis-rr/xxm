@@ -29,6 +29,46 @@ class GaussianInitial(typing.NamedTuple):
         """Express the latent initial distribution in aligned coordinates."""
         return self._replace(model=self.model.affine(alignment))
 
+    @classmethod
+    def from_latents(
+        cls,
+        latents: jax.Array,
+        covariance_floor: float = 1e-2,
+    ) -> typing.Self:
+        """Construct an LDS from a known latent trajectory."""
+
+        def _covariance(
+            values: jax.Array,
+        ) -> jax.Array:
+            centered = values - jnp.mean(values, axis=0)
+            return centered.T @ centered / values.shape[0]
+
+        def _add_covariance_floor(
+            covariance: jax.Array,
+            covariance_floor: float,
+            reference: jax.Array,
+        ) -> jax.Array:
+            """Add an isotropic floor relative to the typical variance of a reference."""
+            scale = jnp.mean(jnp.var(reference, axis=0))
+
+            return covariance + covariance_floor * scale * jnp.eye(
+                covariance.shape[0],
+                dtype=covariance.dtype,
+            )
+
+        # There is only one initial latent estimate, so use the overall
+        # latent covariance as a reasonable scale for its uncertainty.
+        return cls(
+            Gaussian(
+                mean=latents[0],
+                covariance=_add_covariance_floor(
+                    _covariance(latents),
+                    covariance_floor,
+                    reference=latents,
+                ),
+            )
+        )
+
 
 class GaussianLinearDynamics(typing.NamedTuple):
     model: LinearGaussian  # no batch
@@ -103,6 +143,22 @@ class GaussianLinearDynamics(typing.NamedTuple):
         return self._replace(
             model=(self.model.compose_input(inverse).compose_output(alignment)),
         )
+
+    @classmethod
+    def from_latents(
+        cls,
+        latents: jax.Array,
+        covariance_floor: float,
+    ) -> typing.Self:
+        """Fit linear dynamics to a known latent trajectory."""
+        model = gaussian_fit.linear_from_pairs(
+            latents[:-1],
+            latents[1:],
+        )
+
+        model = model.add_covariance_jitter(covariance_floor)
+
+        return cls(model)
 
 
 class StateConditionedGaussian(typing.NamedTuple):
