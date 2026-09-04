@@ -3,6 +3,7 @@ import typing
 import jax
 from jax import numpy as jnp
 
+from xxm.core.affine import Affine
 from xxm.core.chains.gaussian import GaussianPotential
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.optim import gaussian as gaussian_fit
@@ -23,6 +24,10 @@ class GaussianInitial(typing.NamedTuple):
 
     def sample(self, key: jax.Array) -> jax.Array:
         return self.model.sample(key)
+
+    def align(self, alignment: Affine) -> typing.Self:
+        """Express the latent initial distribution in aligned coordinates."""
+        return self._replace(model=self.model.affine(alignment))
 
 
 class GaussianLinearDynamics(typing.NamedTuple):
@@ -91,6 +96,14 @@ class GaussianLinearDynamics(typing.NamedTuple):
             axis=0,
         )
 
+    def align(self, alignment: Affine) -> typing.Self:
+        """Express the latent dynamics in aligned coordinates."""
+        inverse = alignment.inverse()
+
+        return self._replace(
+            model=(self.model.compose_input(inverse).compose_output(alignment)),
+        )
+
 
 class StateConditionedGaussian(typing.NamedTuple):
     """Gaussian distribution conditioned on a discrete state."""
@@ -122,10 +135,8 @@ class StateConditionedGaussian(typing.NamedTuple):
         """Sample conditional on the given discrete state."""
         return self.conditional(state).sample(key)
 
-    def permute(
-        self,
-        permutation: jax.Array,
-    ) -> typing.Self:
-        return self._replace(
-            model=self.model.select(permutation),
-        )
+    def permute(self, permutation: jax.Array) -> typing.Self:
+        return self._replace(model=self.model.select(permutation))
+
+    def align(self, alignment: Affine) -> typing.Self:
+        return self._replace(model=self.model.affine(alignment))

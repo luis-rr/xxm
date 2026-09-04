@@ -3,6 +3,7 @@ import typing
 import jax
 import jax.numpy as jnp
 
+from xxm.core.affine import Affine
 from xxm.core.chains.discrete import DiscreteChain, DiscreteChainMarginals
 from xxm.core.chains.gaussian import (
     GaussianChainMarginals,
@@ -31,6 +32,12 @@ class Posterior(typing.NamedTuple):
             continuous_log_normalizer
             + self.discrete.expected_log_potential(discrete_prior)
             + self.discrete.entropy()
+        )
+
+    def permute(self, permutation: jax.Array) -> typing.Self:
+        """Relabel the discrete latent states."""
+        return self._replace(
+            discrete=self.discrete.permute(permutation),
         )
 
 
@@ -143,8 +150,17 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         )
 
     def permute(self, permutation: jax.Array) -> typing.Self:
+        """Express the states in a reordered coordinate system."""
         return self._replace(
             model=self.model.select(permutation),
+        )
+
+    def align(self, alignment: Affine) -> typing.Self:
+        """Express the latent dynamics in aligned coordinates."""
+        inverse = alignment.inverse()
+
+        return self._replace(
+            model=(self.model.compose_input(inverse).compose_output(alignment)),
         )
 
 
@@ -229,4 +245,27 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
             transitions=self.transitions.permute(permutation),
             latent_initial=self.latent_initial.permute(permutation),
             dynamics=self.dynamics.permute(permutation),
+        )
+
+    def align(
+        self,
+        alignment: Affine,
+    ) -> typing.Self:
+        latent_dim = self.dynamics.model.output_dim
+
+        if alignment.batch_shape:
+            raise ValueError('SLDS latent alignment must be unbatched')
+
+        if alignment.input_shape != (latent_dim,) or alignment.output_dim != latent_dim:
+            raise ValueError(
+                'SLDS latent alignment requires an affine map '
+                f'({latent_dim},) -> ({latent_dim},), '
+                f'got {alignment.input_shape} -> '
+                f'({alignment.output_dim},)'
+            )
+
+        return self._replace(
+            latent_initial=self.latent_initial.align(alignment),
+            dynamics=self.dynamics.align(alignment),
+            emissions=self.emissions.compose_input(alignment),
         )

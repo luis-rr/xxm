@@ -156,3 +156,84 @@ class Affine(typing.NamedTuple):
             coefficients=self.coefficients[index],
             bias=self.bias[index],
         )
+
+    def compose(
+        self,
+        inner: typing.Self,
+    ) -> typing.Self:
+        """Compose affine maps as ``self(inner(x))``."""
+        if self.input_shape != (inner.output_dim,):
+            raise ValueError(
+                'affine composition requires the outer input shape '
+                f'{self.input_shape} to match the inner output dimension '
+                f'({inner.output_dim},)'
+            )
+
+        coefficients = jnp.einsum(
+            '...oi,...ij->...oj',
+            self.coefficients_flat,
+            inner.coefficients_flat,
+        )
+
+        bias = (
+            jnp.einsum(
+                '...oi,...i->...o',
+                self.coefficients_flat,
+                inner.bias,
+            )
+            + self.bias
+        )
+
+        batch_shape = jnp.broadcast_shapes(
+            self.batch_shape,
+            inner.batch_shape,
+        )
+
+        return self.__class__(
+            coefficients=coefficients.reshape(
+                batch_shape
+                + (
+                    self.output_dim,
+                    *inner.input_shape,
+                )
+            ),
+            bias=bias,
+        )
+
+    def inverse(self) -> typing.Self:
+        """Return the inverse of a square vector-to-vector affine map."""
+        if self.input_shape != (self.output_dim,):
+            raise ValueError(
+                'affine inversion requires a square vector-to-vector map, '
+                f'got {self.input_shape} -> ({self.output_dim},)'
+            )
+
+        coefficients = jnp.linalg.inv(
+            self.coefficients_flat,
+        )
+
+        bias = -jnp.einsum(
+            '...oi,...i->...o',
+            coefficients,
+            self.bias,
+        )
+
+        return self.__class__(
+            coefficients=coefficients,
+            bias=bias,
+        )
+
+    def pseudoinverse(self) -> typing.Self:
+        """Return the Moore-Penrose pseudoinverse affine map."""
+        if self.input_ndim != 1:
+            raise ValueError(
+                'affine pseudoinverse requires vector-shaped input; '
+                f'got {self.input_shape}'
+            )
+
+        coefficients = jnp.linalg.pinv(self.coefficients)
+
+        return self.__class__(
+            coefficients=coefficients,
+            bias=-coefficients @ self.bias,
+        )

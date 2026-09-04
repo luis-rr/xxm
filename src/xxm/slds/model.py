@@ -60,12 +60,16 @@ class GaussianSLDS:
     def emissions(self) -> LinearGaussian:
         return self.model.emissions.model
 
-    def permute(
-        self,
-        permutation: jax.Array,
-    ) -> GaussianSLDS:
+    def permute(self, permutation: jax.Array) -> GaussianSLDS:
+        """Relabel the discrete latent states."""
         return self.__class__(
             model=self.model.permute(permutation),
+        )
+
+    def align(self, alignment: Affine) -> GaussianSLDS:
+        """Express the latent dynamics in aligned coordinates."""
+        return self.__class__(
+            model=self.model.align(alignment),
         )
 
     def most_likely_states(self, posterior: Posterior) -> jax.Array:

@@ -285,3 +285,35 @@ class LinearGaussian(typing.NamedTuple):
         return self._replace(
             covariance=self.covariance + jitter * identity,
         )
+
+    def compose_input(
+        self,
+        affine: Affine,
+    ) -> typing.Self:
+        """Precompose the conditional model with an affine input map."""
+        return self._replace(
+            affine=self.affine.compose(affine),
+        )
+
+    def compose_output(
+        self,
+        affine: Affine,
+    ) -> typing.Self:
+        """Postcompose the conditional output with an affine map."""
+        if affine.input_shape != (self.output_dim,):
+            raise ValueError(
+                'output affine input must match the model output dimension; '
+                f'expected {(self.output_dim,)}, got {affine.input_shape}'
+            )
+
+        covariance = jnp.einsum(
+            '...oi,...ij,...pj->...op',
+            affine.coefficients_flat,
+            self.covariance,
+            affine.coefficients_flat,
+        )
+
+        return self.__class__(
+            affine=affine.compose(self.affine),
+            covariance=covariance,
+        )

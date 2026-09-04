@@ -71,6 +71,22 @@ class GaussianLDS:
 
     model: Model[GaussianEmissions]
 
+    @property
+    def latent_dim(self) -> int:
+        return self.model.dynamics.model.output_dim
+
+    @property
+    def observation_dim(self) -> int:
+        return self.model.emissions.model.output_dim
+
+    @property
+    def dynamics(self) -> LinearGaussian:
+        return self.model.dynamics.model
+
+    @property
+    def emissions(self) -> LinearGaussian:
+        return self.model.emissions.model
+
     @classmethod
     def from_params(
         cls,
@@ -200,6 +216,12 @@ class GaussianLDS:
         """Return the posterior mean observation at each time point."""
         return self.model.emissions.observation_mean(posterior)
 
+    def align(self, alignment: Affine) -> typing.Self:
+        """Express the latent dynamics in aligned coordinates."""
+        return self.__class__(
+            model=self.model.align(alignment),
+        )
+
 
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, eq=False)
@@ -207,6 +229,22 @@ class PoissonLDS:
     """Linear dynamical system with Poisson emissions."""
 
     model: Model[PoissonEmissions]
+
+    @property
+    def latent_dim(self) -> int:
+        return self.model.dynamics.model.output_dim
+
+    @property
+    def observation_dim(self) -> int:
+        return self.model.emissions.model.output_dim
+
+    @property
+    def dynamics(self) -> LinearGaussian:
+        return self.model.dynamics.model
+
+    @property
+    def emissions(self) -> LinearPoisson:
+        return self.model.emissions.model
 
     @classmethod
     def from_params(
@@ -346,3 +384,9 @@ class PoissonLDS:
     def observation_mean(self, posterior: Posterior) -> jax.Array:
         """Return the posterior mean observation at each time point."""
         return self.model.emissions.observation_mean(posterior)
+
+    def align(self, alignment: Affine) -> typing.Self:
+        """Express the latent dynamics in aligned coordinates."""
+        return self.__class__(
+            model=self.model.align(alignment),
+        )

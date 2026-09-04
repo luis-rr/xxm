@@ -8,6 +8,7 @@ import jax
 from jax import numpy as jnp
 from jax.scipy import linalg as jsp_linalg
 
+from xxm.core.affine import Affine
 from xxm.core.chains.gaussian import GaussianChainMarginals as Posterior
 from xxm.core.chains.gaussian import (
     GaussianPairPotential,
@@ -152,4 +153,13 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
             initial=initial,
             dynamics=dynamics,
             emissions=emissions,
+        )
+
+    def align(self, alignment: Affine) -> typing.Self:
+        inverse = alignment.inverse()
+
+        return self._replace(
+            initial=self.initial.align(alignment),
+            dynamics=self.dynamics.align(alignment),
+            emissions=self.emissions.compose_input(inverse),
         )

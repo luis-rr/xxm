@@ -176,6 +176,13 @@ class DiscreteChainMarginals(typing.NamedTuple):
 
         return expected_initial + expected_transitions + expected_local
 
+    def permute(self, permutation: jax.Array) -> typing.Self:
+        """Relabel the discrete states."""
+        return self._replace(
+            state_probs=self.state_probs[:, permutation],
+            pair_probs=self.pair_probs[:, permutation, :][:, :, permutation],
+        )
+
 
 class _DiscreteChainMessages(typing.NamedTuple):
     r"""Normalized messages and per-step log normalizers for one chain."""

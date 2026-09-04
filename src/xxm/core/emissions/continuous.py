@@ -5,6 +5,7 @@ import typing
 import jax
 from jax import numpy as jnp
 
+from xxm.core.affine import Affine
 from xxm.core.chains.gaussian import GaussianPotential
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
@@ -27,6 +28,11 @@ class Emissions(typing.Protocol):
         observations: jax.Array,
         latents: jax.Array,
     ) -> jax.Array: ...
+
+    def compose_input(
+        self,
+        alignment: Affine,
+    ) -> typing.Self: ...
 
 
 class QuadraticEmissions(Emissions, typing.Protocol):
@@ -126,6 +132,17 @@ class GaussianEmissions(typing.NamedTuple):
             posterior.means,
         )
 
+    def compose_input(
+        self,
+        alignment: Affine,
+    ) -> typing.Self:
+        """Express the emissions in aligned latent coordinates."""
+        return self._replace(
+            model=self.model.compose_input(
+                alignment.inverse(),
+            ),
+        )
+
 
 class PoissonEmissions(typing.NamedTuple):
     """Linear Poisson emissions for continuous latent variables."""
@@ -214,4 +231,15 @@ class PoissonEmissions(typing.NamedTuple):
                 mean=posterior.means,
                 covariance=posterior.covariances,
             )
+        )
+
+    def compose_input(
+        self,
+        alignment: Affine,
+    ) -> typing.Self:
+        """Express the emissions in aligned latent coordinates."""
+        return self._replace(
+            model=self.model.compose_input(
+                alignment.inverse(),
+            ),
         )

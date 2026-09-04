@@ -180,3 +180,12 @@ class LinearPoisson(typing.NamedTuple):
             log_probs = weights[..., None] * log_probs
 
         return jnp.sum(log_probs)
+
+    def compose_input(
+        self,
+        affine: Affine,
+    ) -> typing.Self:
+        """Precompose the conditional model with an affine input map."""
+        return self._replace(
+            affine=self.affine.compose(affine),
+        )
