@@ -7,6 +7,7 @@ from xxm.core.emissions.continuous import (
     QuadraticEmissionsT,
 )
 from xxm.core.optim.laplace import laplace_inference
+from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
 
 from .core import Model
 
@@ -46,9 +47,7 @@ def infer_laplace(
     model: Model[LaplaceEmissionsT],
     observations: jax.Array,
     initial_latents: jax.Array | None = None,
-    max_iter: int = 20,
-    tol: float = 1e-6,
-    max_line_search_iters: int = 20,
+    params: OptimParams = DEFAULT_OPTIM_PARAMS,
 ) -> tuple[Posterior, jax.Array]:
     """
     Approximate the posterior over latents using Laplace inference.
@@ -61,6 +60,8 @@ def infer_laplace(
     The final Gaussian chain, evaluated at the converged mode, is returned
     as the Laplace approximation to p(x | y).
     """
+
+    params = params or OptimParams()
 
     num_steps = observations.shape[0]
 
@@ -79,7 +80,5 @@ def infer_laplace(
         emissions=model.emissions,
         observations=observations,
         initial_latents=latents,
-        max_iter=max_iter,
-        tol=tol,
-        max_line_search_iters=max_line_search_iters,
+        search_params=params,
     )

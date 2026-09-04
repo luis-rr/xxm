@@ -983,6 +983,44 @@ class _GaussianChainFactorization(typing.NamedTuple):
         return covariances, cross_covariances
 
 
+def _log_det(covariance: jax.Array) -> jax.Array:
+    cholesky = jnp.linalg.cholesky(covariance)
+
+    return 2.0 * jnp.sum(
+        jnp.log(
+            jnp.diagonal(
+                cholesky,
+                axis1=-2,
+                axis2=-1,
+            )
+        )
+    )
+
+
+def _conditional_log_det(
+    covariance: jax.Array,
+    next_covariance: jax.Array,
+    cross_covariance: jax.Array,
+) -> jax.Array:
+    cholesky = jnp.linalg.cholesky(
+        covariance,
+    )
+
+    solved = jsp_linalg.cho_solve(
+        (cholesky, True),
+        cross_covariance,
+    )
+
+    conditional_covariance = next_covariance - cross_covariance.T @ solved
+
+    # Remove small numerical asymmetries before Cholesky.
+    conditional_covariance = 0.5 * (conditional_covariance + conditional_covariance.T)
+
+    return _log_det(
+        conditional_covariance,
+    )
+
+
 class GaussianChainMarginals(typing.NamedTuple):
     r"""Marginal central moments of a Gaussian chain.
 
@@ -1014,6 +1052,29 @@ class GaussianChainMarginals(typing.NamedTuple):
         )
 
         return self.cross_covariances + extra
+
+    def entropy(self) -> jax.Array:
+        """Entropy of the Gaussian Markov-chain posterior."""
+
+        num_steps, variable_dim = self.means.shape
+
+        initial_log_det = _log_det(
+            self.covariances[0],
+        )
+
+        conditional_log_dets = jax.vmap(
+            _conditional_log_det,
+        )(
+            self.covariances[:-1],
+            self.covariances[1:],
+            self.cross_covariances,
+        )
+
+        joint_log_det = initial_log_det + jnp.sum(conditional_log_dets)
+
+        joint_dim = num_steps * variable_dim
+
+        return 0.5 * (joint_dim * (1.0 + jnp.log(2.0 * jnp.pi)) + joint_log_det)
 
 
 def _solve_from_cholesky(

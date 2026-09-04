@@ -7,6 +7,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS
 from xxm.hmm.init import (
     init_gaussian,
     init_gaussian_ar,
@@ -93,7 +94,10 @@ MODEL_CASES = [
     ModelCase(
         name='lds-poisson',
         initialize=initialize_lds_poisson,
-        em_step=lds_laplace_em_step,
+        em_step=partial(
+            lds_laplace_em_step,
+            params=DEFAULT_OPTIM_PARAMS,
+        ),
         observations=POISSON_OBSERVATIONS,
         init_kwargs={'latent_dim': 1},
     ),
@@ -156,7 +160,6 @@ def test_em_step_jittable(case):
         model,
         case.observations,
     )
-
     jit_model, jit_objective = jax.jit(case.em_step)(
         model,
         case.observations,

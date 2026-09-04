@@ -8,7 +8,7 @@ from xxm.core.emissions.continuous import (
     LaplaceEmissions,
     LaplaceEmissionsT,
 )
-from xxm.core.optim.newton import NewtonSearch
+from xxm.core.optim.newton import NewtonSearch, OptimParams
 
 
 class _NewtonSearchParams(typing.NamedTuple):
@@ -86,9 +86,7 @@ def laplace_inference(
     emissions: LaplaceEmissions,
     observations: jax.Array,
     initial_latents: jax.Array,
-    max_iter: int = 20,
-    max_line_search_iters: int = 20,
-    tol: float = 1e-6,
+    search_params: OptimParams,
 ) -> tuple[GaussianChainMarginals, jax.Array]:
     """
     Approximate the posterior over latents using Laplace inference.
@@ -102,16 +100,9 @@ def laplace_inference(
     as the Laplace approximation to p(x | y).
     """
 
-    if max_iter < 1:
-        raise ValueError('max_iter must be at least 1')
-
-    if tol <= 0.0:
-        raise ValueError('tol must be positive')
-
-    if max_line_search_iters < 0:
-        raise ValueError('max_line_search_iters must be non-negative')
-
     latents = initial_latents
+
+    search_params.validate()
 
     newton_model = _NewtonSearchModel(
         latent_chain=chain,
@@ -125,11 +116,10 @@ def laplace_inference(
 
     search = NewtonSearch[_NewtonSearchParams](
         model=newton_model,
-        max_line_search_iters=max_line_search_iters,
-        tol=tol,
+        optim_params=search_params,
     )
 
-    final = search.optimize(params=initial_params, max_iter=max_iter)
+    final = search.optimize(params=initial_params)
 
     latents = final.params.latents
 

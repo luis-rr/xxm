@@ -12,7 +12,7 @@ from xxm.core.optim.laplace import (
     _NewtonSearchModel,
     _NewtonSearchParams,
 )
-from xxm.core.optim.newton import NewtonSearch
+from xxm.core.optim.newton import NewtonSearch, OptimParams
 from xxm.lds.core import Model
 from xxm.lds.inference import (
     infer_exact,
@@ -87,8 +87,11 @@ def test_laplace_newton_steps_do_not_decrease_objective():
 
     search = NewtonSearch[_NewtonSearchParams](
         model=laplace_model,
-        max_line_search_iters=10,
-        tol=1e-6,
+        optim_params=OptimParams(
+            max_line_search_iters=10,
+            tol=1e-6,
+            max_iter=100,
+        ),
     )
 
     state = search.initial_state(params=initial_params)

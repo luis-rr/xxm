@@ -6,6 +6,7 @@ from xxm.core.dists.gaussian import LinearGaussian
 from xxm.core.emissions.continuous import (
     EmissionsT,
     GaussianEmissions,
+    PoissonEmissions,
 )
 from xxm.core.emissions.discrete_ar import AREmissions
 from xxm.core.models.discrete import CategoricalInitial
@@ -240,6 +241,81 @@ def init_arhmm_gaussian(
         latents=latents,
         observations=observations,
         covariance_floor=covariance_floor,
+    )
+
+    arhmm = fit_hmm(
+        arhmm,
+        latents,
+        num_iters=num_arhmm_iters,
+        progress=progress,
+    ).model
+
+    return _from_arhmm(
+        latents=latents,
+        emissions=emissions,
+        arhmm=arhmm,
+        covariance_floor=covariance_floor,
+    )
+
+
+def init_pca_poisson(
+    key: jax.Array,
+    observations: jax.Array,
+    num_states: int,
+    latent_dim: int,
+    *,
+    self_transition_prob: float = 0.9,
+    covariance_floor: float = 1e-2,
+) -> Model[PoissonEmissions]:
+    """
+    Initialize a Poisson SLDS from a PCA latent representation.
+    """
+    latents, arhmm = _initialize_pca_arhmm(
+        key=key,
+        observations=observations,
+        num_states=num_states,
+        latent_dim=latent_dim,
+        self_transition_prob=self_transition_prob,
+    )
+
+    emissions = PoissonEmissions.from_latents(
+        latents=latents,
+        observations=observations,
+    )
+
+    return _from_arhmm(
+        latents=latents,
+        emissions=emissions,
+        arhmm=arhmm,
+        covariance_floor=covariance_floor,
+    )
+
+
+def init_arhmm_poisson(
+    key: jax.Array,
+    observations: jax.Array,
+    num_states: int,
+    latent_dim: int,
+    *,
+    num_arhmm_iters: int = 10,
+    self_transition_prob: float = 0.9,
+    covariance_floor: float = 1e-2,
+    progress: bool | str = 'AR-HMM',
+) -> Model[PoissonEmissions]:
+    """
+    Initialize a Poisson SLDS by fitting an AR-HMM to PCA latents.
+    """
+    latents, arhmm = _initialize_pca_arhmm(
+        key=key,
+        observations=observations,
+        num_states=num_states,
+        latent_dim=latent_dim,
+        self_transition_prob=self_transition_prob,
+    )
+
+    emissions = PoissonEmissions.from_latents(
+        latents=latents,
+        observations=observations,
     )
 
     arhmm = fit_hmm(

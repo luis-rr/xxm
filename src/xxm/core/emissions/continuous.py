@@ -6,7 +6,7 @@ import jax
 from jax import numpy as jnp
 
 from xxm.core.affine import Affine
-from xxm.core.chains.gaussian import GaussianPotential
+from xxm.core.chains.gaussian import GaussianChainMarginals, GaussianPotential
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
 from xxm.core.optim import gaussian as gaussian_fit
@@ -39,12 +39,30 @@ EmissionsT = typing.TypeVar('EmissionsT', bound=Emissions)
 
 
 class QuadraticEmissions(Emissions, typing.Protocol):
-    """Emissions with a quadratic log-likelihood, so that the posterior is Gaussian."""
+    r"""
+    Emissions with a likelihood that is quadratic in the latent variables.
+
+    The observation log likelihood can be represented exactly as a Gaussian
+    potential in ``x``, so continuous latent inference remains conjugate.
+    """
 
     def compute_potential(
         self,
         observations: jax.Array,
-    ) -> GaussianPotential: ...
+    ) -> GaussianPotential:
+        r"""
+        Construct the exact Gaussian likelihood potential.
+
+        Returns a potential representing
+
+        .. math::
+
+            \log p(y \mid x)
+
+        as a quadratic function of the latent variables. Unlike Laplace
+        emissions, no expansion point or local approximation is required.
+        """
+        ...
 
 
 QuadraticEmissionsT = typing.TypeVar(
@@ -54,13 +72,51 @@ QuadraticEmissionsT = typing.TypeVar(
 
 
 class LaplaceEmissions(Emissions, typing.Protocol):
-    """Emissions that provide a local quadratic approximation for a latent."""
+    r"""
+    Emissions supporting Laplace updates and ELBO evaluation.
+
+    The likelihood need not be conjugate to a Gaussian latent posterior, but it
+    must admit a local quadratic approximation and an expectation under
+    Gaussian latent marginals.
+    """
 
     def compute_local_potential(
         self,
         observations: jax.Array,
         latents: jax.Array,
-    ) -> GaussianPotential: ...
+    ) -> GaussianPotential:
+        r"""
+        Construct the local Gaussian likelihood potential at ``latents``.
+
+        Returns the quadratic approximation to
+
+        .. math::
+
+            \log p(y \mid x)
+
+        obtained from its value, gradient, and Hessian at the supplied latent
+        trajectory. This potential is used to form the Gaussian Laplace update.
+        """
+        ...
+
+    def expected_log_likelihood(
+        self,
+        observations: jax.Array,
+        posterior: GaussianChainMarginals,
+    ) -> jax.Array:
+        r"""
+        Evaluate the expected log likelihood under Gaussian latent marginals.
+
+        Computes
+
+        .. math::
+
+            \mathbb{E}_{q(x)}[\log p(y \mid x)],
+
+        where ``q(x)`` is represented by ``posterior``. The expectation may be
+        evaluated analytically or numerically by the emission implementation.
+        """
+        ...
 
 
 LaplaceEmissionsT = typing.TypeVar(
@@ -190,6 +246,21 @@ class PoissonEmissions(typing.NamedTuple):
     ) -> jax.Array:  # ()
         """Compute the total conditional log likelihood."""
         return jnp.sum(self.conditional(latents).log_prob(observations))
+
+    def expected_log_likelihood(
+        self,
+        observations: jax.Array,
+        posterior: ContinuousPosterior,
+    ) -> jax.Array:
+        """Expected conditional log likelihood under Gaussian latent marginals."""
+
+        return self.model.expected_log_prob(
+            values=observations,
+            inputs=Gaussian(
+                mean=posterior.means,
+                covariance=posterior.covariances,
+            ),
+        )
 
     def compute_local_potential(
         self,

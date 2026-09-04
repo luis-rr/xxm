@@ -18,13 +18,24 @@ from xxm.core.chains.gaussian import (
 from xxm.core.chains.gaussian import (
     GaussianChainMarginals as ContinuousPosterior,
 )
-from xxm.core.emissions.continuous import QuadraticEmissionsT
+from xxm.core.emissions.continuous import (
+    EmissionsT,
+    LaplaceEmissionsT,
+    QuadraticEmissionsT,
+)
+from xxm.core.optim.laplace import laplace_inference
+from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
 
 from .core import Model, Posterior
 
 
-class ContinuousFactors(typing.NamedTuple):
-    """Non-switching observation factors of the SLDS."""
+class Inferred(typing.NamedTuple):
+    posterior: Posterior
+    objective: jax.Array
+
+
+class QuadraticContinuousFactors(typing.NamedTuple):
+    """Non-switching quadratic observation factors of the SLDS."""
 
     observations: GaussianPotential
 
@@ -34,7 +45,9 @@ class ContinuousFactors(typing.NamedTuple):
         model: Model[QuadraticEmissionsT],
         observations: jax.Array,
     ) -> typing.Self:
-        return cls(observations=model.emissions.compute_potential(observations))
+        return cls(
+            observations=model.emissions.compute_potential(observations),
+        )
 
     def infer(
         self,
@@ -42,14 +55,62 @@ class ContinuousFactors(typing.NamedTuple):
         dynamics_potential: GaussianPairPotential,
     ) -> tuple[ContinuousPosterior, jax.Array]:
         """Infer q(x) from expected initial and dynamics potentials."""
+
         chain = GaussianChain.from_pair_potentials(
             initial_potential,
             dynamics_potential,
         )
 
-        chain = chain.add_local_potential(self.observations)
+        chain = chain.add_local_potential(
+            self.observations,
+        )
 
         return chain.forward_backward()
+
+
+class LaplaceContinuousFactors(
+    typing.NamedTuple,
+    typing.Generic[LaplaceEmissionsT],
+):
+    """Non-switching non-conjugate observation factors of the SLDS."""
+
+    emissions: LaplaceEmissionsT
+    observations: jax.Array
+    search_params: OptimParams
+
+    @classmethod
+    def from_model(
+        cls,
+        model: Model[LaplaceEmissionsT],
+        observations: jax.Array,
+        search_params: OptimParams,
+    ) -> typing.Self:
+        return cls(
+            emissions=model.emissions,
+            observations=observations,
+            search_params=search_params,
+        )
+
+    def infer(
+        self,
+        initial_potential: GaussianPotential,
+        dynamics_potential: GaussianPairPotential,
+        initial_latents: jax.Array,
+    ) -> tuple[ContinuousPosterior, jax.Array]:
+        """Infer q(x) using a local Laplace approximation."""
+
+        chain = GaussianChain.from_pair_potentials(
+            initial_potential,
+            dynamics_potential,
+        )
+
+        return laplace_inference(
+            chain=chain,
+            emissions=self.emissions,
+            observations=self.observations,
+            initial_latents=initial_latents,
+            search_params=self.search_params,
+        )
 
 
 class DiscreteFactors(typing.NamedTuple):
@@ -60,7 +121,7 @@ class DiscreteFactors(typing.NamedTuple):
     @classmethod
     def from_model(
         cls,
-        model: Model[QuadraticEmissionsT],
+        model: Model[EmissionsT],
         num_steps: int,
     ) -> typing.Self:
         transition_probs = model.transitions.model.broadcast((num_steps - 1,)).probs
@@ -96,7 +157,7 @@ class SwitchingFactors(typing.NamedTuple):
     dynamics_potential: GaussianPairPotential  # (K,)
 
     @classmethod
-    def from_model(cls, model: Model[QuadraticEmissionsT]) -> typing.Self:
+    def from_model(cls, model: Model[EmissionsT]) -> typing.Self:
         return cls(
             initial_potential=model.latent_initial.compute_potentials(),
             dynamics_potential=model.dynamics.compute_pair_potentials(),
@@ -144,55 +205,82 @@ class SwitchingFactors(typing.NamedTuple):
         )
 
 
-def infer_variational(
-    model: Model[QuadraticEmissionsT],
-    observations: jax.Array,
-    num_iters: int,
-) -> tuple[Posterior, jax.Array]:
-    """Run structured mean-field inference for the SLDS."""
-    num_steps = observations.shape[0]
+class QuadraticVI(typing.NamedTuple):
+    switching: SwitchingFactors
+    continuous: QuadraticContinuousFactors
+    discrete: DiscreteFactors
 
-    switching_factors = SwitchingFactors.from_model(
-        model,
-    )
+    @classmethod
+    def from_model(
+        cls,
+        model: Model[QuadraticEmissionsT],
+        observations: jax.Array,
+    ) -> typing.Self:
+        num_steps = observations.shape[0]
 
-    continuous_factors = ContinuousFactors.from_model(
-        model,
-        observations,
-    )
-
-    discrete_factors = DiscreteFactors.from_model(
-        model,
-        num_steps,
-    )
+        return cls(
+            switching=SwitchingFactors.from_model(model),
+            continuous=QuadraticContinuousFactors.from_model(
+                model,
+                observations,
+            ),
+            discrete=DiscreteFactors.from_model(model, num_steps),
+        )
 
     def infer_continuous(
+        self,
         discrete_posterior: DiscretePosterior,
     ) -> tuple[ContinuousPosterior, jax.Array]:
-        initial_potential, dynamics_potential = switching_factors.continuous_potentials(
+
+        initial_potential, dynamics_potential = self.switching.continuous_potentials(
             discrete_posterior
         )
 
-        return continuous_factors.infer(
+        return self.continuous.infer(
             initial_potential,
             dynamics_potential,
         )
 
-    def step(_, discrete_posterior):
-        """Perform one coordinate-ascent update of q(x) and q(z)."""
-        continuous_posterior, _ = infer_continuous(
-            discrete_posterior,
-        )
-
-        discrete_posterior = discrete_factors.infer(
-            switching_factors.discrete_potential(
+    def infer_discrete(
+        self,
+        continuous_posterior: ContinuousPosterior,
+    ) -> DiscretePosterior:
+        return self.discrete.infer(
+            self.switching.discrete_potential(
                 continuous_posterior,
             )
         )
 
+
+def _quadratic_elbo(
+    discrete_posterior: DiscretePosterior,
+    continuous_log_normalizer: jax.Array,
+    discrete_prior: DiscreteChain,
+) -> jax.Array:
+    """Evidence lower bound for the structured SLDS posterior."""
+    return (
+        continuous_log_normalizer
+        + discrete_posterior.expected_log_potential(discrete_prior)
+        + discrete_posterior.entropy()
+    )
+
+
+def infer_variational(
+    model: Model[QuadraticEmissionsT],
+    observations: jax.Array,
+    num_iters: int,
+) -> Inferred:
+    """Run structured mean-field inference for the SLDS."""
+    inference = QuadraticVI.from_model(model, observations)
+
+    def step(_, discrete_posterior):
+        """Perform one coordinate-ascent update of q(x) and q(z)."""
+        continuous_posterior, _ = inference.infer_continuous(discrete_posterior)
+        discrete_posterior = inference.infer_discrete(continuous_posterior)
+
         return discrete_posterior
 
-    discrete_posterior = discrete_factors.prior()
+    discrete_posterior = inference.discrete.prior()
 
     discrete_posterior = jax.lax.fori_loop(
         0,
@@ -201,7 +289,7 @@ def infer_variational(
         discrete_posterior,
     )
 
-    continuous_posterior, continuous_log_normalizer = infer_continuous(
+    continuous_posterior, continuous_log_normalizer = inference.infer_continuous(
         discrete_posterior,
     )
 
@@ -210,9 +298,181 @@ def infer_variational(
         continuous=continuous_posterior,
     )
 
-    elbo_value = posterior.elbo_from_chain(
+    elbo_value = _quadratic_elbo(
+        discrete_posterior=discrete_posterior,
         continuous_log_normalizer=continuous_log_normalizer,
-        discrete_prior=discrete_factors.chain,
+        discrete_prior=inference.discrete.chain,
     )
 
-    return posterior, elbo_value
+    return Inferred(posterior, elbo_value)
+
+
+class LaplaceState(typing.NamedTuple):
+    discrete: DiscretePosterior
+    latents: jax.Array
+
+
+class LaplaceVI(typing.NamedTuple):
+    switching: SwitchingFactors
+    continuous: LaplaceContinuousFactors
+    discrete: DiscreteFactors
+
+    @classmethod
+    def from_model(
+        cls,
+        model: Model[LaplaceEmissionsT],
+        observations: jax.Array,
+        search_params: OptimParams,
+    ) -> typing.Self:
+        num_steps = observations.shape[0]
+        return cls(
+            switching=SwitchingFactors.from_model(
+                model,
+            ),
+            continuous=LaplaceContinuousFactors.from_model(
+                model,
+                observations,
+                search_params=search_params,
+            ),
+            discrete=DiscreteFactors.from_model(
+                model,
+                num_steps,
+            ),
+        )
+
+    def infer_continuous(
+        self, state: LaplaceState
+    ) -> tuple[ContinuousPosterior, jax.Array]:
+
+        initial_potential, dynamics_potential = self.switching.continuous_potentials(
+            state.discrete,
+        )
+
+        return self.continuous.infer(
+            initial_potential,
+            dynamics_potential,
+            initial_latents=state.latents,
+        )
+
+    def infer_discrete(
+        self,
+        continuous_posterior: ContinuousPosterior,
+    ) -> DiscretePosterior:
+
+        return self.discrete.infer(
+            self.switching.discrete_potential(
+                continuous_posterior,
+            )
+        )
+
+    def initial_latents(self, discrete_posterior: DiscretePosterior) -> jax.Array:
+        initial_potential, dynamics_potential = self.switching.continuous_potentials(
+            discrete_posterior,
+        )
+
+        prior_chain = GaussianChain.from_pair_potentials(
+            initial_potential,
+            dynamics_potential,
+        )
+
+        prior_posterior, _ = prior_chain.forward_backward()
+
+        return prior_posterior.means
+
+    def initial_state(self, initial_latents: jax.Array | None = None) -> LaplaceState:
+        discrete_posterior = self.discrete.prior()
+
+        if initial_latents is None:
+            initial_latents = self.initial_latents(discrete_posterior)
+
+        return LaplaceState(
+            discrete=discrete_posterior,
+            latents=initial_latents,
+        )
+
+
+def _laplace_elbo(
+    model: Model[LaplaceEmissionsT],
+    observations: jax.Array,
+    continuous_posterior: ContinuousPosterior,
+    discrete_posterior: DiscretePosterior,
+    switching_factors: SwitchingFactors,
+    discrete_prior: DiscreteChain,
+) -> jax.Array:
+    """Evaluate the structured mean-field ELBO."""
+
+    latent_potential = switching_factors.discrete_potential(
+        continuous_posterior,
+    )
+
+    expected_latent_log_prob = jnp.sum(
+        discrete_posterior.state_probs * latent_potential.log_values
+    )
+
+    expected_observation_log_prob = model.emissions.expected_log_likelihood(
+        observations,
+        continuous_posterior,
+    )
+
+    expected_discrete_log_prob = discrete_posterior.expected_log_potential(
+        discrete_prior,
+    )
+
+    return (
+        expected_observation_log_prob
+        + expected_latent_log_prob
+        + expected_discrete_log_prob
+        + continuous_posterior.entropy()
+        + discrete_posterior.entropy()
+    )
+
+
+def infer_laplace(
+    model: Model[LaplaceEmissionsT],
+    observations: jax.Array,
+    num_iters: int,
+    initial_latents: jax.Array | None = None,
+    params: OptimParams = DEFAULT_OPTIM_PARAMS,
+) -> Inferred:
+    """Run structured mean-field inference with Laplace continuous updates."""
+
+    params = params or OptimParams()
+
+    inference = LaplaceVI.from_model(
+        model,
+        observations,
+        search_params=params,
+    )
+
+    def step(_, state: LaplaceState) -> LaplaceState:
+        """Perform one coordinate update of q(x) and q(z)."""
+
+        continuous_posterior, _ = inference.infer_continuous(state)
+
+        discrete_posterior = inference.infer_discrete(continuous_posterior)
+
+        return LaplaceState(
+            discrete=discrete_posterior,
+            latents=continuous_posterior.means,
+        )
+
+    state = inference.initial_state(initial_latents)
+
+    state: LaplaceState = jax.lax.fori_loop(0, num_iters, step, state)
+
+    continuous_posterior, _ = inference.infer_continuous(state)
+
+    return Inferred(
+        posterior=Posterior(
+            discrete=state.discrete,
+            continuous=continuous_posterior,
+        ),
+        objective=_laplace_elbo(
+            model=model,
+            observations=observations,
+            continuous_posterior=continuous_posterior,
+            discrete_posterior=state.discrete,
+            switching_factors=inference.switching,
+            discrete_prior=inference.discrete.chain,
+        ),
+    )

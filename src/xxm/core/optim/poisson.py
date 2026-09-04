@@ -6,7 +6,7 @@ import jax.numpy as jnp
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
-from xxm.core.optim.newton import NewtonSearch
+from xxm.core.optim.newton import NewtonSearch, OptimParams
 
 EPS: float = 1e-8
 
@@ -383,14 +383,14 @@ def _linear_from_moments(
 
     search = NewtonSearch[_NewtonSearchParams](
         model=model,
-        max_line_search_iters=max_line_search_iters,
-        tol=tol,
+        optim_params=OptimParams(
+            max_line_search_iters=max_line_search_iters,
+            tol=tol,
+            max_iter=max_iter,
+        ),
     )
 
-    final = search.optimize(
-        params=_NewtonSearchParams(centered_affine),
-        max_iter=max_iter,
-    )
+    final = search.optimize(params=_NewtonSearchParams(centered_affine))
 
     return LinearPoisson(
         affine=final.params.affine.shift(-center),

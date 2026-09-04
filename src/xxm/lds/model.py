@@ -18,6 +18,7 @@ from xxm.core.models.gaussian import (
     GaussianLinearDynamics,
 )
 from xxm.core.optim.loop import Fit, FitCollection
+from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
 
 from .core import Model
 from .inference import (
@@ -324,17 +325,13 @@ class PoissonLDS:
         observations: jax.Array,
         *,
         initial_latents: jax.Array | None = None,
-        max_iter: int = 20,
-        tol: float = 1e-6,
-        max_line_search_iters: int = 20,
+        laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
     ) -> tuple[Posterior, jax.Array]:
         return infer_laplace(
             self.model,
             observations,
             initial_latents=initial_latents,
-            max_iter=max_iter,
-            tol=tol,
-            max_line_search_iters=max_line_search_iters,
+            params=laplace_params,
         )
 
     def fit(
@@ -343,12 +340,14 @@ class PoissonLDS:
         *,
         num_iters: int,
         progress: bool | str = 'Laplace EM',
+        laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
     ) -> Fit[typing.Self]:
         fit = fit_laplace_em(
             self.model,
             observations,
             num_iters=num_iters,
             progress=progress,
+            laplace_params=laplace_params,
         )
 
         return Fit(
@@ -364,12 +363,14 @@ class PoissonLDS:
         *,
         num_iters: int,
         progress: bool | str = 'Multi-Laplace EM',
+        laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
     ) -> FitCollection[typing.Self]:
         fit = fit_laplace_em_many(
             tuple(model.model for model in models),
             observations,
             num_iters=num_iters,
             progress=progress,
+            laplace_params=laplace_params,
         )
 
         return FitCollection(

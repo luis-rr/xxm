@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core.affine import Affine
-from xxm.core.chains.discrete import DiscreteChain, DiscreteChainMarginals
+from xxm.core.chains.discrete import DiscreteChainMarginals
 from xxm.core.chains.gaussian import (
     GaussianChainMarginals,
     GaussianPairPotential,
@@ -21,18 +21,6 @@ class Posterior(typing.NamedTuple):
 
     discrete: DiscreteChainMarginals  # T discrete states
     continuous: GaussianChainMarginals  # T continuous latents
-
-    def elbo_from_chain(
-        self,
-        continuous_log_normalizer: jax.Array,
-        discrete_prior: DiscreteChain,
-    ) -> jax.Array:
-        """Evidence lower bound for the structured SLDS posterior."""
-        return (
-            continuous_log_normalizer
-            + self.discrete.expected_log_potential(discrete_prior)
-            + self.discrete.entropy()
-        )
 
     def permute(self, permutation: jax.Array) -> typing.Self:
         """Relabel the discrete latent states."""

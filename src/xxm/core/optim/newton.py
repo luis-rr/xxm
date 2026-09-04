@@ -38,10 +38,33 @@ class NewtonState(typing.NamedTuple, typing.Generic[FreeParamsT]):
     done: jax.Array
 
 
+@jax.tree_util.register_static
+class OptimParams(typing.NamedTuple):
+    """Parameters for damped Newton optimization."""
+
+    max_iter: int = 20
+    tol: float = 1e-6
+    max_line_search_iters: int = 20
+
+    def validate(self) -> None:
+        """Validate the parameters for Laplace inference."""
+
+        if self.max_iter < 1:
+            raise ValueError('max_iter must be at least 1')
+
+        if self.tol <= 0.0:
+            raise ValueError('tol must be positive')
+
+        if self.max_line_search_iters < 0:
+            raise ValueError('max_line_search_iters must be non-negative')
+
+
+DEFAULT_OPTIM_PARAMS = OptimParams()
+
+
 class NewtonSearch(typing.NamedTuple, typing.Generic[FreeParamsT]):
     model: Model[FreeParamsT]
-    max_line_search_iters: int
-    tol: float
+    optim_params: OptimParams
 
     def initial_state(
         self,
@@ -70,7 +93,7 @@ class NewtonSearch(typing.NamedTuple, typing.Generic[FreeParamsT]):
                 direction=direction,
                 current_objective=search_state.objective,
                 active=active,
-                max_iter=self.max_line_search_iters,
+                max_iter=self.optim_params.max_line_search_iters,
             )
         )
 
@@ -86,7 +109,7 @@ class NewtonSearch(typing.NamedTuple, typing.Generic[FreeParamsT]):
         relative_change = next_params.relative_change_from(search_state.params)
 
         next_done = search_state.done | (
-            active & ((relative_change <= self.tol) | ~accepted)
+            active & ((relative_change <= self.optim_params.tol) | ~accepted)
         )
 
         return NewtonState(
@@ -96,17 +119,17 @@ class NewtonSearch(typing.NamedTuple, typing.Generic[FreeParamsT]):
             done=next_done,
         )
 
-    def optimize(self, params: FreeParamsT, max_iter: int) -> NewtonState[FreeParamsT]:
+    def optimize(self, params: FreeParamsT) -> NewtonState[FreeParamsT]:
         """Iteratively refine Poisson readout parameters with damped Newton steps."""
         initial = self.initial_state(params)
-        return self._iterate(initial, max_iter)
+        return self._iterate(initial)
 
-    def _iterate(
-        self, initial: NewtonState[FreeParamsT], max_iter: int
-    ) -> NewtonState[FreeParamsT]:
+    def _iterate(self, initial: NewtonState[FreeParamsT]) -> NewtonState[FreeParamsT]:
 
         def should_continue(search_state: NewtonState[FreeParamsT]) -> jax.Array:
-            return (search_state.iteration < max_iter) & jnp.any(~search_state.done)
+            return (search_state.iteration < self.optim_params.max_iter) & jnp.any(
+                ~search_state.done
+            )
 
         return jax.lax.while_loop(
             should_continue,

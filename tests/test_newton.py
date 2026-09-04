@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from xxm.core.optim.newton import LineSearch, NewtonSearch
+from xxm.core.optim.newton import LineSearch, NewtonSearch, OptimParams
 
 
 class QuadraticParams(typing.NamedTuple):
@@ -79,11 +79,14 @@ def _run_search(
 ):
     search = NewtonSearch[QuadraticParams](
         model=model,
-        max_line_search_iters=max_line_search_iters,
-        tol=tol,
+        optim_params=OptimParams(
+            max_iter=max_iter,
+            max_line_search_iters=max_line_search_iters,
+            tol=tol,
+        ),
     )
 
-    return search.optimize(params=initial_params, max_iter=max_iter)
+    return search.optimize(params=initial_params)
 
 
 def test_newton_search_solves_scalar_quadratic():
