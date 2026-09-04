@@ -8,11 +8,13 @@ from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.continuous import PoissonEmissions
 from xxm.core.models.gaussian import GaussianInitial, GaussianLinearDynamics
+from xxm.core.optim.laplace import (
+    _NewtonSearchModel,
+    _NewtonSearchParams,
+)
 from xxm.core.optim.newton import NewtonSearch
 from xxm.lds.core import Model
 from xxm.lds.inference import (
-    _NewtonSearchModel,
-    _NewtonSearchParams,
     infer_exact,
     infer_laplace,
     to_chain,
