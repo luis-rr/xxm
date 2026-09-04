@@ -72,8 +72,12 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         second = posterior.continuous.raw_second_moments()
         cross = posterior.continuous.raw_cross_moments()
 
-        def fit_state(weights_k):
-            total = jnp.sum(weights_k)  # TODO: Define behavior for zero posterior mass.
+        def fit_state(weights_k, current_model):
+            true_total = jnp.sum(weights_k)
+
+            # Only used to make the candidate computation numerically defined.
+            # For total == 0 all weighted sums below are zero anyway.
+            total = jnp.where(true_total > 0, true_total, 1.0)
 
             input_mean = jnp.einsum('t,ti->i', weights_k, means[:-1]) / total
 
@@ -86,26 +90,31 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
             # raw_cross_moments[t] = E[x_t x_{t+1}^T],
             # while the fitter expects E[x_{t+1} x_t^T].
             output_input = (
-                jnp.einsum(
-                    't,tij->ij',
-                    weights_k,
-                    jnp.swapaxes(cross, -1, -2),
-                )
-                / total
+                jnp.einsum('t,tij->ij', weights_k, jnp.swapaxes(cross, -1, -2)) / total
             )
 
-            return gaussian_fit.linear_from_moments(
+            fitted_model = gaussian_fit.linear_from_moments(
                 input_mean=input_mean,
                 output_mean=output_mean,
                 input_second_moment=input_second,
                 output_second_moment=output_second,
                 output_input_moment=output_input,
+                ridge=1e-6,
+            )
+
+            return jax.tree.map(
+                lambda fitted, current: jnp.where(true_total > 0, fitted, current),
+                fitted_model,
+                current_model,
             )
 
         linear_gaussian = jax.vmap(
             fit_state,
-            in_axes=1,
-        )(weights)
+            in_axes=(1, 0),
+        )(
+            weights,
+            self.model,
+        )
 
         return self._replace(
             model=linear_gaussian,

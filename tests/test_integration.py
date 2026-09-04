@@ -1,5 +1,6 @@
 import typing
 from collections.abc import Callable
+from functools import partial
 
 import jax
 import jax.numpy as jnp
@@ -17,6 +18,8 @@ from xxm.lds.init import init_pca_gaussian as initialize_lds_gaussian
 from xxm.lds.init import init_pca_poisson as initialize_lds_poisson
 from xxm.lds.learning import em_step as lds_em_step
 from xxm.lds.learning import laplace_em_step as lds_laplace_em_step
+from xxm.slds.init import init_pca_gaussian as initialize_slds_gaussian
+from xxm.slds.learning import variational_em_step as slds_variational_em_step
 
 
 class ModelCase(typing.NamedTuple):
@@ -93,6 +96,20 @@ MODEL_CASES = [
         em_step=lds_laplace_em_step,
         observations=POISSON_OBSERVATIONS,
         init_kwargs={'latent_dim': 1},
+    ),
+    ModelCase(
+        name='slds-gaussian',
+        initialize=initialize_slds_gaussian,
+        em_step=partial(
+            slds_variational_em_step,
+            num_inference_iters=2,
+        ),
+        observations=GAUSSIAN_OBSERVATIONS,
+        init_kwargs={
+            'num_states': 2,
+            'latent_dim': 1,
+            'key': jax.random.key(0),
+        },
     ),
 ]
 
