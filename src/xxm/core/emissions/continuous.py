@@ -165,26 +165,39 @@ class GaussianEmissions(typing.NamedTuple):
 
     def fit_params(
         self,
-        observations: jax.Array,  # (T, N)
-        posterior: ContinuousPosterior,  # (T, D)
+        observations: jax.Array,
+        posterior: ContinuousPosterior,
     ) -> typing.Self:
         """Fit the emission parameters from Gaussian latent marginals."""
-        means = posterior.means  # (T, D)
-        second_moments = posterior.raw_second_moments()  # (T, D, D)
+        means = posterior.means
+        covariances = posterior.covariances
+
+        input_mean = jnp.mean(means, axis=0)
+        output_mean = jnp.mean(observations, axis=0)
+
+        input_residuals = means - input_mean
+        output_residuals = observations - output_mean
 
         num_samples = observations.shape[0]
 
-        model = gaussian_fit.linear_from_moments(
-            input_mean=jnp.mean(means, axis=0),
-            output_mean=jnp.mean(observations, axis=0),
-            input_second_moment=jnp.mean(second_moments, axis=0),
-            output_second_moment=(observations.T @ observations / num_samples),
-            output_input_moment=(observations.T @ means / num_samples),
+        input_covariance = (
+            jnp.mean(covariances, axis=0)
+            + input_residuals.T @ input_residuals / num_samples
         )
 
-        return self._replace(
-            model=model,
+        output_covariance = output_residuals.T @ output_residuals / num_samples
+
+        output_input_covariance = output_residuals.T @ input_residuals / num_samples
+
+        model = gaussian_fit.linear_from_centered_moments(
+            input_mean=input_mean,
+            output_mean=output_mean,
+            input_covariance=input_covariance,
+            output_covariance=output_covariance,
+            output_input_covariance=output_input_covariance,
         )
+
+        return self._replace(model=model)
 
     def observation_mean(self, posterior: ContinuousPosterior) -> jax.Array:
         return self.model.conditional_mean(

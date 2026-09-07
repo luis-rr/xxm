@@ -26,8 +26,8 @@ def from_samples(
 
 
 def from_samples_weighted(
-    values: jax.Array,  # (T, N)
-    weights: jax.Array,  # (T, ...)
+    values: jax.Array,
+    weights: jax.Array,
 ) -> Gaussian:
     """Fit one weighted Gaussian for each batch entry of ``weights``."""
     total = jnp.sum(weights, axis=0)
@@ -39,17 +39,26 @@ def from_samples_weighted(
         normalized,
         values,
     )
-    second_moment = jnp.einsum(
-        't...,ti,tj->...ij',
-        normalized,
-        values,
-        values,
+
+    batch_ndim = weights.ndim - 1
+
+    expanded_values = values.reshape(
+        (values.shape[0],) + (1,) * batch_ndim + (values.shape[-1],)
     )
 
-    covariance = second_moment - mean[..., :, None] * mean[..., None, :]
-    covariance = 0.5 * (covariance + jnp.swapaxes(covariance, -2, -1))
+    residuals = expanded_values - mean[None, ...]
 
-    return Gaussian(mean=mean, covariance=covariance)
+    covariance = jnp.einsum(
+        't...,t...i,t...j->...ij',
+        normalized,
+        residuals,
+        residuals,
+    )
+
+    return Gaussian(
+        mean=mean,
+        covariance=covariance,
+    )
 
 
 def from_samples_grouped(
@@ -156,41 +165,9 @@ def linear_from_centered_moments(
     )
 
 
-def linear_from_moments(
-    input_mean: jax.Array,
-    output_mean: jax.Array,
-    input_second_moment: jax.Array,
-    output_second_moment: jax.Array,
-    output_input_moment: jax.Array,
-    ridge: float = 0.0,
-) -> LinearGaussian:
-    r"""Fit from E[x], E[y], E[xxᵀ], E[yyᵀ], and E[yxᵀ]."""
-
-    input_covariance = (
-        input_second_moment - input_mean[..., :, None] * input_mean[..., None, :]
-    )
-
-    output_covariance = (
-        output_second_moment - output_mean[..., :, None] * output_mean[..., None, :]
-    )
-
-    output_input_covariance = (
-        output_input_moment - output_mean[..., :, None] * input_mean[..., None, :]
-    )
-
-    return linear_from_centered_moments(
-        input_mean=input_mean,
-        output_mean=output_mean,
-        input_covariance=input_covariance,
-        output_covariance=output_covariance,
-        output_input_covariance=output_input_covariance,
-        ridge=ridge,
-    )
-
-
 def linear_from_pairs(
-    inputs: jax.Array,  # (T, *input_shape)
-    outputs: jax.Array,  # (T, O)
+    inputs: jax.Array,
+    outputs: jax.Array,
     ridge: float = 0.0,
 ) -> LinearGaussian:
     """Fit a linear Gaussian model from paired samples."""
@@ -201,20 +178,22 @@ def linear_from_pairs(
     flat_inputs = inputs.reshape(
         inputs.shape[0],
         -1,
-    )  # (T, input_size)
+    )
+
+    input_mean = jnp.mean(flat_inputs, axis=0)
+    output_mean = jnp.mean(outputs, axis=0)
+
+    input_residuals = flat_inputs - input_mean
+    output_residuals = outputs - output_mean
 
     num_samples = inputs.shape[0]
 
-    model = linear_from_moments(
-        input_mean=jnp.mean(flat_inputs, axis=0),
-        output_mean=jnp.mean(outputs, axis=0),
-        input_second_moment=(
-            jnp.einsum('ti,tj->ij', flat_inputs, flat_inputs) / num_samples
-        ),
-        output_second_moment=(jnp.einsum('to,tp->op', outputs, outputs) / num_samples),
-        output_input_moment=(
-            jnp.einsum('to,ti->oi', outputs, flat_inputs) / num_samples
-        ),
+    model = linear_from_centered_moments(
+        input_mean=input_mean,
+        output_mean=output_mean,
+        input_covariance=(input_residuals.T @ input_residuals / num_samples),
+        output_covariance=(output_residuals.T @ output_residuals / num_samples),
+        output_input_covariance=(output_residuals.T @ input_residuals / num_samples),
         ridge=ridge,
     )
 
@@ -222,9 +201,9 @@ def linear_from_pairs(
 
 
 def linear_from_pairs_weighted(
-    inputs: jax.Array,  # (T, *input_shape)
-    outputs: jax.Array,  # (T, O)
-    weights: jax.Array,  # (T, ...)
+    inputs: jax.Array,
+    outputs: jax.Array,
+    weights: jax.Array,
     ridge: float = 0.0,
 ) -> LinearGaussian:
     """Fit one weighted model for each batch entry of ``weights``."""
@@ -235,24 +214,63 @@ def linear_from_pairs_weighted(
     flat_inputs = inputs.reshape(
         inputs.shape[0],
         -1,
-    )  # (T, input_size)
+    )
 
     total = jnp.sum(weights, axis=0)
     counts = jnp.where(total > 0, total, EPS)
     normalized = weights / counts[None, ...]
 
-    model = linear_from_moments(
-        input_mean=jnp.einsum('t...,ti->...i', normalized, flat_inputs),
-        output_mean=jnp.einsum('t...,to->...o', normalized, outputs),
-        input_second_moment=jnp.einsum(
-            't...,ti,tj->...ij', normalized, flat_inputs, flat_inputs
-        ),
-        output_second_moment=jnp.einsum(
-            't...,to,tp->...op', normalized, outputs, outputs
-        ),
-        output_input_moment=jnp.einsum(
-            't...,to,ti->...oi', normalized, outputs, flat_inputs
-        ),
+    input_mean = jnp.einsum(
+        't...,ti->...i',
+        normalized,
+        flat_inputs,
+    )
+    output_mean = jnp.einsum(
+        't...,to->...o',
+        normalized,
+        outputs,
+    )
+
+    batch_ndim = weights.ndim - 1
+
+    expanded_inputs = flat_inputs.reshape(
+        (flat_inputs.shape[0],) + (1,) * batch_ndim + (flat_inputs.shape[-1],)
+    )
+
+    expanded_outputs = outputs.reshape(
+        (outputs.shape[0],) + (1,) * batch_ndim + (outputs.shape[-1],)
+    )
+
+    input_residuals = expanded_inputs - input_mean[None, ...]
+    output_residuals = expanded_outputs - output_mean[None, ...]
+
+    input_covariance = jnp.einsum(
+        't...,t...i,t...j->...ij',
+        normalized,
+        input_residuals,
+        input_residuals,
+    )
+
+    output_covariance = jnp.einsum(
+        't...,t...o,t...p->...op',
+        normalized,
+        output_residuals,
+        output_residuals,
+    )
+
+    output_input_covariance = jnp.einsum(
+        't...,t...o,t...i->...oi',
+        normalized,
+        output_residuals,
+        input_residuals,
+    )
+
+    model = linear_from_centered_moments(
+        input_mean=input_mean,
+        output_mean=output_mean,
+        input_covariance=input_covariance,
+        output_covariance=output_covariance,
+        output_input_covariance=output_input_covariance,
         ridge=ridge,
     )
 

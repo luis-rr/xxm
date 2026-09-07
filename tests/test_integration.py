@@ -20,6 +20,8 @@ from xxm.lds.init import init_pca_poisson as initialize_lds_poisson
 from xxm.lds.learning import em_step as lds_em_step
 from xxm.lds.learning import laplace_em_step as lds_laplace_em_step
 from xxm.slds.init import init_pca_gaussian as initialize_slds_gaussian
+from xxm.slds.init import init_pca_poisson as initialize_slds_poisson
+from xxm.slds.learning import laplace_em_step as slds_laplace_em_step
 from xxm.slds.learning import variational_em_step as slds_variational_em_step
 
 
@@ -109,6 +111,21 @@ MODEL_CASES = [
             num_inference_iters=2,
         ),
         observations=GAUSSIAN_OBSERVATIONS,
+        init_kwargs={
+            'num_states': 2,
+            'latent_dim': 1,
+            'key': jax.random.key(0),
+        },
+    ),
+    ModelCase(
+        name='slds-poisson',
+        initialize=initialize_slds_poisson,
+        em_step=partial(
+            slds_laplace_em_step,
+            params=DEFAULT_OPTIM_PARAMS,
+            num_inference_iters=2,
+        ),
+        observations=POISSON_OBSERVATIONS,
         init_kwargs={
             'num_states': 2,
             'latent_dim': 1,

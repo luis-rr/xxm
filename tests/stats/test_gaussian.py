@@ -66,24 +66,6 @@ def test_fit_linear_recovers_exact_affine_map():
     np.testing.assert_allclose(fit.covariance, [[0.0]], atol=ATOL)
 
 
-def test_fit_linear_from_moments_uses_unregularized_covariance_for_noise():
-    # x has variance 1 and y = 2x exactly. With ridge=1, the fitted
-    # coefficient is 1, but the residual covariance is still computed from
-    # the original input covariance: 4 - 2 - 2 + 1 = 1.
-    fit = gaussian_fit.linear_from_moments(
-        input_mean=jnp.array([0.0]),
-        output_mean=jnp.array([0.0]),
-        input_second_moment=jnp.array([[1.0]]),
-        output_second_moment=jnp.array([[4.0]]),
-        output_input_moment=jnp.array([[2.0]]),
-        ridge=1.0,
-    )
-
-    np.testing.assert_allclose(fit.affine.coefficients, [[1.0]], atol=ATOL)
-    np.testing.assert_allclose(fit.affine.bias, [0.0], atol=ATOL)
-    np.testing.assert_allclose(fit.covariance, [[1.0]], atol=ATOL)
-
-
 def test_fit_weighted_linear_recovers_state_specific_affine_maps():
     inputs = jnp.array([[0.0], [1.0], [2.0], [3.0]])
     outputs = jnp.array([[1.0], [3.0], [8.0], [7.0]])

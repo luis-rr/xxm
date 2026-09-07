@@ -22,6 +22,10 @@ class ContinuousPosterior(typing.Protocol):
     def covariances(self) -> jax.Array:  # (T, D, D)
         ...
 
+    @property
+    def cross_covariances(self) -> jax.Array:  # (T-1, D, D)
+        ...
+
     def raw_second_moments(self) -> jax.Array:  # (T, D, D)
         ...
 

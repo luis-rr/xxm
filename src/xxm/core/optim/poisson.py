@@ -319,7 +319,7 @@ def _initial_affine(
     )
 
 
-def _linear_from_moments(
+def _linear_from_marginals(
     outputs: jax.Array,
     input_means: jax.Array,
     input_covariances: jax.Array | None,
@@ -417,7 +417,7 @@ def linear_from_marginals(
             f'got {initial_affine.input_shape}'
         )
 
-    return _linear_from_moments(
+    return _linear_from_marginals(
         outputs=outputs,
         input_means=inputs.mean,
         input_covariances=inputs.covariance,
@@ -472,7 +472,7 @@ def linear_from_pairs(
         initial_affine,
     )
 
-    model = _linear_from_moments(
+    model = _linear_from_marginals(
         outputs=outputs,
         input_means=flat_inputs,
         input_covariances=None,
@@ -507,7 +507,7 @@ def linear_from_pairs_weighted(
         state_weights: jax.Array,  # (T,)
         state_affine: Affine | None,
     ) -> LinearPoisson:
-        return _linear_from_moments(
+        return _linear_from_marginals(
             outputs=outputs,
             input_means=flat_inputs,
             input_covariances=None,

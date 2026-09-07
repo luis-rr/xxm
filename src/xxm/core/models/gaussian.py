@@ -73,23 +73,84 @@ class GaussianInitial(typing.NamedTuple):
 class GaussianLinearDynamics(typing.NamedTuple):
     model: LinearGaussian  # no batch
 
-    def fit_params(self, posterior: ContinuousPosterior) -> typing.Self:
-        r"""
-        Maximum-likelihood update of the latent model.
-        """
-        means = posterior.means
-        second = posterior.raw_second_moments()
-        cross = posterior.raw_cross_moments()
+    def fit_params(
+        self,
+        posterior: ContinuousPosterior,
+    ) -> typing.Self:
+        r"""Maximum-likelihood update of the latent model."""
 
-        model = gaussian_fit.linear_from_moments(
-            input_mean=jnp.mean(means[:-1], axis=0),
-            output_mean=jnp.mean(means[1:], axis=0),
-            input_second_moment=jnp.mean(second[:-1], axis=0),
-            output_second_moment=jnp.mean(second[1:], axis=0),
-            output_input_moment=jnp.mean(cross, axis=0).T,
+        means = posterior.means
+        covariances = posterior.covariances
+        cross_covariances = posterior.cross_covariances
+
+        input_mean = jnp.mean(
+            means[:-1],
+            axis=0,
         )
 
-        return self._replace(model=model)
+        output_mean = jnp.mean(
+            means[1:],
+            axis=0,
+        )
+
+        input_residuals = means[:-1] - input_mean
+
+        output_residuals = means[1:] - output_mean
+
+        input_covariance = (
+            jnp.mean(
+                covariances[:-1],
+                axis=0,
+            )
+            + jnp.einsum(
+                'ti,tj->ij',
+                input_residuals,
+                input_residuals,
+            )
+            / input_residuals.shape[0]
+        )
+
+        output_covariance = (
+            jnp.mean(
+                covariances[1:],
+                axis=0,
+            )
+            + jnp.einsum(
+                'ti,tj->ij',
+                output_residuals,
+                output_residuals,
+            )
+            / output_residuals.shape[0]
+        )
+
+        output_input_covariance = (
+            jnp.mean(
+                jnp.swapaxes(
+                    cross_covariances,
+                    -1,
+                    -2,
+                ),
+                axis=0,
+            )
+            + jnp.einsum(
+                'ti,tj->ij',
+                output_residuals,
+                input_residuals,
+            )
+            / input_residuals.shape[0]
+        )
+
+        model = gaussian_fit.linear_from_centered_moments(
+            input_mean=input_mean,
+            output_mean=output_mean,
+            input_covariance=input_covariance,
+            output_covariance=output_covariance,
+            output_input_covariance=output_input_covariance,
+        )
+
+        return self._replace(
+            model=model,
+        )
 
     def sample_next(
         self,

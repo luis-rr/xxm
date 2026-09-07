@@ -54,49 +54,104 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         posterior: Posterior,
     ) -> typing.Self:
         """Fit one linear-Gaussian dynamics model per incoming state."""
+
         weights = posterior.discrete.state_probs[1:]  # (T-1, K)
 
         means = posterior.continuous.means
-        second = posterior.continuous.raw_second_moments()
-        cross = posterior.continuous.raw_cross_moments()
+        covariances = posterior.continuous.covariances
+        cross_covariances = posterior.continuous.cross_covariances
 
-        def fit_state(weights_k, current_model):
+        def fit_state(
+            weights_k: jax.Array,
+            current_model: LinearGaussian,
+        ) -> LinearGaussian:
             true_total = jnp.sum(weights_k)
 
-            # Only used to make the candidate computation numerically defined.
-            # For total == 0 all weighted sums below are zero anyway.
-            total = jnp.where(true_total > 0, true_total, 1.0)
-
-            input_mean = jnp.einsum('t,ti->i', weights_k, means[:-1]) / total
-
-            output_mean = jnp.einsum('t,ti->i', weights_k, means[1:]) / total
-
-            input_second = jnp.einsum('t,tij->ij', weights_k, second[:-1]) / total
-
-            output_second = jnp.einsum('t,tij->ij', weights_k, second[1:]) / total
-
-            # raw_cross_moments[t] = E[x_t x_{t+1}^T],
-            # while the fitter expects E[x_{t+1} x_t^T].
-            output_input = (
-                jnp.einsum('t,tij->ij', weights_k, jnp.swapaxes(cross, -1, -2)) / total
+            # Only used to make the candidate calculation defined when the
+            # state has zero posterior mass.
+            total = jnp.where(
+                true_total > 0,
+                true_total,
+                1.0,
             )
 
-            fitted_model = gaussian_fit.linear_from_moments(
+            normalized = weights_k / total
+
+            input_mean = jnp.einsum(
+                't,ti->i',
+                normalized,
+                means[:-1],
+            )
+
+            output_mean = jnp.einsum(
+                't,ti->i',
+                normalized,
+                means[1:],
+            )
+
+            input_residuals = means[:-1] - input_mean
+
+            output_residuals = means[1:] - output_mean
+
+            input_covariance = jnp.einsum(
+                't,tij->ij',
+                normalized,
+                covariances[:-1],
+            ) + jnp.einsum(
+                't,ti,tj->ij',
+                normalized,
+                input_residuals,
+                input_residuals,
+            )
+
+            output_covariance = jnp.einsum(
+                't,tij->ij',
+                normalized,
+                covariances[1:],
+            ) + jnp.einsum(
+                't,ti,tj->ij',
+                normalized,
+                output_residuals,
+                output_residuals,
+            )
+
+            # cross_covariances[t] = Cov(x_t, x_{t+1}),
+            # while the fitter expects Cov(x_{t+1}, x_t).
+            output_input_covariance = jnp.einsum(
+                't,tij->ij',
+                normalized,
+                jnp.swapaxes(
+                    cross_covariances,
+                    -1,
+                    -2,
+                ),
+            ) + jnp.einsum(
+                't,ti,tj->ij',
+                normalized,
+                output_residuals,
+                input_residuals,
+            )
+
+            fitted_model = gaussian_fit.linear_from_centered_moments(
                 input_mean=input_mean,
                 output_mean=output_mean,
-                input_second_moment=input_second,
-                output_second_moment=output_second,
-                output_input_moment=output_input,
+                input_covariance=input_covariance,
+                output_covariance=output_covariance,
+                output_input_covariance=output_input_covariance,
                 ridge=1e-6,
             )
 
             return jax.tree.map(
-                lambda fitted, current: jnp.where(true_total > 0, fitted, current),
+                lambda fitted, current: jnp.where(
+                    true_total > 0,
+                    fitted,
+                    current,
+                ),
                 fitted_model,
                 current_model,
             )
 
-        linear_gaussian = jax.vmap(
+        model = jax.vmap(
             fit_state,
             in_axes=(1, 0),
         )(
@@ -105,7 +160,7 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         )
 
         return self._replace(
-            model=linear_gaussian,
+            model=model,
         )
 
     def sample_next(

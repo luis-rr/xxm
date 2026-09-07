@@ -18,6 +18,7 @@ from xxm.core.chains.gaussian import (
 from xxm.core.chains.gaussian import (
     GaussianChainMarginals as ContinuousPosterior,
 )
+from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.emissions.continuous import (
     EmissionsT,
     LaplaceEmissionsT,
@@ -153,12 +154,20 @@ class DiscreteFactors(typing.NamedTuple):
 class SwitchingFactors(typing.NamedTuple):
     """State-dependent factors coupling discrete and continuous latents."""
 
+    initial_model: Gaussian  # (K,)
+    dynamics_model: LinearGaussian  # (K,)
+
     initial_potential: GaussianPotential  # (K,)
     dynamics_potential: GaussianPairPotential  # (K,)
 
     @classmethod
-    def from_model(cls, model: Model[EmissionsT]) -> typing.Self:
+    def from_model(
+        cls,
+        model: Model[EmissionsT],
+    ) -> typing.Self:
         return cls(
+            initial_model=model.latent_initial.model,
+            dynamics_model=model.dynamics.model,
             initial_potential=model.latent_initial.compute_potentials(),
             dynamics_potential=model.dynamics.compute_pair_potentials(),
         )
@@ -183,16 +192,29 @@ class SwitchingFactors(typing.NamedTuple):
         continuous_posterior: ContinuousPosterior,
     ) -> DiscretePotential:
         """Compute expected state potentials under q(x)."""
-        second = continuous_posterior.raw_second_moments()
 
-        initial_log_values = self.initial_potential.expected_log_potentials(
-            mean=continuous_posterior.means[0],
-            second_moment=second[0],
+        means = continuous_posterior.means
+        covariances = continuous_posterior.covariances
+        cross_covariances = continuous_posterior.cross_covariances
+
+        initial_log_values = self.initial_model.expected_log_prob(
+            Gaussian(
+                mean=means[0],
+                covariance=covariances[0],
+            )
         )  # (K,)
 
-        dynamics_log_values = self.dynamics_potential.expected_log_potentials(
-            continuous_posterior,
-        )  # (T-1, K)
+        dynamics_log_values = self.dynamics_model.expected_log_prob_broadcast(
+            input=Gaussian(
+                mean=means[:-1],
+                covariance=covariances[:-1],
+            ),
+            output=Gaussian(
+                mean=means[1:],
+                covariance=covariances[1:],
+            ),
+            input_output_covariance=cross_covariances,
+        )  # (T - 1, K)
 
         return DiscretePotential(
             log_values=jnp.concatenate(
