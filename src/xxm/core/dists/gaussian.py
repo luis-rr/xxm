@@ -174,6 +174,100 @@ class Gaussian(typing.NamedTuple):
             axis=-2,
         )
 
+    def expected_log_prob(
+        self,
+        other: 'Gaussian',
+    ) -> jax.Array:
+        r"""
+        Expected log density under a Gaussian with the given moments.
+
+        Computes
+
+            E_q[log p(x)]
+
+        where ``q`` has the supplied mean and covariance and ``p = self``.
+        """
+        if other.mean.shape[-1] != self.variable_dim:
+            raise ValueError(
+                f'mean must have trailing dimension {self.variable_dim}; '
+                f'got {other.mean.shape}'
+            )
+
+        if other.covariance.shape[-2:] != (
+            self.variable_dim,
+            self.variable_dim,
+        ):
+            raise ValueError(
+                'covariance must have trailing shape '
+                f'{(self.variable_dim, self.variable_dim)}; '
+                f'got {other.covariance.shape}'
+            )
+
+        batch_shape = jnp.broadcast_shapes(
+            self.batch_shape,
+            other.mean.shape[:-1],
+            other.covariance.shape[:-2],
+        )
+
+        mean = jnp.broadcast_to(
+            other.mean,
+            batch_shape + (self.variable_dim,),
+        )
+
+        covariance = jnp.broadcast_to(
+            other.covariance,
+            batch_shape + (self.variable_dim, self.variable_dim),
+        )
+
+        model_mean = jnp.broadcast_to(
+            self.mean,
+            batch_shape + (self.variable_dim,),
+        )
+
+        cholesky = jnp.broadcast_to(
+            jnp.linalg.cholesky(self.covariance),
+            batch_shape + (self.variable_dim, self.variable_dim),
+        )
+
+        residual = mean - model_mean
+
+        whitened_residual = jsp.linalg.solve_triangular(
+            cholesky,
+            residual[..., None],
+            lower=True,
+        )[..., 0]
+
+        mahalanobis = jnp.sum(
+            whitened_residual**2,
+            axis=-1,
+        )
+
+        precision_covariance = jsp.linalg.cho_solve(
+            (cholesky, True),
+            covariance,
+        )
+
+        trace = jnp.trace(
+            precision_covariance,
+            axis1=-2,
+            axis2=-1,
+        )
+
+        log_det = 2.0 * jnp.sum(
+            jnp.log(
+                jnp.diagonal(
+                    cholesky,
+                    axis1=-2,
+                    axis2=-1,
+                )
+            ),
+            axis=-1,
+        )
+
+        return -0.5 * (
+            self.variable_dim * jnp.log(2.0 * jnp.pi) + log_det + mahalanobis + trace
+        )
+
 
 class LinearGaussian(typing.NamedTuple):
     """A linear Gaussian model:
@@ -316,4 +410,131 @@ class LinearGaussian(typing.NamedTuple):
         return self.__class__(
             affine=affine.compose(self.affine),
             covariance=covariance,
+        )
+
+    def expected_log_prob(
+        self,
+        input: Gaussian,
+        output: Gaussian,
+        input_output_covariance: jax.Array,
+    ) -> jax.Array:
+        r"""
+        Expected conditional log density from joint input-output moments.
+
+        Computes
+
+            E_q[log p(y | x)]
+
+        for ``p(y | x) = N(A x + b, Q)``.
+
+        ``input_output_covariance`` is ``Cov(x, y)`` and uses flattened
+        input coordinates.
+        """
+        input_mean_flat = self.affine.input_flatten(
+            input.mean,
+        )
+
+        coefficients = self.affine.coefficients_flat
+
+        residual_mean = (
+            output.mean
+            - jnp.einsum(
+                '...oi,...i->...o',
+                coefficients,
+                input_mean_flat,
+            )
+            - self.affine.bias
+        )
+
+        projected_input_covariance = jnp.einsum(
+            '...oi,...ij,...pj->...op',
+            coefficients,
+            input.covariance,
+            coefficients,
+        )
+
+        projected_cross_covariance = jnp.einsum(
+            '...oi,...ip->...op',
+            coefficients,
+            input_output_covariance,
+        )
+
+        residual_covariance = (
+            output.covariance
+            + projected_input_covariance
+            - projected_cross_covariance
+            - jnp.swapaxes(
+                projected_cross_covariance,
+                -1,
+                -2,
+            )
+        )
+
+        # Remove insignificant asymmetry introduced by floating-point arithmetic.
+        residual_covariance = 0.5 * (
+            residual_covariance
+            + jnp.swapaxes(
+                residual_covariance,
+                -1,
+                -2,
+            )
+        )
+
+        noise = Gaussian(
+            mean=jnp.zeros_like(self.affine.bias),
+            covariance=self.covariance,
+        )
+
+        return noise.expected_log_prob(
+            Gaussian(
+                mean=residual_mean,
+                covariance=residual_covariance,
+            )
+        )
+
+    def expected_log_prob_broadcast(
+        self,
+        input: Gaussian,
+        output: Gaussian,
+        input_output_covariance: jax.Array,
+    ) -> jax.Array:
+        """
+        Evaluate every supplied moment tuple against every batched model.
+        """
+        extra = (1,) * len(self.batch_shape)
+
+        # TODO is there a joint re-shape + broadcast method hiding in here?
+
+        input_mean = input.mean.reshape(
+            input.mean.shape[: -self.input_ndim] + extra + self.input_shape
+        )
+
+        input_covariance = input.covariance.reshape(
+            input.covariance.shape[:-2] + extra + (self.input_size, self.input_size)
+        )
+
+        output_mean = output.mean.reshape(
+            output.mean.shape[:-1] + extra + (self.output_dim,)
+        )
+
+        output_covariance = output.covariance.reshape(
+            output.covariance.shape[:-2] + extra + (self.output_dim, self.output_dim)
+        )
+
+        input_output_covariance = input_output_covariance.reshape(
+            input_output_covariance.shape[:-2]
+            + extra
+            + (self.input_size, self.output_dim)
+        )
+
+        return self.expected_log_prob(
+            input=Gaussian(
+                mean=input_mean,
+                covariance=input_covariance,
+            ),
+            output=Gaussian(
+                mean=output_mean,
+                covariance=output_covariance,
+            ),
+            input_output_covariance=input_output_covariance,
         )
