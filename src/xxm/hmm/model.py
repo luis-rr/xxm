@@ -57,7 +57,13 @@ def _categorical_components_from_params(
 class GaussianHMM:
     r"""Hidden Markov model with Gaussian state-conditional emissions.
 
+    $$z_0\sim\operatorname{Categorical}(\pi),\qquad
+    p(z_{t+1}=j\mid z_t=i)=P(i,j),$$
+
     $$y_t\mid z_t=k \sim \mathcal{N}(\mu_k, \Sigma_k).$$
+
+    `_model.initial.dist.probs` stores $\pi$, `_model.transitions.dist.probs`
+    stores $P$, and `states` stores the Gaussian emission parameters.
     """
 
     _model: Model[GaussianEmissions]
@@ -204,7 +210,13 @@ class PoissonHMM:
     r"""
     Hidden Markov model with Poisson emissions.
 
-    $$y_t\mid z_t=k \sim \operatorname{Poisson}(\exp(\eta_k)).$$
+    $$z_0\sim\operatorname{Categorical}(\pi),\qquad
+    p(z_{t+1}=j\mid z_t=i)=P(i,j),$$
+
+    $$y_t\mid z_t=k \sim \operatorname{Poisson}(\lambda_k).$$
+
+    `_model.initial.dist.probs` stores $\pi$, `_model.transitions.dist.probs`
+    stores $P$, and `states.log_rates` stores $\eta_k=\log\lambda_k$.
     """
 
     _model: Model[PoissonEmissions]
@@ -346,14 +358,25 @@ class GaussianARHMM:
     r"""
     Autoregressive HMM with Gaussian conditional emissions.
 
+    $$z_0\sim\operatorname{Categorical}(\pi),\qquad
+    p(z_{s+1}=j\mid z_s=i)=P(i,j),$$
+
+    $$y_{L+s}\mid z_s=k,y_{L+s-1:L+s-L}
+    \sim\mathcal{N}\left(b_k+\sum_{\ell=1}^L A_{k,\ell}y_{L+s-\ell},R_k\right).$$
+
+    For inference on $T$ observations, $s=0,\ldots,T-L-1$ is the compact
+    posterior index: `posterior.state_probs[s]` corresponds to `observations[L+s]`.
+    `states.affine` stores the AR coefficients and biases; `states.covariance`
+    stores $R_k$.
+
     The first ``num_lags`` observations of a fitted or inferred sequence are
     treated as fixed conditioning history and have no associated latent states.
     The first latent state is drawn independently from ``initial_probs`` and
     selects the regression generating the first observation after that history.
 
-    Conditional predictors have shape ``(L, N)`` and are ordered from most
+    Conditional predictors have shape $(L,D_y)$ and are ordered from most
     recent to oldest observation. Affine coefficients therefore have shape
-    ``(K, N, L, N)``.
+    $(K,D_y,L,D_y)$.
 
     Autonomous sampling starts from a zero prehistory. An explicit
     ``initial_history`` may instead be supplied to generate a continuation from
@@ -369,7 +392,7 @@ class GaussianARHMM:
 
     @property
     def output_dim(self) -> int:
-        """Observation dimension $N$."""
+        """Observation dimension $D_y$."""
         return self.model.emissions.output_dim
 
     @property
@@ -436,7 +459,7 @@ class GaussianARHMM:
     ) -> typing.Self:
         r"""Construct a Gaussian AR-HMM from state, transition, and AR parameters.
 
-        The coefficients have shape $(K,N,L,N)$ and the first $L$ observations
+        The coefficients have shape $(K,D_y,L,D_y)$ and the first $L$ observations
         serve as fixed conditioning history.
         """
         initial, transitions = _categorical_components_from_params(
@@ -497,7 +520,7 @@ class GaussianARHMM:
         Sample states and observations from the AR-HMM.
 
         If ``initial_history`` is omitted, generation uses a zero prehistory.
-        Otherwise it must have shape ``(L, N)`` and be ordered chronologically,
+        Otherwise it must have shape $(L,D_y)$ and be ordered chronologically,
         from oldest to most recent. Only the newly generated observations are
         returned.
         """
@@ -577,14 +600,25 @@ class PoissonARHMM:
     r"""
     Autoregressive HMM with Poisson conditional emissions.
 
+    $$z_0\sim\operatorname{Categorical}(\pi),\qquad
+    p(z_{s+1}=j\mid z_s=i)=P(i,j),$$
+
+    $$y_{L+s}\mid z_s=k,y_{L+s-1:L+s-L}
+    \sim\operatorname{Poisson}(\lambda_{L+s}),\qquad
+    \log\lambda_{L+s}=b_k+\sum_{\ell=1}^L A_{k,\ell}y_{L+s-\ell}.$$
+
+    For inference on $T$ observations, $s=0,\ldots,T-L-1$ is the compact
+    posterior index: `posterior.state_probs[s]` corresponds to `observations[L+s]`.
+    `states.affine` stores the AR log-rate coefficients and biases.
+
     The first ``num_lags`` observations of a fitted or inferred sequence are
     treated as fixed conditioning history and have no associated latent states.
     The first latent state is drawn independently from ``initial_probs`` and
     selects the regression generating the first observation after that history.
 
-    Conditional predictors have shape ``(L, N)`` and are ordered from most
+    Conditional predictors have shape $(L,D_y)$ and are ordered from most
     recent to oldest observation. Affine coefficients therefore have shape
-    ``(K, N, L, N)``.
+    $(K,D_y,L,D_y)$.
 
     Autonomous sampling starts from a zero prehistory. An explicit
     ``initial_history`` may instead be supplied to generate a continuation from
@@ -600,7 +634,7 @@ class PoissonARHMM:
 
     @property
     def output_dim(self) -> int:
-        """Observation dimension $N$."""
+        """Observation dimension $D_y$."""
         return self.model.emissions.output_dim
 
     @property
@@ -666,7 +700,7 @@ class PoissonARHMM:
     ) -> typing.Self:
         r"""Construct a Poisson AR-HMM from state, transition, and log-rate parameters.
 
-        The coefficients have shape $(K,N,L,N)$ and the first $L$ observations
+        The coefficients have shape $(K,D_y,L,D_y)$ and the first $L$ observations
         serve as fixed conditioning history.
         """
         initial, transitions = _categorical_components_from_params(
@@ -726,7 +760,7 @@ class PoissonARHMM:
         Sample states and observations from the AR-HMM.
 
         If ``initial_history`` is omitted, generation uses a zero prehistory.
-        Otherwise it must have shape ``(L, N)`` and be ordered chronologically,
+        Otherwise it must have shape $(L,D_y)$ and be ordered chronologically,
         from oldest to most recent. Only the newly generated observations are
         returned.
         """

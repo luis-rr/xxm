@@ -54,8 +54,8 @@ def infer_laplace(
     """
     Approximate the latent posterior and marginal log likelihood using Laplace inference.
 
-    The posterior mode is found with damped Newton iterations. At each
-    iteration, the emission likelihood is replaced by its local quadratic
+    Damped Newton iterations seek the posterior mode. At each
+    iteration, the emission log likelihood is replaced by its local quadratic
     approximation, producing a Gaussian chain whose mean gives the Newton
     candidate.
 

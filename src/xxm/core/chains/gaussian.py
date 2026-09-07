@@ -53,7 +53,7 @@ def _precision_and_log_det(
 class GaussianPotential(typing.NamedTuple):
     r"""Gaussian potential in canonical form.
 
-    $$\log f(x) = -\frac12 x^\top J x + h^\top x + c.$$
+    $$\log \phi(u) = -\frac12 u^\top J u + h^\top u + c.$$
 
     `precision_blocks` stores $J$, `information_vectors` stores $h$,
     and `log_constant` stores $c$. Leading dimensions are batch dimensions.
@@ -65,6 +65,7 @@ class GaussianPotential(typing.NamedTuple):
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
+        """Batch shape shared by the canonical parameters."""
         precision_shape = self.precision_blocks.shape[:-2]
         information_shape = self.information_vectors.shape[:-1]
         log_constant_shape = self.log_constant.shape
@@ -73,6 +74,7 @@ class GaussianPotential(typing.NamedTuple):
 
     @property
     def variable_dim(self) -> int:
+        """Dimension of the potential's variable."""
         return self.precision_blocks.shape[-1]
 
     @classmethod
@@ -184,16 +186,13 @@ class GaussianPotential(typing.NamedTuple):
         gradient: jax.Array,  # (..., D)
         precision: jax.Array,  # (..., D, D)
     ) -> GaussianPotential:
-        r"""Construct a local quadratic potential around ``point``.
+        r"""Construct a local quadratic potential around `point`.
 
-        Represents the approximation
+        $$\log \phi(u) \approx a + g^\top(u-u_0)
+        -\frac12 (u-u_0)^\top J(u-u_0).$$
 
-            log f(x)
-            ≈ log f(x0)
-            + g.T (x - x0)
-            - 1/2 (x - x0).T J (x - x0),
-
-        where ``J`` is the negative Hessian at ``x0``.
+        `point` stores $u_0$, `log_value` stores $a$, `gradient` stores $g$,
+        and `precision` stores the negative Hessian $J$ at $u_0$.
         """
         information = gradient + jnp.einsum(
             '...ij,...j->...i',
@@ -225,11 +224,10 @@ class GaussianPotential(typing.NamedTuple):
     ) -> typing.Self:
         r"""Compute the weighted sum of batched log potentials.
 
-        Returns the Gaussian potential
-
-            sum_k weights[..., k] log f_k(x).
-
-        The potential must have one batch dimension of size ``K``.
+        The returned potential satisfies
+        $\log \phi(u)=\sum_k w_k\log\phi_k(u)$, with $w$ stored in `weights`.
+        The input potential has one batch dimension of size $K$; the result
+        has batch shape `weights.shape[:-1]`.
         """
         if self.batch_shape != (weights.shape[-1],):
             raise ValueError(
@@ -262,11 +260,9 @@ class GaussianPotential(typing.NamedTuple):
     ) -> jax.Array:  # (..., K)
         r"""Compute each batched log potential's Gaussian expectation.
 
-        Returns
-
-            E_q[log f_k(x)]
-
-        for each potential ``k``.
+        Return $\mathbb{E}_q[\log\phi_k(u)]$ for each potential $k$.
+        `mean` stores $\mathbb{E}_q[u]$ and `second_moment` stores the raw
+        second moment $\mathbb{E}_q[uu^\top]$.
         """
         if len(self.batch_shape) != 1:
             raise ValueError(
@@ -327,6 +323,7 @@ class GaussianPairPotential(typing.NamedTuple):
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
+        """Batch shape shared by the pair-potential parameters."""
         left_precision_shape = self.left_precision.shape[:-2]
         right_precision_shape = self.right_precision.shape[:-2]
         lower_precision_shape = self.lower_precision.shape[:-2]
@@ -345,6 +342,7 @@ class GaussianPairPotential(typing.NamedTuple):
 
     @property
     def variable_dim(self) -> int:
+        """Dimension of each variable in the pair."""
         return self.left_precision.shape[-1]
 
     @classmethod
@@ -455,11 +453,10 @@ class GaussianPairPotential(typing.NamedTuple):
     ) -> GaussianPairPotential:
         r"""Compute the weighted sum of the batched log potentials.
 
-        Returns the Gaussian potential given weights ``w[..., k]``:
-
-            sum_k w[..., k] log f_k(x_0, x_1).
-
-        The returned potential has batch shape ``weights.shape[:-1]``.
+        The returned potential satisfies
+        $\log f(x_0,x_1)=\sum_k w_k\log f_k(x_0,x_1)$, with $w$ stored in
+        `weights`. The input has one batch dimension of size $K$; the result
+        has batch shape `weights.shape[:-1]`.
         """
 
         if self.batch_shape != (weights.shape[-1],):
@@ -548,14 +545,13 @@ class GaussianChain(typing.NamedTuple):
 
     $$\log f(x)=-\frac12x^\top Jx+h^\top x+c.$$
 
-    where J is symmetric positive definite and block tridiagonal,
-    h is the information vector, and c is ``log_constant``.
+    Here $J$ is symmetric positive definite and block tridiagonal,
+    $h$ is the information vector, and $c$ is `log_constant`.
 
     The lower block convention is $B_t=J_{t+1,t}$, so the upper block is
     $B_t^\top$.
 
-    ``information_vectors[t]`` contains the block of ``h`` associated
-    with the variable ``x_t``.
+    `information_vectors[t]` contains the block of $h$ associated with $x_t$.
 
     A ``GaussianChain`` represents a single chain. Batch dimensions are
     intentionally not supported; use ``jax.vmap`` over chains instead.
@@ -619,10 +615,12 @@ class GaussianChain(typing.NamedTuple):
 
     @property
     def num_steps(self) -> int:
+        """Number of time steps $T$."""
         return self.diagonal_precision_blocks.shape[0]
 
     @property
     def variable_dim(self) -> int:
+        """Dimension of each continuous state."""
         return self.diagonal_precision_blocks.shape[1]
 
     def add_local_potential(
@@ -661,7 +659,7 @@ class GaussianChain(typing.NamedTuple):
         self,
         latent: jax.Array,
     ) -> jax.Array:
-        """Compute log f(x) for a latent trajectory."""
+        r"""Compute $\log f(x)$ for a latent trajectory."""
 
         expected_shape = (self.num_steps, self.variable_dim)
 
@@ -819,6 +817,8 @@ class GaussianChain(typing.NamedTuple):
 
 
 class _ForwardEliminationCarry(typing.NamedTuple):
+    r"""Effective precision Cholesky factor and offset $J^{-1}h$ at one step."""
+
     cholesky: jax.Array
     mean_offset: jax.Array
 
@@ -828,6 +828,7 @@ class _ForwardEliminationCarry(typing.NamedTuple):
         precision: jax.Array,
         information: jax.Array,
     ) -> typing.Self:
+        """Construct the elimination carry from effective canonical parameters."""
         cholesky = jnp.linalg.cholesky(precision)
 
         return cls(
@@ -844,6 +845,7 @@ class _ForwardEliminationCarry(typing.NamedTuple):
         next_precision: jax.Array,
         next_information: jax.Array,
     ) -> _ForwardEliminationResult:
+        r"""Eliminate $x_t$ and retain its conditional mean as a function of $x_{t+1}$."""
         mean_coefficient = -_solve_from_cholesky(
             self.cholesky,
             lower_precision.T,
@@ -870,6 +872,8 @@ class _ForwardEliminationCarry(typing.NamedTuple):
 
 
 class _ForwardEliminationResult(typing.NamedTuple):
+    """Next elimination carry and the eliminated state's conditional mean map."""
+
     next_carry: _ForwardEliminationCarry
     conditional_mean: Affine
 
@@ -948,6 +952,7 @@ class _GaussianChainFactorization(typing.NamedTuple):
 
 
 def _log_det(covariance: jax.Array) -> jax.Array:
+    """Compute a positive-definite covariance's log determinant via Cholesky."""
     cholesky = jnp.linalg.cholesky(covariance)
 
     return 2.0 * jnp.sum(
@@ -966,6 +971,10 @@ def _conditional_log_det(
     next_covariance: jax.Array,
     cross_covariance: jax.Array,
 ) -> jax.Array:
+    r"""Compute $\log\det\operatorname{Cov}(x_{t+1}\mid x_t)$ from pair moments.
+
+    `cross_covariance` stores $\operatorname{Cov}(x_t,x_{t+1})$.
+    """
     cholesky = jnp.linalg.cholesky(
         covariance,
     )
@@ -989,9 +998,11 @@ class GaussianChainMarginals(typing.NamedTuple):
     r"""
     Marginal moments of the normalized Gaussian chain distribution.
 
-    * ``means[t] = E[x_t]``.
-    * ``covariances[t] = Cov(x_t, x_t)``.
-    * ``cross_covariances[t] = Cov(x_t, x_{t+1})``.
+    Under the normalized chain distribution $q(x)$:
+
+    * `means[t]` stores $\mathbb{E}_q[x_t]$.
+    * `covariances[t]` stores $\operatorname{Cov}_q(x_t)$.
+    * `cross_covariances[t]` stores $\operatorname{Cov}_q(x_t,x_{t+1})$.
     """
 
     means: jax.Array
@@ -999,7 +1010,7 @@ class GaussianChainMarginals(typing.NamedTuple):
     cross_covariances: jax.Array
 
     def raw_second_moments(self) -> jax.Array:
-        """Return E[x_t x_t.T], shape (T, N, N)."""
+        r"""Return raw second moments $\mathbb{E}_q[x_t x_t^\top]$."""
         extra = jnp.einsum(
             'ti,tj->tij',
             self.means,
@@ -1009,7 +1020,7 @@ class GaussianChainMarginals(typing.NamedTuple):
         return self.covariances + extra
 
     def raw_cross_moments(self) -> jax.Array:
-        """Return E[x_t x_{t+1}.T], shape (T - 1, N, N)."""
+        r"""Return raw cross moments $\mathbb{E}_q[x_t x_{t+1}^\top]$ for $T-1$ pairs."""
         extra = jnp.einsum(
             'ti,tj->tij',
             self.means[:-1],

@@ -1,6 +1,6 @@
 r"""Autoregressive emission models for state-conditional variables with history dependence.
 
-For state $z_t=k$, the conditional predictor is
+For observation time $t=L,\ldots,T-1$ and state $z_{t-L}=k$, the predictor is
 
 $$\eta_t^{(k)} = b_k + \sum_{\ell=1}^L A_{k,\ell} y_{t-\ell}.$$
 
@@ -11,6 +11,8 @@ Poisson emissions: $y_t \sim \operatorname{Poisson}(\exp(\eta_t^{(k)}))$.
 Inference and fitting condition on the first $L$ observations, so only the
 remaining $T-L$ observations have associated latent states. Sampling starts
 from zero history unless an explicit continuation history is supplied.
+The compact posterior index $s=t-L$ means `state_probs[s]` describes the
+state generating `observations[L+s]`.
 """
 
 import typing
@@ -79,14 +81,15 @@ class AREmissions(
     r"""
     State-dependent autoregressive emissions with structured lagged inputs.
 
-    The conditional model maps predictors of shape ``(L, N)`` to outputs of
-    shape ``(N,)``. Predictors are ordered from most recent to oldest,
+    The conditional model maps predictors of shape $(L,D_y)$ to outputs of
+    shape $(D_y,)$. Predictors are ordered from most recent to oldest,
     ``(y[t-1], ..., y[t-L])``. For an affine conditional model, coefficients
-    therefore have shape ``(K, N, L, N)``.
+    therefore have shape $(K,D_y,L,D_y)$.
 
     Likelihood and fitting methods receive a chronological sequence whose first
     ``L`` observations are fixed conditioning history. Only the remaining
-    observations have associated latent states.
+    observations have associated latent states: posterior index $s$ corresponds
+    to `observations[L+s]`.
 
     Autonomous sampling uses an all-zero history. Conditional continuation
     sampling accepts an explicit chronological history, ordered from oldest
@@ -97,14 +100,17 @@ class AREmissions(
 
     @property
     def num_states(self) -> int:
+        """Number of discrete states $K$."""
         return self.dist.batch_shape[0]
 
     @property
     def output_dim(self) -> int:
+        """Observation dimension $D_y$."""
         return self.dist.output_dim
 
     @property
     def num_lags(self) -> int:
+        """Number of autoregressive lags $L$."""
         if len(self.dist.input_shape) != 2:
             raise ValueError(
                 'autoregressive emissions require model input shape (L, N); '
@@ -224,7 +230,7 @@ class AREmissions(
         """
         Sample a continuation conditional on an explicit observation history.
 
-        ``initial_history`` has shape ``(L, N)`` and is chronological, from
+        `initial_history` has shape $(L,D_y)$ and is chronological, from
         oldest to most recent. Only newly generated observations are returned.
         """
         if initial_history.shape != (

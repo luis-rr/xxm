@@ -108,6 +108,9 @@ class GaussianEmissions(typing.NamedTuple):
     r"""Linear-Gaussian emissions.
 
     $$y_t|x_t \sim \mathcal{N}(Cx_t + d, R).$$
+
+    `dist.affine.coefficients` stores $C$, `dist.affine.bias` stores $d$,
+    and `dist.covariance` stores $R$.
     """
 
     dist: LinearGaussian  # no batch
@@ -198,7 +201,13 @@ class GaussianEmissions(typing.NamedTuple):
 
 
 class PoissonEmissions(typing.NamedTuple):
-    """Linear Poisson emissions for continuous latent variables."""
+    r"""Linear Poisson emissions for continuous latent variables.
+
+    $$y_t\mid x_t \sim \operatorname{Poisson}(\lambda_t),
+    \qquad \log\lambda_t=Cx_t+d.$$
+
+    `dist.affine.coefficients` stores $C$ and `dist.affine.bias` stores $d$.
+    """
 
     dist: LinearPoisson  # no batch
 
@@ -244,7 +253,7 @@ class PoissonEmissions(typing.NamedTuple):
         observations: jax.Array,  # (T, N)
         latents: jax.Array,  # (T, D)
     ) -> GaussianPotential:
-        """Quadratic approximation of the likelihood around ``latents``."""
+        """Construct a quadratic approximation of the log likelihood around `latents`."""
         coefficients = self.dist.affine.coefficients  # (N, D)
 
         conditional = self.conditional(latents)

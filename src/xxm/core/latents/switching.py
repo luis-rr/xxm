@@ -39,7 +39,11 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         discrete: DiscretePosterior,
         continuous: ContinuousPosterior,
     ) -> typing.Self:
-        r"""Fit state-dependent dynamics from posterior pair marginals."""
+        r"""Fit dynamics from continuous pair moments weighted by incoming state marginals.
+
+        The pair $(x_{t-1},x_t)$ receives weight $q(z_t=k)$, taken from
+        `discrete.state_probs[1:]`. Exactly empty states retain their parameters.
+        """
         weights = discrete.state_probs[1:]  # (T-1, K)
 
         paired = PairedGaussian(

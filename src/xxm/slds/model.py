@@ -1,3 +1,5 @@
+"""Facade classes for Gaussian and Poisson switching linear dynamical systems."""
+
 from __future__ import annotations
 
 import dataclasses

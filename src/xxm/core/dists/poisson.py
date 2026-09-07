@@ -1,3 +1,5 @@
+"""Independent Poisson distributions and log-linear conditional distributions."""
+
 import typing
 
 import jax

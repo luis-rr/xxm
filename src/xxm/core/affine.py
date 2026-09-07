@@ -1,3 +1,5 @@
+"""Affine maps with vector outputs and possibly tensor-shaped inputs."""
+
 import math
 import typing
 

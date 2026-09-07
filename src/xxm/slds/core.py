@@ -20,6 +20,9 @@ from xxm.core.latents.switching import GaussianLinearSwitchingDynamics
 class Posterior(typing.NamedTuple):
     r"""
     Structured mean-field posterior over discrete states $z$ and continuous latents $x$.
+
+    The approximation factorizes as $q(z,x)=q(z)q(x)$; each factor retains
+    its temporal chain structure. `discrete` and `continuous` store its marginals.
     """
 
     discrete: DiscreteChainMarginals  # T discrete states
@@ -59,7 +62,11 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         observations: jax.Array,
         posterior: Posterior,
     ) -> typing.Self:
-        """Fit learnable SLDS parameters from a structured posterior."""
+        """Fit discrete initial, transition, dynamics, and emission parameters.
+
+        Keep the state-conditioned continuous boundary distribution
+        `latent_initial` fixed during single-sequence learning.
+        """
         return self.__class__(
             state_initial=self.state_initial.fit_params(
                 posterior.discrete,

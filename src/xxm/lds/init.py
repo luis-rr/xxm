@@ -1,3 +1,5 @@
+"""Initialize linear dynamical systems from principal-component latent trajectories."""
+
 import jax
 from jax import numpy as jnp
 

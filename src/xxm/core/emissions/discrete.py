@@ -61,7 +61,9 @@ class ContinuationEmissions(Emissions, typing.Protocol):
         key: jax.Array,
         states: jax.Array,
         initial_history: jax.Array,
-    ) -> jax.Array: ...
+    ) -> jax.Array:
+        """Sample new observations given states and a fixed chronological history."""
+        ...
 
 
 class GaussianEmissions(typing.NamedTuple):
@@ -74,6 +76,7 @@ class GaussianEmissions(typing.NamedTuple):
 
     @property
     def num_states(self) -> int:
+        """Number of discrete states $K$."""
         return self.dist.batch_shape[0]
 
     def log_likelihoods(self, observations: jax.Array) -> jax.Array:
@@ -91,6 +94,7 @@ class GaussianEmissions(typing.NamedTuple):
         observations: jax.Array,
         posterior: DiscretePosterior,
     ) -> typing.Self:
+        """Fit Gaussian means and covariances from posterior state weights."""
         gaussian = gaussian_fit.from_samples_weighted(
             observations,
             posterior.state_probs,
@@ -105,18 +109,25 @@ class GaussianEmissions(typing.NamedTuple):
         return self.dist.select(states).sample(key)
 
     def permute(self, permutation: jax.Array) -> 'GaussianEmissions':
+        """Relabel state-specific emission parameters."""
         return self._replace(
             dist=self.dist.select(permutation),
         )
 
 
 class PoissonEmissions(typing.NamedTuple):
-    r"""State-dependent Poisson emissions parameterized by log rates $\eta_k=\log\lambda_k$."""
+    r"""State-dependent Poisson emissions parameterized by log rates.
+
+    $$y_t\mid z_t=k \sim \operatorname{Poisson}(\lambda_k).$$
+
+    `dist.log_rates` stores $\eta_k=\log\lambda_k$.
+    """
 
     dist: Poisson  # K-batched
 
     @property
     def num_states(self) -> int:
+        """Number of discrete states $K$."""
         return self.dist.batch_shape[0]
 
     def log_likelihoods(self, observations: jax.Array) -> jax.Array:

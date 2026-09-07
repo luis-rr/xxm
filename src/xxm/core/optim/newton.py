@@ -92,6 +92,7 @@ class NewtonSearch(typing.NamedTuple, typing.Generic[FreeParamsT]):
         self,
         params: FreeParamsT,
     ) -> NewtonState[FreeParamsT]:
+        """Evaluate the initial objective and mark all optimization problems active."""
 
         current_objective = self.model.objective(params)
 
@@ -147,6 +148,7 @@ class NewtonSearch(typing.NamedTuple, typing.Generic[FreeParamsT]):
         return self._iterate(initial)
 
     def _iterate(self, initial: NewtonState[FreeParamsT]) -> NewtonState[FreeParamsT]:
+        """Run Newton steps until all problems stop or the iteration limit is reached."""
 
         def should_continue(search_state: NewtonState[FreeParamsT]) -> jax.Array:
             return (search_state.iteration < self.optim_params.max_iter) & jnp.any(
@@ -199,12 +201,15 @@ class LineSearchState(typing.NamedTuple, typing.Generic[FreeParamsT]):
     candidate_objective: jax.Array
 
     def is_accepted(self, current_objective: jax.Array) -> jax.Array:
+        """Identify finite candidate objectives that do not decrease the current value."""
         return jnp.isfinite(self.candidate_objective) & (
             self.candidate_objective >= current_objective
         )
 
 
 class LineSearch(typing.NamedTuple, typing.Generic[FreeParamsT]):
+    """Backtracking search with independent step sizes for active objectives."""
+
     model: Model[FreeParamsT]
     current_objective: jax.Array
     direction: FreeParamsT
@@ -212,6 +217,7 @@ class LineSearch(typing.NamedTuple, typing.Generic[FreeParamsT]):
     active: jax.Array
 
     def initial_state(self) -> LineSearchState[FreeParamsT]:
+        """Evaluate a full step along the search direction."""
         step_size = jnp.ones_like(self.current_objective)
         candidate_params = self.initial_params.take_step(
             self.direction,
@@ -228,6 +234,8 @@ class LineSearch(typing.NamedTuple, typing.Generic[FreeParamsT]):
     def iterate(
         self, initial: LineSearchState[FreeParamsT], max_iter: int
     ) -> LineSearchState[FreeParamsT]:
+        """Halve rejected active step sizes until acceptance or the backtracking limit."""
+
         def needs_backtracking(search: LineSearchState[FreeParamsT]) -> jax.Array:
             rejected = self.active & ~search.is_accepted(self.current_objective)
 

@@ -45,14 +45,14 @@ class _NewtonSearchModel(
     typing.NamedTuple,
     typing.Generic[LaplaceEmissionsT],
 ):
-    """Find the Laplace posterior mode."""
+    """Log-potential objective for finding a latent mode by Newton search."""
 
     latent_chain: GaussianChain
     emissions: LaplaceEmissionsT
     observations: jax.Array
 
     def objective(self, params: _NewtonSearchParams) -> jax.Array:
-        """Evaluate the log joint at a latent trajectory."""
+        """Evaluate the chain log potential plus the observation log likelihood."""
 
         return self.latent_chain.log_potential(
             params.latents
@@ -91,15 +91,17 @@ def laplace_inference(
     search_params: OptimParams,
 ) -> tuple[GaussianChainMarginals, jax.Array]:
     """
-    Approximate the posterior over latents using Laplace inference.
+    Approximate normalized latent marginals and the log normalizer by Laplace inference.
 
-    The posterior mode is found with damped Newton iterations. At each
-    iteration, the emission likelihood is replaced by its local quadratic
+    Damped Newton iterations seek the latent mode. At each
+    iteration, the emission log likelihood is replaced by its local quadratic
     approximation, producing a Gaussian chain whose mean gives the Newton
     candidate.
 
-    The final local Gaussian approximation defines the returned posterior
-    marginals and Laplace approximation to the marginal log likelihood.
+    The final local Gaussian approximation defines the returned marginals
+    and approximate log normalizer. The latter approximates the marginal
+    log likelihood when `chain` represents a normalized latent prior;
+    expected switching factors in SLDS inference need not satisfy this condition.
     """
 
     latents = initial_latents

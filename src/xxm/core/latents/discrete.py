@@ -16,6 +16,7 @@ class CategoricalInitial(typing.NamedTuple):
 
     @property
     def num_states(self) -> int:
+        """Number of discrete states $K$."""
         return self.dist.num_categories
 
     def sample(self, key: jax.Array) -> jax.Array:
@@ -34,12 +35,16 @@ class CategoricalInitial(typing.NamedTuple):
 
 
 class CategoricalTransitions(typing.NamedTuple):
-    r"""Transition probabilities $p(z_{t+1}|z_t)$ for discrete latent state."""
+    r"""Stationary transition probabilities for discrete latent states.
+
+    `dist.probs[i,j]` stores $P(i,j)=p(z_{t+1}=j\mid z_t=i)$.
+    """
 
     dist: Categorical  # K-batched
 
     @property
     def num_states(self) -> int:
+        """Number of discrete states $K$."""
         return self.dist.num_categories
 
     def conditional(self, previous: jax.Array) -> Categorical:

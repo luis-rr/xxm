@@ -428,7 +428,11 @@ class LinearGaussian(typing.NamedTuple):
         output: Gaussian,
         input_output_covariance: jax.Array,
     ) -> jax.Array:
-        r"""Expected conditional log density $\mathbb{E}_{q}[\log p(v|u)]$ from joint input-output moments."""
+        r"""Compute $\mathbb{E}_q[\log p(v\mid u)]$ from joint input-output moments.
+
+        `input_output_covariance` stores $\operatorname{Cov}_q(u,v)$ with
+        trailing shape $(I,O)$; tensor-shaped inputs are flattened.
+        """
         input_mean_flat = self.affine.input_flatten(
             input.mean,
         )
@@ -497,7 +501,11 @@ class LinearGaussian(typing.NamedTuple):
         output: Gaussian,
         input_output_covariance: jax.Array,
     ) -> jax.Array:
-        """Evaluate every moment tuple against every batched model."""
+        r"""Evaluate every moment tuple against every batched model.
+
+        `input_output_covariance` stores $\operatorname{Cov}_q(u,v)$ with
+        trailing shape $(I,O)$, as in `expected_log_prob`.
+        """
         extra = (1,) * len(self.batch_shape)
 
         # TODO is there a joint re-shape + broadcast method hiding in here?

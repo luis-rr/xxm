@@ -72,7 +72,11 @@ def align_procrustes(
     source: jax.Array,
     target: jax.Array,
 ) -> Affine:
-    """Least-squares orthogonal Procrustes alignment with global scaling."""
+    """Fit a source-to-target orthogonal Procrustes map with scaling and translation.
+
+    The returned map minimizes squared errors between `alignment.apply(source)`
+    and `target`.
+    """
     source_mean = jnp.mean(source, axis=0)
     target_mean = jnp.mean(target, axis=0)
 
@@ -101,7 +105,11 @@ def align_affine(
     source: jax.Array,
     target: jax.Array,
 ) -> Affine:
-    """Least-squares unconstrained affine alignment."""
+    """Fit an unconstrained affine map from source to target by least squares.
+
+    The returned map minimizes squared errors between `alignment.apply(source)`
+    and `target`.
+    """
     source_mean = jnp.mean(source, axis=0)
     target_mean = jnp.mean(target, axis=0)
 

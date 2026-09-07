@@ -193,10 +193,11 @@ class DiscreteChainMarginals(typing.NamedTuple):
 
 class _DiscreteChainMessages(typing.NamedTuple):
     """
-    Normalized forward and backward messages for one chain.
+    Normalized forward messages and scaled backward messages for one chain.
 
-    - `forward_messages[t,k]` and `backward_messages[t,k]` are normalized
-    probability-space messages
+    - `forward_messages[t,k]` are normalized probability-space messages
+    - `backward_messages[t,k]` use forward scaling factors and terminate at
+      ones; they are not probability distributions over states
     - `log_scaling_factors[t]` are per-step log normalization constants
     """
 

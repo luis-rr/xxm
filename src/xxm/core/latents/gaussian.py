@@ -189,6 +189,7 @@ class StateConditionedGaussian(typing.NamedTuple):
 
     @property
     def num_states(self) -> int:
+        """Number of discrete states $K$."""
         return self.dist.batch_shape[0]
 
     def conditional(

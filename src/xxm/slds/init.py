@@ -1,3 +1,5 @@
+"""Initialize switching dynamics from PCA latents and autoregressive HMMs."""
+
 import jax
 import jax.numpy as jnp
 
