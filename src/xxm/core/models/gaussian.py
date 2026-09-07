@@ -5,7 +5,7 @@ from jax import numpy as jnp
 
 from xxm.core.affine import Affine
 from xxm.core.chains.gaussian import GaussianPotential
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.dists.gaussian import Gaussian, LinearGaussian, PairedGaussian
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.posteriors import ContinuousPosterior
 
@@ -73,83 +73,30 @@ class GaussianInitial(typing.NamedTuple):
 class GaussianLinearDynamics(typing.NamedTuple):
     model: LinearGaussian  # no batch
 
-    def fit_params(
-        self,
-        posterior: ContinuousPosterior,
-    ) -> typing.Self:
-        r"""Maximum-likelihood update of the latent model."""
-
-        means = posterior.means
-        covariances = posterior.covariances
-        cross_covariances = posterior.cross_covariances
-
-        input_mean = jnp.mean(
-            means[:-1],
-            axis=0,
+    def fit_params(self, posterior: ContinuousPosterior) -> typing.Self:
+        """Maximum-likelihood update of the latent dynamics."""
+        paired = PairedGaussian(
+            left=Gaussian(
+                mean=posterior.means[:-1],
+                covariance=posterior.covariances[:-1],
+            ),
+            right=Gaussian(
+                mean=posterior.means[1:],
+                covariance=posterior.covariances[1:],
+            ),
+            # posterior stores Cov(x_t, x_{t+1});
+            # PairedGaussian stores Cov(right, left).
+            cross_covariance=jnp.swapaxes(
+                posterior.cross_covariances,
+                -2,
+                -1,
+            ),
         )
 
-        output_mean = jnp.mean(
-            means[1:],
-            axis=0,
-        )
-
-        input_residuals = means[:-1] - input_mean
-
-        output_residuals = means[1:] - output_mean
-
-        input_covariance = (
-            jnp.mean(
-                covariances[:-1],
-                axis=0,
-            )
-            + jnp.einsum(
-                'ti,tj->ij',
-                input_residuals,
-                input_residuals,
-            )
-            / input_residuals.shape[0]
-        )
-
-        output_covariance = (
-            jnp.mean(
-                covariances[1:],
-                axis=0,
-            )
-            + jnp.einsum(
-                'ti,tj->ij',
-                output_residuals,
-                output_residuals,
-            )
-            / output_residuals.shape[0]
-        )
-
-        output_input_covariance = (
-            jnp.mean(
-                jnp.swapaxes(
-                    cross_covariances,
-                    -1,
-                    -2,
-                ),
-                axis=0,
-            )
-            + jnp.einsum(
-                'ti,tj->ij',
-                output_residuals,
-                input_residuals,
-            )
-            / input_residuals.shape[0]
-        )
-
-        model = gaussian_fit.linear_from_centered_moments(
-            input_mean=input_mean,
-            output_mean=output_mean,
-            input_covariance=input_covariance,
-            output_covariance=output_covariance,
-            output_input_covariance=output_input_covariance,
-        )
+        paired = gaussian_fit.paired_from_moment_match(paired)
 
         return self._replace(
-            model=model,
+            model=gaussian_fit.linear_from_paired(paired),
         )
 
     def sample_next(

@@ -2,62 +2,141 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core.affine import Affine
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.dists.gaussian import (
+    Gaussian,
+    LinearGaussian,
+    PairedGaussian,
+)
 
-EPS: float = 1e-8
+
+def _normalize_weights(
+    num_samples: int,
+    weights: jax.Array | None,
+    dtype: jax.typing.DTypeLike,
+) -> jax.Array:
+    """Normalize optional weights along the sample axis."""
+    if weights is None:
+        return jnp.full(
+            (num_samples,),
+            1.0 / num_samples,
+            dtype=dtype,
+        )
+
+    assert weights.shape[0] == num_samples
+
+    weights = weights.astype(dtype)
+
+    totals = jnp.sum(
+        weights,
+        axis=0,
+    )
+
+    safe_totals = jnp.where(
+        totals > 0.0,
+        totals,
+        1.0,
+    )
+
+    return weights / safe_totals[None, ...]
+
+
+def _center_samples(
+    values: jax.Array,  # (T, N)
+    mean: jax.Array,  # (..., N)
+) -> jax.Array:  # (T, ..., N)
+    """Center samples around one or more means."""
+    batch_ndim = mean.ndim - 1
+
+    values = values.reshape(
+        (values.shape[0],) + (1,) * batch_ndim + (values.shape[-1],)
+    )
+
+    return values - mean[None, ...]
+
+
+def _from_samples_normalized(
+    values: jax.Array,  # (T, N)
+    weights: jax.Array,  # (T, ...)
+) -> Gaussian:
+    """Fit a Gaussian using already-normalized weights."""
+    mean = jnp.einsum(
+        't...,ti->...i',
+        weights,
+        values,
+    )
+
+    residuals = _center_samples(
+        values,
+        mean,
+    )
+
+    covariance = jnp.einsum(
+        't...,t...i,t...j->...ij',
+        weights,
+        residuals,
+        residuals,
+    )
+
+    covariance = 0.5 * (
+        covariance
+        + jnp.swapaxes(
+            covariance,
+            -2,
+            -1,
+        )
+    )
+
+    return Gaussian(
+        mean=mean,
+        covariance=covariance,
+    )
 
 
 def from_samples(
     values: jax.Array,  # (T, N)
 ) -> Gaussian:
     """Fit a Gaussian from samples along the first axis."""
-    mean = jnp.mean(values, axis=0)
-    residuals = values - mean
-    covariance = (
-        jnp.einsum(
-            't...i,t...j->...ij',
-            residuals,
-            residuals,
-        )
-        / values.shape[0]
+    dtype = jnp.result_type(
+        values,
+        jnp.float32,
     )
 
-    return Gaussian(mean=mean, covariance=covariance)
+    values = values.astype(dtype)
+
+    weights = _normalize_weights(
+        num_samples=values.shape[0],
+        weights=None,
+        dtype=dtype,
+    )
+
+    return _from_samples_normalized(
+        values=values,
+        weights=weights,
+    )
 
 
 def from_samples_weighted(
-    values: jax.Array,
-    weights: jax.Array,
+    values: jax.Array,  # (T, N)
+    weights: jax.Array,  # (T, ...)
 ) -> Gaussian:
     """Fit one weighted Gaussian for each batch entry of ``weights``."""
-    total = jnp.sum(weights, axis=0)
-    counts = jnp.where(total > 0, total, EPS)
-    normalized = weights / counts[None, ...]
-
-    mean = jnp.einsum(
-        't...,tn->...n',
-        normalized,
+    dtype = jnp.result_type(
         values,
+        weights,
+        jnp.float32,
     )
 
-    batch_ndim = weights.ndim - 1
+    values = values.astype(dtype)
 
-    expanded_values = values.reshape(
-        (values.shape[0],) + (1,) * batch_ndim + (values.shape[-1],)
+    weights = _normalize_weights(
+        num_samples=values.shape[0],
+        weights=weights,
+        dtype=dtype,
     )
 
-    residuals = expanded_values - mean[None, ...]
-
-    covariance = jnp.einsum(
-        't...,t...i,t...j->...ij',
-        normalized,
-        residuals,
-        residuals,
-    )
-
-    return Gaussian(
-        mean=mean,
-        covariance=covariance,
+    return _from_samples_normalized(
+        values=values,
+        weights=weights,
     )
 
 
@@ -70,7 +149,10 @@ def from_samples_grouped(
     weights = jax.nn.one_hot(
         assignments,
         num_groups,
-        dtype=values.dtype,
+        dtype=jnp.result_type(
+            values,
+            jnp.float32,
+        ),
     )  # (T, K)
 
     return from_samples_weighted(
@@ -79,78 +161,317 @@ def from_samples_grouped(
     )
 
 
-def linear_from_centered_moments(
-    input_mean: jax.Array,
-    output_mean: jax.Array,
-    input_covariance: jax.Array,
-    output_covariance: jax.Array,
-    output_input_covariance: jax.Array,
+def _from_moment_match_weighted(
+    distributions: Gaussian,
+    normalized_weights: jax.Array,
+) -> Gaussian:
+    """Moment-match Gaussian distributions using normalized weights."""
+    result = _from_samples_normalized(
+        values=distributions.mean,
+        weights=normalized_weights,
+    )
+
+    covariance = result.covariance + jnp.einsum(
+        't...,tij->...ij',
+        normalized_weights,
+        distributions.covariance,
+    )
+
+    covariance = 0.5 * (
+        covariance
+        + jnp.swapaxes(
+            covariance,
+            -2,
+            -1,
+        )
+    )
+
+    return result._replace(
+        covariance=covariance,
+    )
+
+
+def from_moment_match(
+    distributions: Gaussian,
+    weights: jax.Array | None = None,
+) -> Gaussian:
+    """
+    Moment-match a sequence of Gaussian distributions.
+
+    The returned covariance combines average within-distribution
+    covariance with covariance across the distribution means.
+    Optional trailing weight dimensions produce a batched result.
+    """
+    assert len(distributions.batch_shape) == 1
+
+    dtype = jnp.result_type(
+        distributions.dtype,
+        weights if weights is not None else jnp.float32,
+        jnp.float32,
+    )
+
+    distributions = distributions.astype(dtype)
+
+    normalized_weights = _normalize_weights(
+        num_samples=distributions.batch_shape[0],
+        weights=weights,
+        dtype=dtype,
+    )
+
+    return _from_moment_match_weighted(
+        distributions=distributions,
+        normalized_weights=normalized_weights,
+    )
+
+
+def paired_from_moment_match(
+    distributions: PairedGaussian,
+    weights: jax.Array | None = None,
+) -> PairedGaussian:
+    """
+    Moment-match a sequence of paired Gaussian distributions.
+
+    Marginal covariances combine within-distribution uncertainty with
+    variation across marginal means. Cross-covariance is aggregated in
+    the analogous way.
+    """
+    assert len(distributions.batch_shape) == 1
+
+    dtype = jnp.result_type(
+        distributions.dtype,
+        weights if weights is not None else jnp.float32,
+        jnp.float32,
+    )
+
+    distributions = distributions.astype(dtype)
+
+    normalized_weights = _normalize_weights(
+        num_samples=distributions.batch_shape[0],
+        weights=weights,
+        dtype=dtype,
+    )
+
+    left = _from_moment_match_weighted(
+        distributions=distributions.left,
+        normalized_weights=normalized_weights,
+    )
+
+    right = _from_moment_match_weighted(
+        distributions=distributions.right,
+        normalized_weights=normalized_weights,
+    )
+
+    left_residuals = _center_samples(
+        distributions.left.mean,
+        left.mean,
+    )
+
+    right_residuals = _center_samples(
+        distributions.right.mean,
+        right.mean,
+    )
+
+    cross_covariance = jnp.einsum(
+        't...,t...i,t...j->...ij',
+        normalized_weights,
+        right_residuals,
+        left_residuals,
+    ) + jnp.einsum(
+        't...,tij->...ij',
+        normalized_weights,
+        distributions.cross_covariance,
+    )
+
+    return PairedGaussian(
+        left=left,
+        right=right,
+        cross_covariance=cross_covariance,
+    )
+
+
+def paired_from_samples(
+    left: jax.Array,  # (T, L)
+    right: jax.Array,  # (T, R)
+    *,
+    weights: jax.Array | None = None,  # (T, ...)
+) -> PairedGaussian:
+    """Fit a paired Gaussian from aligned left and right samples."""
+    assert left.shape[0] == right.shape[0]
+
+    num_samples = left.shape[0]
+
+    dtype = jnp.result_type(
+        left,
+        right,
+        weights if weights is not None else jnp.float32,
+        jnp.float32,
+    )
+
+    left = left.astype(dtype)
+    right = right.astype(dtype)
+
+    normalized_weights = _normalize_weights(
+        num_samples=num_samples,
+        weights=weights,
+        dtype=dtype,
+    )
+
+    left_distribution = _from_samples_normalized(
+        values=left,
+        weights=normalized_weights,
+    )
+
+    right_distribution = _from_samples_normalized(
+        values=right,
+        weights=normalized_weights,
+    )
+
+    left_residuals = _center_samples(
+        left,
+        left_distribution.mean,
+    )
+
+    right_residuals = _center_samples(
+        right,
+        right_distribution.mean,
+    )
+
+    cross_covariance = jnp.einsum(
+        't...,t...i,t...j->...ij',
+        normalized_weights,
+        right_residuals,
+        left_residuals,
+    )
+
+    return PairedGaussian(
+        left=left_distribution,
+        right=right_distribution,
+        cross_covariance=cross_covariance,
+    )
+
+
+def paired_from_left_marginals(
+    left: Gaussian,
+    right: jax.Array,
+    *,
+    weights: jax.Array | None = None,
+) -> PairedGaussian:
+    """
+    Moment-match uncertain left variables with deterministic right samples.
+    """
+    assert len(left.batch_shape) == 1
+    assert left.batch_shape[0] == right.shape[0]
+
+    dtype = jnp.result_type(
+        left.dtype,
+        right,
+        weights if weights is not None else jnp.float32,
+        jnp.float32,
+    )
+
+    left = left.astype(dtype)
+    right = right.astype(dtype)
+
+    normalized_weights = _normalize_weights(
+        num_samples=left.batch_shape[0],
+        weights=weights,
+        dtype=dtype,
+    )
+
+    aggregated_left = _from_moment_match_weighted(
+        distributions=left,
+        normalized_weights=normalized_weights,
+    )
+
+    aggregated_right = _from_samples_normalized(
+        values=right,
+        weights=normalized_weights,
+    )
+
+    left_residuals = _center_samples(
+        left.mean,
+        aggregated_left.mean,
+    )
+
+    right_residuals = _center_samples(
+        right,
+        aggregated_right.mean,
+    )
+
+    cross_covariance = jnp.einsum(
+        't...,t...i,t...j->...ij',
+        normalized_weights,
+        right_residuals,
+        left_residuals,
+    )
+
+    return PairedGaussian(
+        left=aggregated_left,
+        right=aggregated_right,
+        cross_covariance=cross_covariance,
+    )
+
+
+def linear_from_paired(
+    paired: PairedGaussian,
     ridge: float = 0.0,
 ) -> LinearGaussian:
     r"""
-    Fit a linear Gaussian from means and centered second moments.
+    Return the linear-Gaussian distribution of ``right | left``.
 
-    Fits
-
-        y | x ~ N(A x + b, Q)
-
-    from E[x], E[y], Cov(x), Cov(y), and Cov(y, x).
-    Leading batch dimensions are supported.
+    ``ridge`` adds isotropic regularization to the left covariance when
+    solving for the linear coefficients. With nonzero ridge, the result
+    is a regularized approximation to the exact Gaussian conditional.
     """
     identity = jnp.eye(
-        input_covariance.shape[-1],
-        dtype=input_covariance.dtype,
+        paired.left_dim,
+        dtype=paired.dtype,
     )
 
-    regularized_input_covariance = input_covariance + ridge * identity
-
     coefficients = jnp.linalg.solve(
-        regularized_input_covariance,
+        paired.left.covariance + ridge * identity,
         jnp.swapaxes(
-            output_input_covariance,
+            paired.cross_covariance,
             -2,
             -1,
         ),
     )
+
     coefficients = jnp.swapaxes(
         coefficients,
         -2,
         -1,
     )
 
-    bias = output_mean - jnp.einsum(
+    bias = paired.right.mean - jnp.einsum(
         '...oi,...i->...o',
         coefficients,
-        input_mean,
+        paired.left.mean,
     )
 
-    noise_covariance = (
-        output_covariance
-        - coefficients
-        @ jnp.swapaxes(
-            output_input_covariance,
-            -2,
-            -1,
-        )
-        - output_input_covariance
-        @ jnp.swapaxes(
-            coefficients,
-            -2,
-            -1,
-        )
-        + coefficients
-        @ input_covariance
-        @ jnp.swapaxes(
-            coefficients,
-            -2,
-            -1,
-        )
+    coefficients_t = jnp.swapaxes(
+        coefficients,
+        -2,
+        -1,
     )
 
-    noise_covariance = 0.5 * (
-        noise_covariance
+    cross_covariance_t = jnp.swapaxes(
+        paired.cross_covariance,
+        -2,
+        -1,
+    )
+
+    covariance = (
+        paired.right.covariance
+        - coefficients @ cross_covariance_t
+        - paired.cross_covariance @ coefficients_t
+        + coefficients @ paired.left.covariance @ coefficients_t
+    )
+
+    covariance = 0.5 * (
+        covariance
         + jnp.swapaxes(
-            noise_covariance,
+            covariance,
             -2,
             -1,
         )
@@ -161,49 +482,39 @@ def linear_from_centered_moments(
             coefficients=coefficients,
             bias=bias,
         ),
-        covariance=noise_covariance,
+        covariance=covariance,
     )
 
 
 def linear_from_samples(
-    inputs: jax.Array,
-    outputs: jax.Array,
+    inputs: jax.Array,  # (T, *input_shape)
+    outputs: jax.Array,  # (T, O)
     ridge: float = 0.0,
 ) -> LinearGaussian:
-    """Fit a linear Gaussian model from paired samples."""
+    """Fit a linear Gaussian model from samples."""
     if inputs.ndim < 2:
         raise ValueError('inputs must have shape (T, *input_shape)')
 
     input_shape = inputs.shape[1:]
-    flat_inputs = inputs.reshape(
-        inputs.shape[0],
-        -1,
+
+    paired = paired_from_samples(
+        left=inputs.reshape(
+            inputs.shape[0],
+            -1,
+        ),
+        right=outputs,
     )
 
-    input_mean = jnp.mean(flat_inputs, axis=0)
-    output_mean = jnp.mean(outputs, axis=0)
-
-    input_residuals = flat_inputs - input_mean
-    output_residuals = outputs - output_mean
-
-    num_samples = inputs.shape[0]
-
-    model = linear_from_centered_moments(
-        input_mean=input_mean,
-        output_mean=output_mean,
-        input_covariance=(input_residuals.T @ input_residuals / num_samples),
-        output_covariance=(output_residuals.T @ output_residuals / num_samples),
-        output_input_covariance=(output_residuals.T @ input_residuals / num_samples),
+    return linear_from_paired(
+        paired,
         ridge=ridge,
-    )
-
-    return model.reshape_input(input_shape)
+    ).reshape_input(input_shape)
 
 
 def linear_from_samples_weighted(
-    inputs: jax.Array,
-    outputs: jax.Array,
-    weights: jax.Array,
+    inputs: jax.Array,  # (T, *input_shape)
+    outputs: jax.Array,  # (T, O)
+    weights: jax.Array,  # (T, ...)
     ridge: float = 0.0,
 ) -> LinearGaussian:
     """Fit one weighted model for each batch entry of ``weights``."""
@@ -211,70 +522,20 @@ def linear_from_samples_weighted(
         raise ValueError('inputs must have shape (T, *input_shape)')
 
     input_shape = inputs.shape[1:]
-    flat_inputs = inputs.reshape(
-        inputs.shape[0],
-        -1,
+
+    paired = paired_from_samples(
+        left=inputs.reshape(
+            inputs.shape[0],
+            -1,
+        ),
+        right=outputs,
+        weights=weights,
     )
 
-    total = jnp.sum(weights, axis=0)
-    counts = jnp.where(total > 0, total, EPS)
-    normalized = weights / counts[None, ...]
-
-    input_mean = jnp.einsum(
-        't...,ti->...i',
-        normalized,
-        flat_inputs,
-    )
-    output_mean = jnp.einsum(
-        't...,to->...o',
-        normalized,
-        outputs,
-    )
-
-    batch_ndim = weights.ndim - 1
-
-    expanded_inputs = flat_inputs.reshape(
-        (flat_inputs.shape[0],) + (1,) * batch_ndim + (flat_inputs.shape[-1],)
-    )
-
-    expanded_outputs = outputs.reshape(
-        (outputs.shape[0],) + (1,) * batch_ndim + (outputs.shape[-1],)
-    )
-
-    input_residuals = expanded_inputs - input_mean[None, ...]
-    output_residuals = expanded_outputs - output_mean[None, ...]
-
-    input_covariance = jnp.einsum(
-        't...,t...i,t...j->...ij',
-        normalized,
-        input_residuals,
-        input_residuals,
-    )
-
-    output_covariance = jnp.einsum(
-        't...,t...o,t...p->...op',
-        normalized,
-        output_residuals,
-        output_residuals,
-    )
-
-    output_input_covariance = jnp.einsum(
-        't...,t...o,t...i->...oi',
-        normalized,
-        output_residuals,
-        input_residuals,
-    )
-
-    model = linear_from_centered_moments(
-        input_mean=input_mean,
-        output_mean=output_mean,
-        input_covariance=input_covariance,
-        output_covariance=output_covariance,
-        output_input_covariance=output_input_covariance,
+    return linear_from_paired(
+        paired,
         ridge=ridge,
-    )
-
-    return model.reshape_input(input_shape)
+    ).reshape_input(input_shape)
 
 
 def linear_from_samples_grouped(
@@ -284,11 +545,15 @@ def linear_from_samples_grouped(
     num_groups: int,
     ridge: float = 0.0,
 ) -> LinearGaussian:
-    """Fit one model to each assigned group."""
+    """Fit one linear Gaussian to each assigned group."""
     weights = jax.nn.one_hot(
         assignments,
         num_groups,
-        dtype=jnp.result_type(inputs, outputs, jnp.float32),
+        dtype=jnp.result_type(
+            inputs,
+            outputs,
+            jnp.float32,
+        ),
     )  # (T, K)
 
     return linear_from_samples_weighted(

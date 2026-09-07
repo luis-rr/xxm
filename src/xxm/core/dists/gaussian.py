@@ -538,3 +538,87 @@ class LinearGaussian(typing.NamedTuple):
             ),
             input_output_covariance=input_output_covariance,
         )
+
+
+class PairedGaussian(typing.NamedTuple):
+    r"""
+    Joint Gaussian distribution over a pair of random variables.
+
+    ``left`` and ``right`` are the marginal distributions and
+    ``cross_covariance`` is ``Cov(right, left)``.
+
+    Leading dimensions are batch dimensions and must be shared between
+    attributes.
+    """
+
+    left: Gaussian
+    right: Gaussian
+    cross_covariance: jax.Array  # (..., R, L)
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        left_shape = self.left.batch_shape
+        right_shape = self.right.batch_shape
+        cross_shape = self.cross_covariance.shape[:-2]
+
+        assert left_shape == right_shape
+        assert left_shape == cross_shape
+        assert self.cross_covariance.shape[-2:] == (
+            self.right_dim,
+            self.left_dim,
+        )
+
+        return left_shape
+
+    @property
+    def left_dim(self) -> int:
+        return self.left.variable_dim
+
+    @property
+    def right_dim(self) -> int:
+        return self.right.variable_dim
+
+    @property
+    def variable_dim(self) -> int:
+        return self.left_dim + self.right_dim
+
+    @property
+    def dtype(self) -> jax.typing.DTypeLike:
+        return jnp.result_type(
+            self.left.dtype,
+            self.right.dtype,
+            self.cross_covariance,
+        )
+
+    @property
+    def mean(self) -> jax.Array:
+        """Mean of the concatenated variable ``[left, right]``."""
+        return jnp.concatenate([self.left.mean, self.right.mean], axis=-1)
+
+    @property
+    def covariance(self) -> jax.Array:
+        """Covariance of the concatenated variable ``[left, right]``."""
+        left_right_covariance = jnp.swapaxes(self.cross_covariance, -2, -1)
+
+        top = jnp.concatenate([self.left.covariance, left_right_covariance], axis=-1)
+
+        bottom = jnp.concatenate(
+            [self.cross_covariance, self.right.covariance], axis=-1
+        )
+
+        return jnp.concatenate([top, bottom], axis=-2)
+
+    def select(self, index) -> typing.Self:
+        """Index into the batch dimensions."""
+        return self.__class__(
+            left=self.left.select(index),
+            right=self.right.select(index),
+            cross_covariance=self.cross_covariance[index],
+        )
+
+    def astype(self, dtype: jax.typing.DTypeLike) -> typing.Self:
+        return self._replace(
+            left=self.left.astype(dtype),
+            right=self.right.astype(dtype),
+            cross_covariance=self.cross_covariance.astype(dtype),
+        )

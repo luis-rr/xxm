@@ -9,7 +9,7 @@ from xxm.core.chains.gaussian import (
     GaussianChainMarginals,
     GaussianPairPotential,
 )
-from xxm.core.dists.gaussian import LinearGaussian
+from xxm.core.dists.gaussian import Gaussian, LinearGaussian, PairedGaussian
 from xxm.core.emissions.continuous import EmissionsT
 from xxm.core.models.discrete import CategoricalInitial, CategoricalTransitions
 from xxm.core.models.gaussian import StateConditionedGaussian
@@ -49,113 +49,48 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
             self.model,
         )
 
-    def fit_params(
-        self,
-        posterior: Posterior,
-    ) -> typing.Self:
+    def fit_params(self, posterior: Posterior) -> typing.Self:
         """Fit one linear-Gaussian dynamics model per incoming state."""
-
         weights = posterior.discrete.state_probs[1:]  # (T-1, K)
 
-        means = posterior.continuous.means
-        covariances = posterior.continuous.covariances
-        cross_covariances = posterior.continuous.cross_covariances
+        continuous = posterior.continuous
 
-        def fit_state(
-            weights_k: jax.Array,
-            current_model: LinearGaussian,
-        ) -> LinearGaussian:
-            true_total = jnp.sum(weights_k)
+        paired = PairedGaussian(
+            left=Gaussian(
+                mean=continuous.means[:-1],
+                covariance=continuous.covariances[:-1],
+            ),
+            right=Gaussian(
+                mean=continuous.means[1:],
+                covariance=continuous.covariances[1:],
+            ),
+            cross_covariance=jnp.swapaxes(
+                continuous.cross_covariances,
+                -2,
+                -1,
+            ),
+        )  # (T-1)-batched
 
-            # Only used to make the candidate calculation defined when the
-            # state has zero posterior mass.
-            total = jnp.where(
-                true_total > 0,
-                true_total,
-                1.0,
-            )
+        paired = gaussian_fit.paired_from_moment_match(
+            paired,
+            weights=weights,
+        )  # K-batched
 
-            normalized = weights_k / total
+        fitted_model = gaussian_fit.linear_from_paired(
+            paired,
+            ridge=1e-6,
+        )
 
-            input_mean = jnp.einsum(
-                't,ti->i',
-                normalized,
-                means[:-1],
-            )
+        # Preserve the current parameters for exactly empty states.
+        active = jnp.sum(weights, axis=0) > 0.0  # (K,)
 
-            output_mean = jnp.einsum(
-                't,ti->i',
-                normalized,
-                means[1:],
-            )
-
-            input_residuals = means[:-1] - input_mean
-
-            output_residuals = means[1:] - output_mean
-
-            input_covariance = jnp.einsum(
-                't,tij->ij',
-                normalized,
-                covariances[:-1],
-            ) + jnp.einsum(
-                't,ti,tj->ij',
-                normalized,
-                input_residuals,
-                input_residuals,
-            )
-
-            output_covariance = jnp.einsum(
-                't,tij->ij',
-                normalized,
-                covariances[1:],
-            ) + jnp.einsum(
-                't,ti,tj->ij',
-                normalized,
-                output_residuals,
-                output_residuals,
-            )
-
-            # cross_covariances[t] = Cov(x_t, x_{t+1}),
-            # while the fitter expects Cov(x_{t+1}, x_t).
-            output_input_covariance = jnp.einsum(
-                't,tij->ij',
-                normalized,
-                jnp.swapaxes(
-                    cross_covariances,
-                    -1,
-                    -2,
-                ),
-            ) + jnp.einsum(
-                't,ti,tj->ij',
-                normalized,
-                output_residuals,
-                input_residuals,
-            )
-
-            fitted_model = gaussian_fit.linear_from_centered_moments(
-                input_mean=input_mean,
-                output_mean=output_mean,
-                input_covariance=input_covariance,
-                output_covariance=output_covariance,
-                output_input_covariance=output_input_covariance,
-                ridge=1e-6,
-            )
-
-            return jax.tree.map(
-                lambda fitted, current: jnp.where(
-                    true_total > 0,
-                    fitted,
-                    current,
-                ),
-                fitted_model,
-                current_model,
-            )
-
-        model = jax.vmap(
-            fit_state,
-            in_axes=(1, 0),
-        )(
-            weights,
+        model = jax.tree.map(
+            lambda fitted, current: jnp.where(
+                active.reshape((active.shape[0],) + (1,) * (fitted.ndim - 1)),
+                fitted,
+                current,
+            ),
+            fitted_model,
             self.model,
         )
 

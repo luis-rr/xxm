@@ -169,35 +169,17 @@ class GaussianEmissions(typing.NamedTuple):
         posterior: ContinuousPosterior,
     ) -> typing.Self:
         """Fit the emission parameters from Gaussian latent marginals."""
-        means = posterior.means
-        covariances = posterior.covariances
-
-        input_mean = jnp.mean(means, axis=0)
-        output_mean = jnp.mean(observations, axis=0)
-
-        input_residuals = means - input_mean
-        output_residuals = observations - output_mean
-
-        num_samples = observations.shape[0]
-
-        input_covariance = (
-            jnp.mean(covariances, axis=0)
-            + input_residuals.T @ input_residuals / num_samples
+        paired = gaussian_fit.paired_from_left_marginals(
+            left=Gaussian(
+                mean=posterior.means,
+                covariance=posterior.covariances,
+            ),
+            right=observations,
         )
 
-        output_covariance = output_residuals.T @ output_residuals / num_samples
-
-        output_input_covariance = output_residuals.T @ input_residuals / num_samples
-
-        model = gaussian_fit.linear_from_centered_moments(
-            input_mean=input_mean,
-            output_mean=output_mean,
-            input_covariance=input_covariance,
-            output_covariance=output_covariance,
-            output_input_covariance=output_input_covariance,
+        return self._replace(
+            model=gaussian_fit.linear_from_paired(paired),
         )
-
-        return self._replace(model=model)
 
     def observation_mean(self, posterior: ContinuousPosterior) -> jax.Array:
         return self.model.conditional_mean(
