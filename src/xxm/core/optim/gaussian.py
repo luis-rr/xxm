@@ -70,6 +70,92 @@ def from_samples_grouped(
     )
 
 
+def linear_from_centered_moments(
+    input_mean: jax.Array,
+    output_mean: jax.Array,
+    input_covariance: jax.Array,
+    output_covariance: jax.Array,
+    output_input_covariance: jax.Array,
+    ridge: float = 0.0,
+) -> LinearGaussian:
+    r"""
+    Fit a linear Gaussian from means and centered second moments.
+
+    Fits
+
+        y | x ~ N(A x + b, Q)
+
+    from E[x], E[y], Cov(x), Cov(y), and Cov(y, x).
+    Leading batch dimensions are supported.
+    """
+    identity = jnp.eye(
+        input_covariance.shape[-1],
+        dtype=input_covariance.dtype,
+    )
+
+    regularized_input_covariance = input_covariance + ridge * identity
+
+    coefficients = jnp.linalg.solve(
+        regularized_input_covariance,
+        jnp.swapaxes(
+            output_input_covariance,
+            -2,
+            -1,
+        ),
+    )
+    coefficients = jnp.swapaxes(
+        coefficients,
+        -2,
+        -1,
+    )
+
+    bias = output_mean - jnp.einsum(
+        '...oi,...i->...o',
+        coefficients,
+        input_mean,
+    )
+
+    noise_covariance = (
+        output_covariance
+        - coefficients
+        @ jnp.swapaxes(
+            output_input_covariance,
+            -2,
+            -1,
+        )
+        - output_input_covariance
+        @ jnp.swapaxes(
+            coefficients,
+            -2,
+            -1,
+        )
+        + coefficients
+        @ input_covariance
+        @ jnp.swapaxes(
+            coefficients,
+            -2,
+            -1,
+        )
+    )
+
+    noise_covariance = 0.5 * (
+        noise_covariance
+        + jnp.swapaxes(
+            noise_covariance,
+            -2,
+            -1,
+        )
+    )
+
+    return LinearGaussian(
+        affine=Affine(
+            coefficients=coefficients,
+            bias=bias,
+        ),
+        covariance=noise_covariance,
+    )
+
+
 def linear_from_moments(
     input_mean: jax.Array,
     output_mean: jax.Array,
@@ -78,49 +164,27 @@ def linear_from_moments(
     output_input_moment: jax.Array,
     ridge: float = 0.0,
 ) -> LinearGaussian:
-    r"""Fit from E[x], E[y], E[xxᵀ], E[yyᵀ], and E[yxᵀ].
+    r"""Fit from E[x], E[y], E[xxᵀ], E[yyᵀ], and E[yxᵀ]."""
 
-    Expectations may include both posterior uncertainty and averaging
-    over samples. Leading batch dimensions are supported.
-    """
     input_covariance = (
         input_second_moment - input_mean[..., :, None] * input_mean[..., None, :]
     )
+
     output_covariance = (
         output_second_moment - output_mean[..., :, None] * output_mean[..., None, :]
     )
+
     output_input_covariance = (
         output_input_moment - output_mean[..., :, None] * input_mean[..., None, :]
     )
 
-    identity = jnp.eye(
-        input_covariance.shape[-1],
-        dtype=input_covariance.dtype,
-    )
-    regularized_input_covariance = input_covariance + ridge * identity
-
-    coefficients = jnp.linalg.solve(
-        regularized_input_covariance,
-        jnp.swapaxes(output_input_covariance, -2, -1),
-    )
-    coefficients = jnp.swapaxes(coefficients, -2, -1)
-
-    bias = output_mean - jnp.einsum('...oi,...i->...o', coefficients, input_mean)
-
-    noise_covariance = (
-        output_covariance
-        - coefficients @ jnp.swapaxes(output_input_covariance, -2, -1)
-        - output_input_covariance @ jnp.swapaxes(coefficients, -2, -1)
-        + coefficients @ input_covariance @ jnp.swapaxes(coefficients, -2, -1)
-    )
-    noise_covariance = 0.5 * (noise_covariance + jnp.swapaxes(noise_covariance, -2, -1))
-
-    return LinearGaussian(
-        affine=Affine(
-            coefficients=coefficients,
-            bias=bias,
-        ),
-        covariance=noise_covariance,
+    return linear_from_centered_moments(
+        input_mean=input_mean,
+        output_mean=output_mean,
+        input_covariance=input_covariance,
+        output_covariance=output_covariance,
+        output_input_covariance=output_input_covariance,
+        ridge=ridge,
     )
 
 
