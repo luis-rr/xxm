@@ -3,19 +3,16 @@
 import typing
 
 import jax
-import jax.numpy as jnp
 
 from xxm.core.affine import Affine
 from xxm.core.chains.discrete import DiscreteChainMarginals
 from xxm.core.chains.gaussian import (
     GaussianChainMarginals,
-    GaussianPairPotential,
 )
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian, PairedGaussian
 from xxm.core.emissions.continuous import EmissionsT
 from xxm.core.latents.discrete import CategoricalInitial, CategoricalTransitions
 from xxm.core.latents.gaussian import StateConditionedGaussian
-from xxm.core.optim import gaussian as gaussian_fit
+from xxm.core.latents.switching import GaussianLinearSwitchingDynamics
 
 
 class Posterior(typing.NamedTuple):
@@ -28,128 +25,6 @@ class Posterior(typing.NamedTuple):
         r"""Relabel discrete states $z$ by permutation."""
         return self._replace(
             discrete=self.discrete.permute(permutation),
-        )
-
-
-class GaussianLinearSwitchingDynamics(typing.NamedTuple):
-    r"""State-dependent linear-Gaussian dynamics.
-
-    Under SLDS convention, state $z[t]$ indexes dynamics generating $x[t]$ from $x[t-1]$.
-    Consequently the first transition uses $z[1]$; $z[0]$ indexes the initial distribution.
-    """
-
-    dist: LinearGaussian  # K-batched, input dimension D, output dimension D
-
-    @property
-    def num_states(self) -> int:
-        """Number of discrete states $K$."""
-        return self.dist.covariance.shape[0]
-
-    def compute_pair_potentials(self) -> GaussianPairPotential:
-        """Return one Gaussian transition potential per discrete state."""
-        return GaussianPairPotential.from_linear_conditional(
-            self.dist,
-        )
-
-    def fit_params(self, posterior: Posterior) -> typing.Self:
-        r"""Fit state-dependent dynamics from posterior pair marginals."""
-        weights = posterior.discrete.state_probs[1:]  # (T-1, K)
-
-        continuous = posterior.continuous
-
-        paired = PairedGaussian(
-            left=Gaussian(
-                mean=continuous.means[:-1],
-                covariance=continuous.covariances[:-1],
-            ),
-            right=Gaussian(
-                mean=continuous.means[1:],
-                covariance=continuous.covariances[1:],
-            ),
-            cross_covariance=jnp.swapaxes(
-                continuous.cross_covariances,
-                -2,
-                -1,
-            ),
-        )  # (T-1)-batched
-
-        paired = gaussian_fit.paired_from_moment_match(
-            paired,
-            weights=weights,
-        )  # K-batched
-
-        fitted_model = gaussian_fit.linear_from_paired(
-            paired,
-            ridge=1e-6,
-        )
-
-        # Preserve the current parameters for exactly empty states.
-        active = jnp.sum(weights, axis=0) > 0.0  # (K,)
-
-        model = jax.tree.map(
-            lambda fitted, current: jnp.where(
-                active.reshape((active.shape[0],) + (1,) * (fitted.ndim - 1)),
-                fitted,
-                current,
-            ),
-            fitted_model,
-            self.dist,
-        )
-
-        return self._replace(
-            dist=model,
-        )
-
-    def sample_next(
-        self, key: jax.Array, previous: jax.Array, state: jax.Array
-    ) -> jax.Array:
-        """Sample the next latent using the state being entered."""
-        return self.dist.select(state).sample(key, previous)
-
-    def sample(
-        self, key: jax.Array, initial_latent: jax.Array, states: jax.Array
-    ) -> jax.Array:
-        """Sample subsequent latents from their incoming switching states."""
-
-        def step(carry, state):
-            latent, key = carry
-
-            key, sample_key = jax.random.split(key)
-
-            latent = self.sample_next(
-                sample_key,
-                latent,
-                state,
-            )
-
-            return (latent, key), latent
-
-        _, subsequent_latents = jax.lax.scan(
-            step,
-            (initial_latent, key),
-            states,
-        )
-
-        return jnp.concatenate(
-            [
-                initial_latent[None],
-                subsequent_latents,
-            ],
-            axis=0,
-        )
-
-    def permute(self, permutation: jax.Array) -> typing.Self:
-        """Express the states in a reordered coordinate system."""
-        return self._replace(
-            dist=self.dist.select(permutation),
-        )
-
-    def align(self, alignment: Affine) -> typing.Self:
-        """Express the latent dynamics in aligned coordinates."""
-        inverse = alignment.inverse()
-
-        return self._replace(
-            dist=(self.dist.compose_input(inverse).compose_output(alignment)),
         )
 
 
@@ -191,7 +66,8 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
             # Keep the state-dependent boundary distributions fixed.
             latent_initial=self.latent_initial,
             dynamics=self.dynamics.fit_params(
-                posterior,
+                discrete=posterior.discrete,
+                continuous=posterior.continuous,
             ),
             emissions=self.emissions.fit_params(
                 observations,

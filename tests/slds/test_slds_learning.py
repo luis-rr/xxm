@@ -108,7 +108,11 @@ def _model() -> Model:
 
 
 def test_switching_dynamics_fit_recovers_known_linear_gaussian_model():
-    fitted = _dynamics().fit_params(_posterior())
+    post = _posterior()
+    fitted = _dynamics().fit_params(
+        discrete=post.discrete,
+        continuous=post.continuous,
+    )
 
     np.testing.assert_allclose(
         fitted.dist.affine.coefficients,
