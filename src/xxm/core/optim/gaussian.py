@@ -233,9 +233,9 @@ def paired_from_moment_match(
     """
     Moment-match a sequence of paired Gaussian distributions.
 
-    Marginal covariances combine within-distribution uncertainty with
-    variation across marginal means. Cross-covariance is aggregated in
-    the analogous way.
+    The pair is moment-matched jointly to preserve the covariance structure.
+    Eigenvalues below floating-point resolution are floored to keep the
+    resulting covariance numerically positive definite.
     """
     assert len(distributions.batch_shape) == 1
 
@@ -253,41 +253,69 @@ def paired_from_moment_match(
         dtype=dtype,
     )
 
-    left = _from_moment_match_weighted(
-        distributions=distributions.left,
+    joint = _from_moment_match_weighted(
+        distributions=Gaussian(
+            mean=distributions.mean,
+            covariance=distributions.covariance,
+        ),
         normalized_weights=normalized_weights,
     )
 
-    right = _from_moment_match_weighted(
-        distributions=distributions.right,
-        normalized_weights=normalized_weights,
+    eigenvalues, eigenvectors = jnp.linalg.eigh(
+        joint.covariance,
     )
 
-    left_residuals = _center_samples(
-        distributions.left.mean,
-        left.mean,
+    scale = jnp.max(
+        jnp.abs(eigenvalues),
+        axis=-1,
     )
 
-    right_residuals = _center_samples(
-        distributions.right.mean,
-        right.mean,
+    floor = distributions.variable_dim * jnp.finfo(dtype).eps * scale
+
+    eigenvalues = jnp.maximum(
+        eigenvalues,
+        floor[..., None],
     )
 
-    cross_covariance = jnp.einsum(
-        't...,t...i,t...j->...ij',
-        normalized_weights,
-        right_residuals,
-        left_residuals,
-    ) + jnp.einsum(
-        't...,tij->...ij',
-        normalized_weights,
-        distributions.cross_covariance,
+    covariance = (eigenvectors * eigenvalues[..., None, :]) @ jnp.swapaxes(
+        eigenvectors,
+        -2,
+        -1,
     )
+
+    covariance = 0.5 * (
+        covariance
+        + jnp.swapaxes(
+            covariance,
+            -2,
+            -1,
+        )
+    )
+
+    left_dim = distributions.left_dim
 
     return PairedGaussian(
-        left=left,
-        right=right,
-        cross_covariance=cross_covariance,
+        left=Gaussian(
+            mean=joint.mean[..., :left_dim],
+            covariance=covariance[
+                ...,
+                :left_dim,
+                :left_dim,
+            ],
+        ),
+        right=Gaussian(
+            mean=joint.mean[..., left_dim:],
+            covariance=covariance[
+                ...,
+                left_dim:,
+                left_dim:,
+            ],
+        ),
+        cross_covariance=covariance[
+            ...,
+            left_dim:,
+            :left_dim,
+        ],
     )
 
 

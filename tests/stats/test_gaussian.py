@@ -331,3 +331,48 @@ def test_linear_from_marginals_accounts_for_input_uncertainty():
         [[2.0]],
         atol=ATOL,
     )
+
+
+def test_paired_moment_match_preserves_positive_definiteness():
+    means = jnp.array(
+        [
+            [272.0, -1113.0, 819.0, -11.0],
+            [-145.0, 594.0, -437.0, 6.0],
+        ],
+        dtype=jnp.float32,
+    )
+
+    joint_covariance = jnp.array(
+        [
+            [34.643, -25.674, -48.165, -5.416],
+            [-25.674, 108.154, -78.849, -13.374],
+            [-48.165, -78.849, 217.448, 1.916],
+            [-5.416, -13.374, 1.916, 244.210],
+        ],
+        dtype=jnp.float32,
+    )
+
+    joint_covariances = jnp.broadcast_to(
+        joint_covariance,
+        (2, 4, 4),
+    )
+
+    distributions = PairedGaussian(
+        left=Gaussian(
+            mean=means[:, :2],
+            covariance=joint_covariances[:, :2, :2],
+        ),
+        right=Gaussian(
+            mean=means[:, 2:],
+            covariance=joint_covariances[:, 2:, 2:],
+        ),
+        cross_covariance=joint_covariances[:, 2:, :2],
+    )
+
+    # The input distributions are valid.
+    assert jnp.isfinite(jnp.linalg.cholesky(distributions.covariance)).all()
+
+    fit = gaussian_fit.paired_from_moment_match(distributions)
+
+    # Moment matching should preserve positive definiteness.
+    assert jnp.isfinite(jnp.linalg.cholesky(fit.covariance)).all()
