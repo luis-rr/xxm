@@ -50,43 +50,43 @@ class GaussianSLDS:
     $$y_t\mid x_t \sim \mathcal{N}(Cx_t+d,R).$$
     """
 
-    model: Model[GaussianEmissions]
+    _model: Model[GaussianEmissions]
 
     @property
     def num_states(self) -> int:
         """Number of discrete dynamical states $K$."""
-        return self.model.num_states
+        return self._model.num_states
 
     @property
     def latent_dim(self) -> int:
         """Dimension $D_x$ of the continuous latent state."""
-        return self.model.dynamics.dist.output_dim
+        return self._model.dynamics.dist.output_dim
 
     @property
     def observation_dim(self) -> int:
         """Dimension $D_y$ of each observation."""
-        return self.model.emissions.dist.output_dim
+        return self._model.emissions.dist.output_dim
 
     @property
     def dynamics(self) -> LinearGaussian:
         """State-conditioned linear-Gaussian transition distributions."""
-        return self.model.dynamics.dist
+        return self._model.dynamics.dist
 
     @property
     def emissions(self) -> LinearGaussian:
         """Linear-Gaussian observation distribution."""
-        return self.model.emissions.dist
+        return self._model.emissions.dist
 
     def permute(self, permutation: jax.Array) -> typing.Self:
         """Relabel the discrete latent states."""
         return self.__class__(
-            model=self.model.permute(permutation),
+            _model=self._model.permute(permutation),
         )
 
     def align(self, alignment: Affine) -> typing.Self:
         """Express the latent dynamics in aligned coordinates."""
         return self.__class__(
-            model=self.model.align(alignment),
+            _model=self._model.align(alignment),
         )
 
     def most_likely_states(self, posterior: Posterior) -> jax.Array:
@@ -102,7 +102,7 @@ class GaussianSLDS:
 
     def observation_mean(self, posterior: Posterior) -> jax.Array:
         """Return the posterior mean observation at each time point."""
-        return self.model.emissions.observation_mean(
+        return self._model.emissions.observation_mean(
             posterior.continuous,
         )
 
@@ -123,7 +123,7 @@ class GaussianSLDS:
     ) -> typing.Self:
         """Construct a Gaussian SLDS from discrete, latent, and emission parameters."""
         return cls(
-            model=Model(
+            _model=Model(
                 state_initial=CategoricalInitial(
                     dist=Categorical(
                         probs=initial_probs,
@@ -217,7 +217,7 @@ class GaussianSLDS:
         num_steps: int,
     ) -> tuple[jax.Array, jax.Array, jax.Array]:
         r"""Sample states $z_{0:T-1}$, latents $x_{0:T-1}$, and observations $y_{0:T-1}$."""
-        return self.model.sample(
+        return self._model.sample(
             key,
             num_steps,
         )
@@ -230,7 +230,7 @@ class GaussianSLDS:
     ) -> tuple[Posterior, jax.Array]:
         """Compute a variational posterior over discrete states and continuous latents."""
         return infer_variational(
-            self.model,
+            self._model,
             observations,
             num_iters=num_iters,
         )
@@ -245,7 +245,7 @@ class GaussianSLDS:
     ) -> Fit[typing.Self]:
         """Fit model parameters with variational expectation-maximization."""
         fit = fit_variational_em(
-            self.model,
+            self._model,
             observations,
             num_iters=num_iters,
             num_inference_iters=num_inference_iters,
@@ -269,7 +269,7 @@ class GaussianSLDS:
     ) -> FitCollection[typing.Self]:
         """Fit multiple Gaussian SLDS initializations with variational EM."""
         fit = fit_variational_em_many(
-            tuple(model.model for model in models),
+            tuple(model._model for model in models),
             observations,
             num_iters=num_iters,
             num_inference_iters=num_inference_iters,
@@ -293,43 +293,43 @@ class PoissonSLDS:
     $$y_t\mid x_t \sim \operatorname{Poisson}(\exp(Cx_t+d)).$$
     """
 
-    model: Model[PoissonEmissions]
+    _model: Model[PoissonEmissions]
 
     @property
     def num_states(self) -> int:
         """Number of discrete dynamical states $K$."""
-        return self.model.num_states
+        return self._model.num_states
 
     @property
     def latent_dim(self) -> int:
         """Dimension $D_x$ of the continuous latent state."""
-        return self.model.dynamics.dist.output_dim
+        return self._model.dynamics.dist.output_dim
 
     @property
     def observation_dim(self) -> int:
         """Dimension $D_y$ of each observation."""
-        return self.model.emissions.dist.output_dim
+        return self._model.emissions.dist.output_dim
 
     @property
     def dynamics(self) -> LinearGaussian:
         """State-conditioned linear-Gaussian transition distributions."""
-        return self.model.dynamics.dist
+        return self._model.dynamics.dist
 
     @property
     def emissions(self) -> LinearPoisson:
         """Linear-Poisson observation distribution in log-rate form."""
-        return self.model.emissions.dist
+        return self._model.emissions.dist
 
     def permute(self, permutation: jax.Array) -> typing.Self:
         """Relabel the discrete latent states."""
         return self.__class__(
-            model=self.model.permute(permutation),
+            _model=self._model.permute(permutation),
         )
 
     def align(self, alignment: Affine) -> typing.Self:
         """Express the latent dynamics in aligned coordinates."""
         return self.__class__(
-            model=self.model.align(alignment),
+            _model=self._model.align(alignment),
         )
 
     def most_likely_states(self, posterior: Posterior) -> jax.Array:
@@ -345,7 +345,7 @@ class PoissonSLDS:
 
     def observation_mean(self, posterior: Posterior) -> jax.Array:
         """Return the posterior mean observation at each time point."""
-        return self.model.emissions.observation_mean(
+        return self._model.emissions.observation_mean(
             posterior.continuous,
         )
 
@@ -365,7 +365,7 @@ class PoissonSLDS:
     ) -> typing.Self:
         """Construct a Poisson SLDS from discrete, latent, and emission parameters."""
         return cls(
-            model=Model(
+            _model=Model(
                 state_initial=CategoricalInitial(
                     dist=Categorical(
                         probs=initial_probs,
@@ -458,7 +458,7 @@ class PoissonSLDS:
         num_steps: int,
     ) -> tuple[jax.Array, jax.Array, jax.Array]:
         r"""Sample states $z_{0:T-1}$, latents $x_{0:T-1}$, and observations $y_{0:T-1}$."""
-        return self.model.sample(
+        return self._model.sample(
             key,
             num_steps,
         )
@@ -473,7 +473,7 @@ class PoissonSLDS:
     ) -> tuple[Posterior, jax.Array]:
         """Compute a Laplace posterior approximation over states and latents."""
         return infer_laplace(
-            self.model,
+            self._model,
             observations,
             num_iters=num_iters,
             initial_latents=initial_latents,
@@ -491,7 +491,7 @@ class PoissonSLDS:
     ) -> Fit[typing.Self]:
         """Fit model parameters with Laplace-approximated expectation-maximization."""
         fit = fit_laplace_em(
-            self.model,
+            self._model,
             observations,
             num_iters=num_iters,
             num_inference_iters=num_inference_iters,
@@ -517,7 +517,7 @@ class PoissonSLDS:
     ) -> FitCollection[typing.Self]:
         """Fit multiple Poisson SLDS initializations with Laplace EM."""
         fit = fit_laplace_em_many(
-            tuple(model.model for model in models),
+            tuple(model._model for model in models),
             observations,
             num_iters=num_iters,
             num_inference_iters=num_inference_iters,

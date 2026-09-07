@@ -60,23 +60,23 @@ class GaussianHMM:
     $$y_t\mid z_t=k \sim \mathcal{N}(\mu_k, \Sigma_k).$$
     """
 
-    model: Model[GaussianEmissions]
+    _model: Model[GaussianEmissions]
 
     @property
     def num_states(self) -> int:
         """Number of discrete states $K$."""
-        return self.model.num_states
+        return self._model.num_states
 
     def permute(self, permutation: jax.Array) -> GaussianHMM:
         """Relabel discrete states by permutation."""
         return GaussianHMM(
-            model=self.model.permute(permutation),
+            _model=self._model.permute(permutation),
         )
 
     @property
     def states(self) -> Gaussian:
         """State-conditional emission distributions."""
-        return self.model.emissions.dist
+        return self._model.emissions.dist
 
     def most_likely_states(self, posterior: Posterior) -> jax.Array:
         """Return the marginally most likely state at each time point."""
@@ -107,7 +107,7 @@ class GaussianHMM:
         )
 
         return cls(
-            Model(
+            _model=Model(
                 initial=initial,
                 transitions=transitions,
                 emissions=GaussianEmissions(
@@ -140,7 +140,7 @@ class GaussianHMM:
 
     def sample(self, key: jax.Array, num_steps: int) -> tuple[jax.Array, jax.Array]:
         r"""Sample states $z_{0:T-1}$ and observations $y_{0:T-1}$ from the model."""
-        return self.model.sample(
+        return self._model.sample(
             key,
             num_steps,
         )
@@ -151,7 +151,7 @@ class GaussianHMM:
     ) -> tuple[Posterior, jax.Array]:
         """Compute the exact posterior over states and the observation log likelihood."""
         return infer_exact(
-            self.model,
+            self._model,
             observations,
         )
 
@@ -164,7 +164,7 @@ class GaussianHMM:
     ) -> Fit[typing.Self]:
         """Fit model parameters by expectation-maximization."""
         fit = fit_em(
-            self.model,
+            self._model,
             observations,
             num_iters=num_iters,
             progress=progress,
@@ -186,7 +186,7 @@ class GaussianHMM:
     ) -> FitCollection[typing.Self]:
         """Fit multiple HMM initializations to the same observations by EM."""
         fit = fit_em_many(
-            tuple(model.model for model in models),
+            tuple(model._model for model in models),
             observations,
             num_iters=num_iters,
             progress=progress,
@@ -206,23 +206,23 @@ class PoissonHMM:
     $$p(y_t|z_t=k) = \operatorname{Poisson}(\exp(\eta_k)).$$
     """
 
-    model: Model[PoissonEmissions]
+    _model: Model[PoissonEmissions]
 
     @property
     def num_states(self) -> int:
         """Number of discrete states $K$."""
-        return self.model.num_states
+        return self._model.num_states
 
     def permute(self, permutation: jax.Array) -> PoissonHMM:
         """Relabel discrete states by permutation."""
         return PoissonHMM(
-            model=self.model.permute(permutation),
+            _model=self._model.permute(permutation),
         )
 
     @property
     def states(self) -> Poisson:
         """State-conditional Poisson emission distributions."""
-        return self.model.emissions.dist
+        return self._model.emissions.dist
 
     def most_likely_states(self, posterior: Posterior) -> jax.Array:
         """Return the marginally most likely state at each time point."""
@@ -252,7 +252,7 @@ class PoissonHMM:
         )
 
         return cls(
-            model=Model(
+            _model=Model(
                 initial=initial,
                 transitions=transitions,
                 emissions=PoissonEmissions(
@@ -284,7 +284,7 @@ class PoissonHMM:
 
     def sample(self, key: jax.Array, num_steps: int) -> tuple[jax.Array, jax.Array]:
         r"""Sample states $z_{0:T-1}$ and observations $y_{0:T-1}$ from the model."""
-        return self.model.sample(
+        return self._model.sample(
             key,
             num_steps,
         )
@@ -292,7 +292,7 @@ class PoissonHMM:
     def infer(self, observations: jax.Array) -> tuple[Posterior, jax.Array]:
         """Compute the exact posterior over states and the observation log likelihood."""
         return infer_exact(
-            self.model,
+            self._model,
             observations,
         )
 
@@ -305,7 +305,7 @@ class PoissonHMM:
     ) -> Fit[typing.Self]:
         """Fit model parameters by expectation-maximization."""
         fit = fit_em(
-            self.model,
+            self._model,
             observations,
             num_iters=num_iters,
             progress=progress,
@@ -327,7 +327,7 @@ class PoissonHMM:
     ) -> FitCollection[typing.Self]:
         """Fit multiple HMM initializations to the same observations by EM."""
         fit = fit_em_many(
-            tuple(model.model for model in models),
+            tuple(model._model for model in models),
             observations,
             num_iters=num_iters,
             progress=progress,

@@ -75,27 +75,27 @@ class GaussianLDS:
     y_t|x_t \sim \mathcal{N}(Cx_t+d, R).$$
     """
 
-    model: Model[GaussianEmissions]
+    _model: Model[GaussianEmissions]
 
     @property
     def latent_dim(self) -> int:
         """Dimension $D_x$ of the continuous latent state."""
-        return self.model.dynamics.dist.output_dim
+        return self._model.dynamics.dist.output_dim
 
     @property
     def observation_dim(self) -> int:
         """Dimension $D_y$ of each observation."""
-        return self.model.emissions.dist.output_dim
+        return self._model.emissions.dist.output_dim
 
     @property
     def dynamics(self) -> LinearGaussian:
         """Linear-Gaussian latent transition distribution."""
-        return self.model.dynamics.dist
+        return self._model.dynamics.dist
 
     @property
     def emissions(self) -> LinearGaussian:
         """Linear-Gaussian observation distribution."""
-        return self.model.emissions.dist
+        return self._model.emissions.dist
 
     @classmethod
     def from_params(
@@ -120,7 +120,7 @@ class GaussianLDS:
         )
 
         return cls(
-            model=Model(
+            _model=Model(
                 initial=initial,
                 dynamics=dynamics,
                 emissions=GaussianEmissions(
@@ -171,7 +171,7 @@ class GaussianLDS:
 
     def sample(self, key: jax.Array, num_steps: int) -> tuple[jax.Array, jax.Array]:
         r"""Sample latent states $x_{0:T-1}$ and observations $y_{0:T-1}$."""
-        return self.model.sample(
+        return self._model.sample(
             key,
             num_steps,
         )
@@ -179,7 +179,7 @@ class GaussianLDS:
     def infer(self, observations: jax.Array) -> tuple[Posterior, jax.Array]:
         """Compute the exact Gaussian posterior and observation log likelihood."""
         return infer_exact(
-            self.model,
+            self._model,
             observations,
         )
 
@@ -192,7 +192,7 @@ class GaussianLDS:
     ) -> Fit[typing.Self]:
         """Fit model parameters by expectation-maximization."""
         fit = fit_em(
-            self.model,
+            self._model,
             observations,
             num_iters=num_iters,
             progress=progress,
@@ -214,7 +214,7 @@ class GaussianLDS:
     ) -> FitCollection[typing.Self]:
         """Fit multiple LDS initializations to the same observations by EM."""
         fit = fit_em_many(
-            tuple(model.model for model in models),
+            tuple(model._model for model in models),
             observations,
             num_iters=num_iters,
             progress=progress,
@@ -231,12 +231,12 @@ class GaussianLDS:
 
     def observation_mean(self, posterior: Posterior) -> jax.Array:
         """Return the posterior mean observation at each time point."""
-        return self.model.emissions.observation_mean(posterior)
+        return self._model.emissions.observation_mean(posterior)
 
     def align(self, alignment: Affine) -> typing.Self:
         """Express the latent dynamics in aligned coordinates."""
         return self.__class__(
-            model=self.model.align(alignment),
+            _model=self._model.align(alignment),
         )
 
 
@@ -250,27 +250,27 @@ class PoissonLDS:
     y_t|x_t \sim \operatorname{Poisson}(\exp(Cx_t+d)).$$
     """
 
-    model: Model[PoissonEmissions]
+    _model: Model[PoissonEmissions]
 
     @property
     def latent_dim(self) -> int:
         """Dimension $D_x$ of the continuous latent state."""
-        return self.model.dynamics.dist.output_dim
+        return self._model.dynamics.dist.output_dim
 
     @property
     def observation_dim(self) -> int:
         """Dimension $D_y$ of each observation."""
-        return self.model.emissions.dist.output_dim
+        return self._model.emissions.dist.output_dim
 
     @property
     def dynamics(self) -> LinearGaussian:
         """Linear-Gaussian latent transition distribution."""
-        return self.model.dynamics.dist
+        return self._model.dynamics.dist
 
     @property
     def emissions(self) -> LinearPoisson:
         """Linear-Poisson observation distribution in log-rate form."""
-        return self.model.emissions.dist
+        return self._model.emissions.dist
 
     @classmethod
     def from_params(
@@ -294,7 +294,7 @@ class PoissonLDS:
         )
 
         return cls(
-            Model(
+            _model=Model(
                 initial=initial,
                 dynamics=dynamics,
                 emissions=PoissonEmissions(
@@ -344,7 +344,7 @@ class PoissonLDS:
 
     def sample(self, key: jax.Array, num_steps: int) -> tuple[jax.Array, jax.Array]:
         r"""Sample latent states $x_{0:T-1}$ and observations $y_{0:T-1}$."""
-        return self.model.sample(
+        return self._model.sample(
             key,
             num_steps,
         )
@@ -358,7 +358,7 @@ class PoissonLDS:
     ) -> tuple[Posterior, jax.Array]:
         """Compute a Laplace posterior approximation and its objective value."""
         return infer_laplace(
-            self.model,
+            self._model,
             observations,
             initial_latents=initial_latents,
             params=laplace_params,
@@ -374,7 +374,7 @@ class PoissonLDS:
     ) -> Fit[typing.Self]:
         """Fit model parameters with Laplace-approximated expectation-maximization."""
         fit = fit_laplace_em(
-            self.model,
+            self._model,
             observations,
             num_iters=num_iters,
             progress=progress,
@@ -398,7 +398,7 @@ class PoissonLDS:
     ) -> FitCollection[typing.Self]:
         """Fit multiple Poisson LDS initializations with Laplace EM."""
         fit = fit_laplace_em_many(
-            tuple(model.model for model in models),
+            tuple(model._model for model in models),
             observations,
             num_iters=num_iters,
             progress=progress,
@@ -416,10 +416,10 @@ class PoissonLDS:
 
     def observation_mean(self, posterior: Posterior) -> jax.Array:
         """Return the posterior mean observation at each time point."""
-        return self.model.emissions.observation_mean(posterior)
+        return self._model.emissions.observation_mean(posterior)
 
     def align(self, alignment: Affine) -> typing.Self:
         """Express the latent dynamics in aligned coordinates."""
         return self.__class__(
-            model=self.model.align(alignment),
+            _model=self._model.align(alignment),
         )
