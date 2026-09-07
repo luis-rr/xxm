@@ -5,11 +5,11 @@ from xxm.core.affine import Affine
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.emissions.continuous import GaussianEmissions
-from xxm.core.models.discrete import (
+from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
 )
-from xxm.core.models.gaussian import StateConditionedGaussian
+from xxm.core.latents.gaussian import StateConditionedGaussian
 from xxm.slds.core import GaussianLinearSwitchingDynamics, Model
 
 

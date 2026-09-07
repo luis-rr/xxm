@@ -13,8 +13,8 @@ from xxm.core.chains.gaussian import (
 )
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian, PairedGaussian
 from xxm.core.emissions.continuous import EmissionsT
-from xxm.core.models.discrete import CategoricalInitial, CategoricalTransitions
-from xxm.core.models.gaussian import StateConditionedGaussian
+from xxm.core.latents.discrete import CategoricalInitial, CategoricalTransitions
+from xxm.core.latents.gaussian import StateConditionedGaussian
 from xxm.core.optim import gaussian as gaussian_fit
 
 

@@ -13,7 +13,7 @@ from xxm.core.emissions.continuous import (
     GaussianEmissions,
     PoissonEmissions,
 )
-from xxm.core.models.gaussian import (
+from xxm.core.latents.gaussian import (
     GaussianInitial,
     GaussianLinearDynamics,
 )

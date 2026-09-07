@@ -11,11 +11,11 @@ from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
-from xxm.core.models.discrete import (
+from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
 )
-from xxm.core.models.gaussian import StateConditionedGaussian
+from xxm.core.latents.gaussian import StateConditionedGaussian
 from xxm.core.optim.loop import Fit, FitCollection
 from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
 

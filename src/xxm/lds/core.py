@@ -15,7 +15,7 @@ from xxm.core.chains.gaussian import (
     GaussianPotential,
 )
 from xxm.core.emissions.continuous import EmissionsT
-from xxm.core.models.gaussian import GaussianInitial, GaussianLinearDynamics
+from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
 
 
 def _gaussian_log_prob_residuals(

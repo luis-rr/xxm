@@ -9,8 +9,8 @@ from xxm.core.emissions.continuous import (
     PoissonEmissions,
 )
 from xxm.core.emissions.discrete_ar import AREmissions
-from xxm.core.models.discrete import CategoricalInitial
-from xxm.core.models.gaussian import StateConditionedGaussian
+from xxm.core.latents.discrete import CategoricalInitial
+from xxm.core.latents.gaussian import StateConditionedGaussian
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.hmm.core import Model as HMMModel
 from xxm.hmm.inference import infer_exact as infer_hmm

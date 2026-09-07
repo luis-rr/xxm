@@ -7,7 +7,7 @@ from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.continuous import PoissonEmissions
-from xxm.core.models.gaussian import GaussianInitial, GaussianLinearDynamics
+from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
 from xxm.core.optim.laplace import (
     _NewtonSearchModel,
     _NewtonSearchParams,

@@ -8,7 +8,7 @@ import jax
 
 from xxm.core.chains.discrete import DiscreteChainMarginals as Posterior
 from xxm.core.emissions.discrete import ContinuationEmissions, Emissions
-from xxm.core.models.discrete import CategoricalInitial, CategoricalTransitions
+from xxm.core.latents.discrete import CategoricalInitial, CategoricalTransitions
 
 EmissionsT = typing.TypeVar('EmissionsT', bound=Emissions)
 

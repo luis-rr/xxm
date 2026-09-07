@@ -17,7 +17,7 @@ from xxm.core.emissions.discrete import (
     PoissonEmissions,
 )
 from xxm.core.emissions.discrete_ar import AREmissions
-from xxm.core.models.discrete import (
+from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
 )

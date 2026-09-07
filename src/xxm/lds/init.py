@@ -2,7 +2,7 @@ import jax
 from jax import numpy as jnp
 
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
-from xxm.core.models.gaussian import GaussianInitial, GaussianLinearDynamics
+from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
 from xxm.core.optim.loop import unstack_models
 
 from .core import Model
