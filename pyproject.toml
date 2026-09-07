@@ -27,7 +27,7 @@ dev = [
 where = ['src']
 
 [tool.setuptools.package-data]
-nocte = ['py.typed']
+xxm = ['py.typed']
 
 [tool.ruff.format]
 quote-style = 'single'
