@@ -209,7 +209,7 @@ def _init_ar_gaussian_emissions(
         num_states=num_states,
     )  # (T-L,)
 
-    model = gaussian_fit.linear_from_pairs_grouped(
+    model = gaussian_fit.linear_from_samples_grouped(
         inputs=predictors,
         outputs=current,
         assignments=assignments,
@@ -311,7 +311,7 @@ def _init_ar_poisson_emissions(
         num_states=num_states,
     )  # (T-L,)
 
-    model = poisson_fit.linear_from_pairs_grouped(
+    model = poisson_fit.linear_from_samples_grouped(
         inputs=predictors,
         outputs=current,
         assignments=assignments,

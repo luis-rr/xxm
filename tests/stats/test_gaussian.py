@@ -59,7 +59,7 @@ def test_fit_linear_recovers_exact_affine_map():
     inputs = jnp.array([[-1.0], [0.0], [1.0], [2.0]])
     outputs = 2.0 * inputs + 1.0
 
-    fit = gaussian_fit.linear_from_pairs(inputs, outputs)
+    fit = gaussian_fit.linear_from_samples(inputs, outputs)
 
     np.testing.assert_allclose(fit.affine.coefficients, [[2.0]], atol=ATOL)
     np.testing.assert_allclose(fit.affine.bias, [1.0], atol=ATOL)
@@ -78,7 +78,7 @@ def test_fit_weighted_linear_recovers_state_specific_affine_maps():
         ]
     )
 
-    fit = gaussian_fit.linear_from_pairs_weighted(inputs, outputs, weights)
+    fit = gaussian_fit.linear_from_samples_weighted(inputs, outputs, weights)
 
     np.testing.assert_allclose(
         fit.affine.coefficients,
@@ -113,8 +113,8 @@ def test_public_routines_are_jittable():
             observations,
             weights,
         )
-        linear_fit = gaussian_fit.linear_from_pairs(inputs, outputs)
-        weighted_linear_fit = gaussian_fit.linear_from_pairs_weighted(
+        linear_fit = gaussian_fit.linear_from_samples(inputs, outputs)
+        weighted_linear_fit = gaussian_fit.linear_from_samples_weighted(
             inputs,
             outputs,
             weights,
@@ -190,7 +190,7 @@ def test_fit_linear_preserves_structured_input_shape():
 
     outputs = 2.0 * inputs[:, 0] - 3.0 * inputs[:, 1] + 1.0
 
-    fit = gaussian_fit.linear_from_pairs(
+    fit = gaussian_fit.linear_from_samples(
         inputs,
         outputs,
     )

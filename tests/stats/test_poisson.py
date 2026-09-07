@@ -121,7 +121,7 @@ def test_fit_weighted_keeps_zero_rates_finite():
 def test_fit_linear_recovers_two_point_poisson_mle():
     # With two observations and two parameters, the optimum can match both
     # positive counts exactly: lambda(0)=1 and lambda(1)=2.
-    fit = poisson_fit.linear_from_pairs(
+    fit = poisson_fit.linear_from_samples(
         inputs=jnp.array([[0.0], [1.0]]),
         outputs=jnp.array([[1.0], [2.0]]),
         initial_affine=Affine(coefficients=jnp.zeros((1, 1)), bias=jnp.zeros(1)),
@@ -137,7 +137,7 @@ def test_fit_linear_from_marginals_matches_known_ridge_solution():
     # choosing this ridge gives the exact optimum below.
     ridge = 3.0 / (13.0 * np.log(1.5))
 
-    fit = poisson_fit.linear_from_pairs(
+    fit = poisson_fit.linear_from_samples(
         outputs=jnp.array([[1.0], [3.0]]),
         inputs=jnp.array([[-1.0], [1.0]]),
         initial_affine=Affine(coefficients=jnp.zeros((1, 1)), bias=jnp.zeros(1)),
@@ -168,7 +168,7 @@ def test_fit_weighted_linear_recovers_state_specific_two_point_mles():
         ]
     )
 
-    fit = poisson_fit.linear_from_pairs_weighted(
+    fit = poisson_fit.linear_from_samples_weighted(
         inputs=inputs,
         outputs=outputs,
         weights=weights,
@@ -262,14 +262,14 @@ def test_public_routines_are_jittable():
 
     @jax.jit
     def run_deterministic_fits(inputs, outputs, weights):
-        linear_fit = poisson_fit.linear_from_pairs(
+        linear_fit = poisson_fit.linear_from_samples(
             inputs=inputs[:2],
             outputs=outputs[:2],
             initial_affine=Affine(coefficients=jnp.zeros((1, 1)), bias=jnp.zeros(1)),
             max_iter=2,
             ridge=0.1,
         )
-        weighted_fit = poisson_fit.linear_from_pairs_weighted(
+        weighted_fit = poisson_fit.linear_from_samples_weighted(
             inputs=inputs,
             outputs=outputs,
             weights=weights,
@@ -309,7 +309,7 @@ def test_fit_linear_preserves_structured_input_shape():
         ]
     )
 
-    fit = poisson_fit.linear_from_pairs(
+    fit = poisson_fit.linear_from_samples(
         inputs=inputs,
         outputs=outputs,
         initial_affine=Affine(

@@ -223,7 +223,7 @@ class GaussianEmissions(typing.NamedTuple):
         covariance_floor: float,
     ) -> typing.Self:
         """Fit Gaussian emissions to a known latent trajectory."""
-        model = gaussian_fit.linear_from_pairs(
+        model = gaussian_fit.linear_from_samples(
             latents,
             observations,
         )
@@ -373,7 +373,7 @@ class PoissonEmissions(typing.NamedTuple):
             bias=jnp.log(mean_rates),
         )
 
-        model = poisson_fit.linear_from_pairs(
+        model = poisson_fit.linear_from_samples(
             outputs=observations,
             inputs=latents,
             initial_affine=initial_affine,

@@ -65,7 +65,7 @@ def _fit_ar_model(
     weights: jax.Array,
 ) -> ConditionalModelT:
     if isinstance(model, LinearGaussian):
-        return gaussian_fit.linear_from_pairs_weighted(
+        return gaussian_fit.linear_from_samples_weighted(
             inputs=inputs,
             outputs=outputs,
             weights=weights,
@@ -73,7 +73,7 @@ def _fit_ar_model(
         )
 
     if isinstance(model, LinearPoisson):
-        return poisson_fit.linear_from_pairs_weighted(
+        return poisson_fit.linear_from_samples_weighted(
             inputs=inputs,
             outputs=outputs,
             weights=weights,

@@ -457,7 +457,7 @@ def _prepare_pair_inputs(
     return flat_inputs, input_shape, initial_affine
 
 
-def linear_from_pairs(
+def linear_from_samples(
     inputs: jax.Array,  # (T, *input_shape)
     outputs: jax.Array,  # (T, O)
     initial_affine: Affine | None = None,
@@ -487,7 +487,7 @@ def linear_from_pairs(
     return model.reshape_input(input_shape)
 
 
-def linear_from_pairs_weighted(
+def linear_from_samples_weighted(
     inputs: jax.Array,  # (T, *input_shape)
     outputs: jax.Array,  # (T, O)
     weights: jax.Array,  # (T, K)
@@ -540,7 +540,7 @@ def linear_from_pairs_weighted(
     return model.reshape_input(input_shape)
 
 
-def linear_from_pairs_grouped(
+def linear_from_samples_grouped(
     inputs: jax.Array,  # (T, *input_shape)
     outputs: jax.Array,  # (T, O)
     assignments: jax.Array,  # (T,)
@@ -558,7 +558,7 @@ def linear_from_pairs_grouped(
         dtype=jnp.result_type(inputs, outputs, jnp.float32),
     )
 
-    return linear_from_pairs_weighted(
+    return linear_from_samples_weighted(
         inputs=inputs,
         outputs=outputs,
         weights=weights,

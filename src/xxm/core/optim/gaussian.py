@@ -165,7 +165,7 @@ def linear_from_centered_moments(
     )
 
 
-def linear_from_pairs(
+def linear_from_samples(
     inputs: jax.Array,
     outputs: jax.Array,
     ridge: float = 0.0,
@@ -200,7 +200,7 @@ def linear_from_pairs(
     return model.reshape_input(input_shape)
 
 
-def linear_from_pairs_weighted(
+def linear_from_samples_weighted(
     inputs: jax.Array,
     outputs: jax.Array,
     weights: jax.Array,
@@ -277,7 +277,7 @@ def linear_from_pairs_weighted(
     return model.reshape_input(input_shape)
 
 
-def linear_from_pairs_grouped(
+def linear_from_samples_grouped(
     inputs: jax.Array,  # (T, *input_shape)
     outputs: jax.Array,  # (T, O)
     assignments: jax.Array,  # (T,)
@@ -291,7 +291,7 @@ def linear_from_pairs_grouped(
         dtype=jnp.result_type(inputs, outputs, jnp.float32),
     )  # (T, K)
 
-    return linear_from_pairs_weighted(
+    return linear_from_samples_weighted(
         inputs=inputs,
         outputs=outputs,
         weights=weights,

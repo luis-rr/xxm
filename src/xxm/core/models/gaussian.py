@@ -212,7 +212,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
         covariance_floor: float,
     ) -> typing.Self:
         """Fit linear dynamics to a known latent trajectory."""
-        model = gaussian_fit.linear_from_pairs(
+        model = gaussian_fit.linear_from_samples(
             latents[:-1],
             latents[1:],
         )
