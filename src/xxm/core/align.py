@@ -1,3 +1,5 @@
+"""State alignment and coordinate alignment utilities."""
+
 import itertools
 
 import jax
@@ -7,11 +9,10 @@ from xxm.core.affine import Affine
 
 
 def match_states(costs: jax.Array) -> jax.Array:
-    """Return the source-state permutation that best matches target states.
+    r"""Permutation minimizing total cost matrix.
 
-    ``costs[target, source]`` is the cost of matching each source state to
-    each target state. The returned permutation can be applied to the source
-    state axis to express it in the target-state ordering.
+    `costs[target, source]` is cost of matching source state to target state.
+    Returns permutation to apply to source to match target ordering.
     """
     permutation = min(
         itertools.permutations(range(costs.shape[0])),
@@ -24,11 +25,7 @@ def match_states_by_mean(
     source: jax.Array,
     target: jax.Array,
 ) -> jax.Array:
-    """Return the permutation aligning source states to target states.
-
-    States are matched by Euclidean distance between their associated means.
-    The returned permutation should be applied to ``source``.
-    """
+    """Permutation aligning source states to target by Euclidean distance of means."""
     costs = jnp.linalg.norm(
         target[:, None, :] - source[None, :, :],
         axis=-1,
@@ -41,11 +38,7 @@ def match_states_by_conditional_mean(
     source: jax.Array,  # (T, K, N)
     target: jax.Array,  # (T, K, N)
 ) -> jax.Array:
-    """Return the permutation aligning source states to target states.
-
-    States are matched by their mean squared difference in conditional means
-    across time. The returned permutation should be applied to ``source``.
-    """
+    """Permutation aligning source to target by time-averaged conditional means."""
     differences = (
         target[:, :, None, :] - source[:, None, :, :]
     )  # (T, K_target, K_source, N)
@@ -62,12 +55,7 @@ def match_states_to_true(
     state_probs: jax.Array,
     true_states: jax.Array,
 ) -> jax.Array:
-    """Return the permutation aligning inferred states to true state labels.
-
-    ``state_probs`` defines the source-state ordering and ``true_states`` the
-    target ordering. The returned permutation should be applied to the
-    inferred states or model.
-    """
+    """Permutation aligning inferred discrete states to ground-truth labels."""
     num_states = state_probs.shape[-1]
 
     true_state_probs = jax.nn.one_hot(
@@ -84,12 +72,7 @@ def align_procrustes(
     source: jax.Array,
     target: jax.Array,
 ) -> Affine:
-    """Return a similarity transform aligning source points to target points.
-
-    The fitted transform contains a translation, one global scale, and an
-    orthogonal rotation or reflection. Applying it to ``source`` gives its
-    least-squares Procrustes alignment with ``target``.
-    """
+    """Least-squares orthogonal Procrustes alignment with global scaling."""
     source_mean = jnp.mean(source, axis=0)
     target_mean = jnp.mean(target, axis=0)
 
@@ -118,12 +101,7 @@ def align_affine(
     source: jax.Array,
     target: jax.Array,
 ) -> Affine:
-    """Return the least-squares affine transform from source to target.
-
-    Unlike Procrustes alignment, the fitted transform may independently scale,
-    shear, rotate, or reflect dimensions. Applying it to ``source`` gives its
-    least-squares affine alignment with ``target``.
-    """
+    """Least-squares unconstrained affine alignment."""
     source_mean = jnp.mean(source, axis=0)
     target_mean = jnp.mean(target, axis=0)
 

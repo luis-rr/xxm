@@ -1,3 +1,5 @@
+"""Gaussian distributions, conditionals, and paired moment representations."""
+
 import typing
 
 import jax
@@ -8,9 +10,12 @@ from xxm.core.affine import Affine
 
 
 class Gaussian(typing.NamedTuple):
-    """A multivariate Gaussian distribution in moment form.
+    r"""Multivariate Gaussian distribution in moment form.
 
-    Leading dimensions are batch dimensions and must be shared between attributes.
+    $$u \sim \mathcal{N}(\mu, \Sigma).$$
+
+    `mean` stores $\mu$ and `covariance` stores $\Sigma$. Leading dimensions
+    are batch dimensions, shared across all attributes.
     """
 
     mean: jax.Array  # (..., N)
@@ -18,6 +23,7 @@ class Gaussian(typing.NamedTuple):
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
+        """Batch shape."""
         mean_shape = self.mean.shape[:-1]
         covariance_shape = self.covariance.shape[:-2]
         assert mean_shape == covariance_shape
@@ -25,20 +31,23 @@ class Gaussian(typing.NamedTuple):
 
     @property
     def variable_dim(self) -> int:
+        """Dimension of the Gaussian variable."""
         return self.mean.shape[-1]
 
     @property
     def dtype(self) -> jax.typing.DTypeLike:
+        """Data type."""
         return jnp.result_type(self.mean, self.covariance)
 
     def select(self, index) -> 'Gaussian':
-        """Index into the batch dimensions of the distribution."""
+        """Index into batch dimensions."""
         return Gaussian(
             mean=self.mean[index],
             covariance=self.covariance[index],
         )
 
     def astype(self, dtype: jax.typing.DTypeLike) -> 'Gaussian':
+        """Convert to a different data type."""
         return self._replace(
             mean=self.mean.astype(dtype),
             covariance=self.covariance.astype(dtype),
@@ -46,6 +55,7 @@ class Gaussian(typing.NamedTuple):
 
     @property
     def variance(self) -> jax.Array:
+        """Marginal variances, diagonal of covariance."""
         return jnp.diagonal(self.covariance, axis1=-2, axis2=-1)
 
     def sample(
@@ -53,6 +63,7 @@ class Gaussian(typing.NamedTuple):
         key: jax.Array,
         sample_shape: tuple[int, ...] = (),
     ) -> jax.Array:
+        """Sample from the distribution."""
         return jax.random.multivariate_normal(
             key,
             mean=self.mean,
@@ -75,9 +86,7 @@ class Gaussian(typing.NamedTuple):
         self,
         affine: Affine,
     ) -> jax.Array:
-        """
-        Compute the mean of y = A x + b for x distributed according to self.
-        """
+        r"""Compute mean of $f(u)$ where $u \sim \text{self}$."""
         self._validate_affine_input(affine)
         return affine.apply(self.mean)
 
@@ -85,9 +94,7 @@ class Gaussian(typing.NamedTuple):
         self,
         affine: Affine,
     ) -> jax.Array:
-        """
-        Compute the covariance of y = A x + b for x distributed according to self.
-        """
+        r"""Compute covariance of $f(u)$ where $u \sim \text{self}$."""
         self._validate_affine_input(affine)
 
         return jnp.einsum(
@@ -101,9 +108,7 @@ class Gaussian(typing.NamedTuple):
         self,
         affine: Affine,
     ) -> jax.Array:
-        """
-        Compute the marginal variances of y = A x + b for x distributed according to self.
-        """
+        r"""Compute marginal variances of $f(u)$ where $u \sim \text{self}$."""
         self._validate_affine_input(affine)
 
         return jnp.einsum(
@@ -117,7 +122,7 @@ class Gaussian(typing.NamedTuple):
         self,
         affine: Affine,
     ) -> 'Gaussian':
-        """Distribution of ``y = A x + b`` for ``x ~ self``."""
+        r"""Distribution of $f(u)$ for $u \sim \text{self}$."""
 
         return self.__class__(
             mean=self.affine_mean(affine),
@@ -168,7 +173,7 @@ class Gaussian(typing.NamedTuple):
         return self.log_prob(values)
 
     def mixture_mean(self, weights: jax.Array) -> jax.Array:
-        """Mean of a mixture over the last batch dimension."""
+        """Mean of mixture over last batch dimension."""
         return jnp.sum(
             weights[..., :, None] * self.mean,
             axis=-2,
@@ -178,15 +183,7 @@ class Gaussian(typing.NamedTuple):
         self,
         other: 'Gaussian',
     ) -> jax.Array:
-        r"""
-        Expected log density under a Gaussian with the given moments.
-
-        Computes
-
-            E_q[log p(x)]
-
-        where ``q`` has the supplied mean and covariance and ``p = self``.
-        """
+        r"""Expected log density $\mathbb{E}_{\sim \text{other}}[\log p(u)]$ under `other`."""
         if other.mean.shape[-1] != self.variable_dim:
             raise ValueError(
                 f'mean must have trailing dimension {self.variable_dim}; '
@@ -270,14 +267,13 @@ class Gaussian(typing.NamedTuple):
 
 
 class LinearGaussian(typing.NamedTuple):
-    """A linear Gaussian model:
+    r"""Linear-Gaussian conditional distribution.
 
-        y | x ~ N(A x + b, Q)
+    $$v \mid u \sim \mathcal{N}(Wu + b, \Sigma).$$
 
-    Inputs are allowed to be tensor-shaped, which resolves as a tensor contraction
-    and matrix-vector multiplication.
-
-    Leading dimensions are batch dimensions and must be shared between attributes.
+    `affine` encodes $(W, b)$ and `covariance` stores $\Sigma$.
+    Tensor-shaped inputs resolve as tensor contractions. Leading dimensions are
+    batch dimensions, shared across all attributes.
     """
 
     affine: Affine
@@ -285,6 +281,7 @@ class LinearGaussian(typing.NamedTuple):
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
+        """Batch shape."""
         covariance_shape = self.covariance.shape[:-2]
         affine_shape = self.affine.batch_shape
         assert covariance_shape == affine_shape
@@ -292,29 +289,34 @@ class LinearGaussian(typing.NamedTuple):
 
     @property
     def input_shape(self) -> tuple[int, ...]:
+        """Input shape of the affine map."""
         return self.affine.input_shape
 
     @property
     def input_ndim(self) -> int:
+        """Number of input dimensions."""
         return self.affine.input_ndim
 
     @property
     def input_size(self) -> int:
+        """Total size of input."""
         return self.affine.input_size
 
     @property
     def output_dim(self) -> int:
+        """Output dimension."""
         return self.affine.output_dim
 
     @property
     def dtype(self) -> jax.typing.DTypeLike:
+        """Data type."""
         return jnp.result_type(self.affine.dtype, self.covariance)
 
     def reshape_input(
         self,
         input_shape: tuple[int, ...],
     ) -> typing.Self:
-        """Return the same model with a different affine input shape."""
+        """Return same model with input shape reshaped."""
         return self._replace(
             affine=self.affine.input_reshape(input_shape),
         )
@@ -330,6 +332,7 @@ class LinearGaussian(typing.NamedTuple):
         self,
         dtype: jax.typing.DTypeLike,
     ) -> typing.Self:
+        """Convert to a different data type."""
         return self._replace(
             affine=self.affine.astype(dtype),
             covariance=self.covariance.astype(dtype),
@@ -339,14 +342,14 @@ class LinearGaussian(typing.NamedTuple):
         self,
         values: jax.Array,
     ) -> jax.Array:
-        """Conditional mean for deterministic input values."""
+        """Mean of conditional distribution at deterministic input."""
         return self.affine.apply(values)
 
     def conditional(
         self,
         values: jax.Array,  # (..., *input_shape)
     ) -> Gaussian:
-        """Conditional output distribution for deterministic inputs."""
+        """Conditional distribution at deterministic input."""
         mean = self.conditional_mean(values)  # (..., O)
 
         covariance = jnp.broadcast_to(
@@ -364,13 +367,14 @@ class LinearGaussian(typing.NamedTuple):
         key: jax.Array,
         values: jax.Array,
     ) -> jax.Array:
+        """Sample from conditional distribution at deterministic input."""
         return self.conditional(values).sample(key)
 
     def add_covariance_jitter(
         self,
         jitter: float,
     ) -> typing.Self:
-        """Add isotropic jitter to the output covariance."""
+        """Add isotropic jitter to output covariance for numerical stability."""
         identity = jnp.eye(
             self.output_dim,
             dtype=self.covariance.dtype,
@@ -384,7 +388,7 @@ class LinearGaussian(typing.NamedTuple):
         self,
         affine: Affine,
     ) -> typing.Self:
-        """Precompose the conditional model with an affine input map."""
+        r"""Precompose with input map, returning $v \mid u' \sim \mathcal{N}(W(A' u' + b') + b, \Sigma)$."""
         return self._replace(
             affine=self.affine.compose(affine),
         )
@@ -393,7 +397,7 @@ class LinearGaussian(typing.NamedTuple):
         self,
         affine: Affine,
     ) -> typing.Self:
-        """Postcompose the conditional output with an affine map."""
+        r"""Postcompose with output map, returning $w \mid u \sim \mathcal{N}(A(Wu + b) + b', \ldots)$."""
         if affine.input_shape != (self.output_dim,):
             raise ValueError(
                 'output affine input must match the model output dimension; '
@@ -418,18 +422,7 @@ class LinearGaussian(typing.NamedTuple):
         output: Gaussian,
         input_output_covariance: jax.Array,
     ) -> jax.Array:
-        r"""
-        Expected conditional log density from joint input-output moments.
-
-        Computes
-
-            E_q[log p(y | x)]
-
-        for ``p(y | x) = N(A x + b, Q)``.
-
-        ``input_output_covariance`` is ``Cov(x, y)`` and uses flattened
-        input coordinates.
-        """
+        r"""Expected conditional log density $\mathbb{E}_{q}[\log p(v|u)]$ from joint input-output moments."""
         input_mean_flat = self.affine.input_flatten(
             input.mean,
         )
@@ -498,9 +491,7 @@ class LinearGaussian(typing.NamedTuple):
         output: Gaussian,
         input_output_covariance: jax.Array,
     ) -> jax.Array:
-        """
-        Evaluate every supplied moment tuple against every batched model.
-        """
+        """Evaluate every moment tuple against every batched model."""
         extra = (1,) * len(self.batch_shape)
 
         # TODO is there a joint re-shape + broadcast method hiding in here?
@@ -541,14 +532,11 @@ class LinearGaussian(typing.NamedTuple):
 
 
 class PairedGaussian(typing.NamedTuple):
-    r"""
-    Joint Gaussian distribution over a pair of random variables.
+    r"""Joint Gaussian distribution over pair of random variables.
 
-    ``left`` and ``right`` are the marginal distributions and
-    ``cross_covariance`` is ``Cov(right, left)``.
-
-    Leading dimensions are batch dimensions and must be shared between
-    attributes.
+    `left` and `right` are marginal distributions. `cross_covariance` is
+    $\operatorname{Cov}(\text{right}, \text{left})$. Leading dimensions are batch dimensions,
+    shared across all attributes.
     """
 
     left: Gaussian
@@ -557,6 +545,7 @@ class PairedGaussian(typing.NamedTuple):
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
+        """Batch shape."""
         left_shape = self.left.batch_shape
         right_shape = self.right.batch_shape
         cross_shape = self.cross_covariance.shape[:-2]
@@ -572,18 +561,22 @@ class PairedGaussian(typing.NamedTuple):
 
     @property
     def left_dim(self) -> int:
+        """Dimension of left variable."""
         return self.left.variable_dim
 
     @property
     def right_dim(self) -> int:
+        """Dimension of right variable."""
         return self.right.variable_dim
 
     @property
     def variable_dim(self) -> int:
+        """Total dimension of concatenated pair."""
         return self.left_dim + self.right_dim
 
     @property
     def dtype(self) -> jax.typing.DTypeLike:
+        """Common dtype implied by both marginals and the cross-covariance."""
         return jnp.result_type(
             self.left.dtype,
             self.right.dtype,
@@ -592,12 +585,12 @@ class PairedGaussian(typing.NamedTuple):
 
     @property
     def mean(self) -> jax.Array:
-        """Mean of the concatenated variable ``[left, right]``."""
+        """Mean of concatenated variable $[\text{left}, \text{right}]$."""
         return jnp.concatenate([self.left.mean, self.right.mean], axis=-1)
 
     @property
     def covariance(self) -> jax.Array:
-        """Covariance of the concatenated variable ``[left, right]``."""
+        """Covariance of concatenated variable $[\text{left}, \text{right}]$."""
         left_right_covariance = jnp.swapaxes(self.cross_covariance, -2, -1)
 
         top = jnp.concatenate([self.left.covariance, left_right_covariance], axis=-1)
@@ -617,6 +610,7 @@ class PairedGaussian(typing.NamedTuple):
         )
 
     def astype(self, dtype: jax.typing.DTypeLike) -> typing.Self:
+        """Convert to a different data type."""
         return self._replace(
             left=self.left.astype(dtype),
             right=self.right.astype(dtype),

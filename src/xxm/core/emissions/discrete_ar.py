@@ -1,27 +1,16 @@
-r"""
-Autoregressive emission models for hidden Markov models.
+r"""Autoregressive emission models for state-conditional variables with history dependence.
 
-For state \(z_t=k\), the conditional predictor is
+For state $z_t=k$, the conditional predictor is
 
-\[
-\eta_t^{(k)}
-=
-b_k + \sum_{\ell=1}^{L} A_{k\ell} y_{t-\ell}.
-\]
+$$\eta_t^{(k)} = b_k + \sum_{\ell=1}^L A_{k,\ell} y_{t-\ell}.$$
 
-Gaussian emissions use
-\[
-    \(y_t \sim \mathcal{N}(\eta_t^{(k)}, \Sigma_k)\)
-\]
-while Poisson emissions use
-\[
-    \(y_t \sim \operatorname{Poisson}(\exp(\eta_t^{(k)}))\).
-\]
+Gaussian emissions: $y_t \sim \mathcal{N}(\eta_t^{(k)}, R_k)$.
 
-Inference and fitting use the conditional likelihood given the first \(L\)
-observations, so their emission log likelihoods are set to zero. Sampling
-instead starts from an all-zero history, providing a simple initial condition
-without introducing a separate initial-observation model.
+Poisson emissions: $y_t \sim \operatorname{Poisson}(\exp(\eta_t^{(k)}))$.
+
+Inference and fitting condition on the first $L$ observations, so only the
+remaining $T-L$ observations have associated latent states. Sampling starts
+from zero history unless an explicit continuation history is supplied.
 """
 
 import typing
@@ -221,6 +210,7 @@ class AREmissions(
         self,
         permutation: jax.Array,
     ) -> typing.Self:
+        """Relabel state-specific autoregressive emission parameters."""
         return self._replace(
             model=self.model.select(permutation),
         )

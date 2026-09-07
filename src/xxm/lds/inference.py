@@ -1,3 +1,5 @@
+"""LDS inference via Gaussian message passing and Laplace approximation."""
+
 import jax
 
 from xxm.core.chains.gaussian import GaussianChain as Chain
@@ -27,7 +29,7 @@ def infer_exact(
     model: Model[QuadraticEmissionsT],
     observations: jax.Array,
 ) -> tuple[Posterior, jax.Array]:
-    """Compute the exact posterior over latents for quadratic emissions."""
+    """Run Gaussian forward-backward, returning marginals and log likelihood for quadratic emissions."""
 
     latent_chain = to_chain(
         model,

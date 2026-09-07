@@ -6,15 +6,13 @@ import jax.numpy as jnp
 
 
 class Affine(typing.NamedTuple):
-    """A linear operation:
+    r"""Linear-affine map.
 
-        y = A x + b
+    $$f(u) = Wu + b.$$
 
-    Inputs are allowed to be tensor-shaped, which resolves as a tensor contraction
-    and matrix-vector multiplication.
-
-    Leading dimensions are batch dimensions and must be shared between attributes.
-
+    `coefficients` stores $W$ and `bias` stores $b$. Inputs may be tensor-shaped,
+    resolved as a tensor contraction and matrix-vector multiplication.
+    Leading dimensions are batch dimensions, shared across all attributes.
     """
 
     coefficients: jax.Array  # (..., O, I1, I2, ...)
@@ -22,6 +20,7 @@ class Affine(typing.NamedTuple):
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
+        """Batch shape shared by coefficients and bias."""
         if self.bias.ndim < 1:
             raise ValueError('bias must have shape (..., O)')
 
@@ -42,19 +41,22 @@ class Affine(typing.NamedTuple):
 
     @property
     def input_shape(self) -> tuple[int, ...]:  # (I1, I2, ...)
+        """Shape of input to the affine map."""
         _ = self.batch_shape
         return self.coefficients.shape[self.bias.ndim :]
 
     @property
     def input_ndim(self) -> int:
+        """Number of input dimensions."""
         return len(self.input_shape)
 
     @property
     def input_size(self) -> int:
+        """Total size of input, product of input_shape."""
         return math.prod(self.input_shape)
 
     def input_squeeze(self) -> typing.Self:
-        """Remove singleton dimensions from the affine input shape."""
+        """Remove singleton dimensions from input shape."""
         input_shape = tuple(size for size in self.input_shape if size != 1)
 
         if not input_shape:
@@ -64,21 +66,23 @@ class Affine(typing.NamedTuple):
 
     @property
     def output_dim(self) -> int:
+        """Output dimension."""
         return self.bias.shape[-1]
 
     @property
     def dtype(self) -> jax.typing.DTypeLike:
+        """Data type of the affine map."""
         return jnp.result_type(self.coefficients, self.bias)
 
     @property
     def coefficients_flat(self) -> jax.Array:
-        """Return coefficients with all input dimensions flattened."""
+        """Coefficients with all input dimensions flattened to a single axis."""
         return self.coefficients.reshape(
             self.batch_shape + (self.output_dim, self.input_size)
         )
 
     def input_flatten(self, values: jax.Array) -> jax.Array:
-        """Flatten the structured input dimensions of values."""
+        """Flatten input dimensions of values from structured to single axis."""
         if values.shape[-self.input_ndim :] != self.input_shape:
             raise ValueError(
                 f'expected trailing input shape {self.input_shape}, got {values.shape}'
@@ -87,7 +91,7 @@ class Affine(typing.NamedTuple):
         return values.reshape(values.shape[: -self.input_ndim] + (self.input_size,))
 
     def input_unflatten(self, values: jax.Array) -> jax.Array:
-        """Restore a flattened input dimension to this affine input shape."""
+        """Restore flattened input dimension to this affine's input shape."""
         if values.shape[-1] != self.input_size:
             raise ValueError(
                 f'expected trailing input size {self.input_size}, '
@@ -97,7 +101,7 @@ class Affine(typing.NamedTuple):
         return values.reshape(values.shape[:-1] + self.input_shape)
 
     def input_reshape(self, input_shape: tuple[int, ...]) -> typing.Self:
-        """Return the same affine map with a different input shape."""
+        """Return affine map with input shape reshaped, preserving input size."""
         if not input_shape:
             raise ValueError('input_shape must contain at least one dimension')
 
@@ -118,11 +122,11 @@ class Affine(typing.NamedTuple):
         )
 
     def norm(self) -> jax.Array:
-        """Return the parameter norm for each output."""
+        """Frobenius norm of coefficients and bias for each output dimension."""
         return jnp.sqrt(jnp.sum(self.coefficients_flat**2, axis=-1) + self.bias**2)
 
     def shift(self, center: jax.Array) -> typing.Self:
-        """Shift the input origin by ``center``."""
+        """Translate input origin, compensating bias to preserve $f(u-\text{center})$."""
         shift = jnp.einsum(
             '...oi,...i->...o',
             self.coefficients_flat,
@@ -134,7 +138,7 @@ class Affine(typing.NamedTuple):
         )
 
     def apply(self, values: jax.Array) -> jax.Array:
-        """Apply the affine map to deterministic input values."""
+        """Evaluate the affine map at input values."""
         return (
             jnp.einsum(
                 '...oi,...i->...o',
@@ -145,13 +149,14 @@ class Affine(typing.NamedTuple):
         )
 
     def astype(self, dtype: jax.typing.DTypeLike) -> typing.Self:
+        """Convert to a different data type."""
         return self._replace(
             coefficients=self.coefficients.astype(dtype),
             bias=self.bias.astype(dtype),
         )
 
     def select(self, index) -> typing.Self:
-        """Index into the batch dimensions."""
+        """Index into batch dimensions."""
         return self.__class__(
             coefficients=self.coefficients[index],
             bias=self.bias[index],
@@ -161,7 +166,7 @@ class Affine(typing.NamedTuple):
         self,
         inner: typing.Self,
     ) -> typing.Self:
-        """Compose affine maps as ``self(inner(x))``."""
+        """Compose affine maps, returning $f_\text{outer} \\circ f_\text{inner}$."""
         if self.input_shape != (inner.output_dim,):
             raise ValueError(
                 'affine composition requires the outer input shape '
@@ -201,7 +206,7 @@ class Affine(typing.NamedTuple):
         )
 
     def inverse(self) -> typing.Self:
-        """Return the inverse of a square vector-to-vector affine map."""
+        """Compute the inverse of this square vector-to-vector affine map."""
         if self.input_shape != (self.output_dim,):
             raise ValueError(
                 'affine inversion requires a square vector-to-vector map, '
@@ -224,7 +229,7 @@ class Affine(typing.NamedTuple):
         )
 
     def pseudoinverse(self) -> typing.Self:
-        """Return the Moore-Penrose pseudoinverse affine map."""
+        """Compute the Moore-Penrose pseudoinverse affine map (vector inputs only)."""
         if self.input_ndim != 1:
             raise ValueError(
                 'affine pseudoinverse requires vector-shaped input; '

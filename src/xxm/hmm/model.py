@@ -1,3 +1,5 @@
+"""HMM facade classes for user-facing API."""
+
 from __future__ import annotations
 
 import dataclasses
@@ -53,21 +55,27 @@ def _categorical_components_from_params(
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, eq=False)
 class GaussianHMM:
-    """Hidden Markov model with Gaussian emissions."""
+    r"""Hidden Markov model with Gaussian state-conditional emissions.
+
+    $$y_t\mid z_t=k \sim \mathcal{N}(\mu_k, \Sigma_k).$$
+    """
 
     model: Model[GaussianEmissions]
 
     @property
     def num_states(self) -> int:
+        """Number of discrete states $K$."""
         return self.model.num_states
 
     def permute(self, permutation: jax.Array) -> GaussianHMM:
+        """Relabel discrete states by permutation."""
         return GaussianHMM(
             model=self.model.permute(permutation),
         )
 
     @property
     def states(self) -> Gaussian:
+        """State-conditional emission distributions."""
         return self.model.emissions.model
 
     def most_likely_states(self, posterior: Posterior) -> jax.Array:
@@ -92,6 +100,7 @@ class GaussianHMM:
         emission_means: jax.Array,
         emission_covariances: jax.Array,
     ) -> typing.Self:
+        r"""Construct a Gaussian HMM from its initial, transition, and emission parameters."""
         initial, transitions = _categorical_components_from_params(
             initial_probs,
             transition_probs,
@@ -119,6 +128,7 @@ class GaussianHMM:
         *,
         self_transition_prob: float = 0.9,
     ) -> typing.Self:
+        """Initialize a Gaussian HMM by clustering the observations with K-means."""
         model = init_gaussian(
             key=key,
             observations=observations,
@@ -129,6 +139,7 @@ class GaussianHMM:
         return cls(model)
 
     def sample(self, key: jax.Array, num_steps: int) -> tuple[jax.Array, jax.Array]:
+        r"""Sample states $z_{0:T-1}$ and observations $y_{0:T-1}$ from the model."""
         return self.model.sample(
             key,
             num_steps,
@@ -138,6 +149,7 @@ class GaussianHMM:
         self,
         observations: jax.Array,
     ) -> tuple[Posterior, jax.Array]:
+        """Compute the exact posterior over states and the observation log likelihood."""
         return infer_exact(
             self.model,
             observations,
@@ -150,6 +162,7 @@ class GaussianHMM:
         num_iters: int,
         progress: bool | str = 'EM',
     ) -> Fit[typing.Self]:
+        """Fit model parameters by expectation-maximization."""
         fit = fit_em(
             self.model,
             observations,
@@ -171,6 +184,7 @@ class GaussianHMM:
         num_iters: int,
         progress: bool | str = 'Multi-EM',
     ) -> FitCollection[typing.Self]:
+        """Fit multiple HMM initializations to the same observations by EM."""
         fit = fit_em_many(
             tuple(model.model for model in models),
             observations,
@@ -187,21 +201,27 @@ class GaussianHMM:
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, eq=False)
 class PoissonHMM:
-    """Hidden Markov model with Poisson emissions."""
+    r"""Hidden Markov model with Poisson emissions.
+
+    $$p(y_t|z_t=k) = \operatorname{Poisson}(\exp(\eta_k)).$$
+    """
 
     model: Model[PoissonEmissions]
 
     @property
     def num_states(self) -> int:
+        """Number of discrete states $K$."""
         return self.model.num_states
 
     def permute(self, permutation: jax.Array) -> PoissonHMM:
+        """Relabel discrete states by permutation."""
         return PoissonHMM(
             model=self.model.permute(permutation),
         )
 
     @property
     def states(self) -> Poisson:
+        """State-conditional Poisson emission distributions."""
         return self.model.emissions.model
 
     def most_likely_states(self, posterior: Posterior) -> jax.Array:
@@ -225,6 +245,7 @@ class PoissonHMM:
         transition_probs: jax.Array,
         emission_log_rates: jax.Array,
     ) -> typing.Self:
+        r"""Construct a Poisson HMM from categorical and log-rate parameters."""
         initial, transitions = _categorical_components_from_params(
             initial_probs,
             transition_probs,
@@ -251,6 +272,7 @@ class PoissonHMM:
         *,
         self_transition_prob: float = 0.9,
     ) -> typing.Self:
+        """Initialize a Poisson HMM by clustering the observations with K-means."""
         model = init_poisson(
             key=key,
             observations=observations,
@@ -261,12 +283,14 @@ class PoissonHMM:
         return cls(model)
 
     def sample(self, key: jax.Array, num_steps: int) -> tuple[jax.Array, jax.Array]:
+        r"""Sample states $z_{0:T-1}$ and observations $y_{0:T-1}$ from the model."""
         return self.model.sample(
             key,
             num_steps,
         )
 
     def infer(self, observations: jax.Array) -> tuple[Posterior, jax.Array]:
+        """Compute the exact posterior over states and the observation log likelihood."""
         return infer_exact(
             self.model,
             observations,
@@ -279,6 +303,7 @@ class PoissonHMM:
         num_iters: int,
         progress: bool | str = 'EM',
     ) -> Fit[typing.Self]:
+        """Fit model parameters by expectation-maximization."""
         fit = fit_em(
             self.model,
             observations,
@@ -300,6 +325,7 @@ class PoissonHMM:
         num_iters: int,
         progress: bool | str = 'Multi-EM',
     ) -> FitCollection[typing.Self]:
+        """Fit multiple HMM initializations to the same observations by EM."""
         fit = fit_em_many(
             tuple(model.model for model in models),
             observations,
@@ -337,26 +363,31 @@ class GaussianARHMM:
 
     @property
     def num_states(self) -> int:
+        """Number of discrete states $K$."""
         return self.model.num_states
 
     @property
     def output_dim(self) -> int:
+        """Observation dimension $N$."""
         return self.model.emissions.output_dim
 
     @property
     def num_lags(self) -> int:
+        """Number of autoregressive lags $L$."""
         return self.model.emissions.num_lags
 
     def permute(
         self,
         permutation: jax.Array,
     ) -> GaussianARHMM:
+        """Relabel discrete states by permutation."""
         return GaussianARHMM(
             model=self.model.permute(permutation),
         )
 
     @property
     def states(self) -> LinearGaussian:
+        """State-conditional autoregressive Gaussian distributions."""
         return self.model.emissions.model
 
     def states_conditional(
@@ -402,6 +433,11 @@ class GaussianARHMM:
         emission_bias: jax.Array,  # (K, N)
         emission_covariances: jax.Array,  # (K, N, N)
     ) -> typing.Self:
+        r"""Construct a Gaussian AR-HMM from state, transition, and AR parameters.
+
+        The coefficients have shape $(K,N,L,N)$ and the first $L$ observations
+        serve as fixed conditioning history.
+        """
         initial, transitions = _categorical_components_from_params(
             initial_probs,
             transition_probs,
@@ -558,26 +594,31 @@ class PoissonARHMM:
 
     @property
     def num_states(self) -> int:
+        """Number of discrete states $K$."""
         return self.model.num_states
 
     @property
     def output_dim(self) -> int:
+        """Observation dimension $N$."""
         return self.model.emissions.output_dim
 
     @property
     def num_lags(self) -> int:
+        """Number of autoregressive lags $L$."""
         return self.model.emissions.num_lags
 
     def permute(
         self,
         permutation: jax.Array,
     ) -> PoissonARHMM:
+        """Relabel discrete states by permutation."""
         return PoissonARHMM(
             model=self.model.permute(permutation),
         )
 
     @property
     def states(self) -> LinearPoisson:
+        """State-conditional autoregressive Poisson distributions."""
         return self.model.emissions.model
 
     def states_conditional(
@@ -622,6 +663,11 @@ class PoissonARHMM:
         emission_coefficients: jax.Array,  # (K, N, L, N)
         emission_bias: jax.Array,  # (K, N)
     ) -> typing.Self:
+        r"""Construct a Poisson AR-HMM from state, transition, and log-rate parameters.
+
+        The coefficients have shape $(K,N,L,N)$ and the first $L$ observations
+        serve as fixed conditioning history.
+        """
         initial, transitions = _categorical_components_from_params(
             initial_probs,
             transition_probs,

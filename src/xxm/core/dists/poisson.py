@@ -9,38 +9,46 @@ from xxm.core.dists.gaussian import Gaussian
 
 
 class Poisson(typing.NamedTuple):
-    """Independent Poisson variables parameterized by log rates.
+    r"""Independent Poisson variables parameterized by log rates.
 
-    Leading dimensions are batch dimensions and must be shared between attributes.
+    $$y_i \sim \operatorname{Poisson}(\exp(\eta_i)).$$
+
+    `log_rates` stores $\eta$. Leading dimensions are batch dimensions,
+    shared across all attributes.
     """
 
     log_rates: jax.Array  # (..., N)
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
+        """Batch shape."""
         return self.log_rates.shape[:-1]
 
     @property
     def variable_dim(self) -> int:
+        """Number of independent Poisson variables."""
         return self.log_rates.shape[-1]
 
     def select(self, index) -> 'Poisson':
-        """Index into the batch dimensions of the distribution."""
+        """Index into batch dimensions."""
         return Poisson(
             log_rates=self.log_rates[index],
         )
 
     def astype(self, dtype: jax.typing.DTypeLike) -> 'Poisson':
+        """Convert to a different data type."""
         return self._replace(
             log_rates=self.log_rates.astype(dtype),
         )
 
     @property
     def dtype(self) -> jax.typing.DTypeLike:
+        """Data type."""
         return self.log_rates.dtype
 
     @property
     def rates(self) -> jax.Array:
+        r"""Poisson rates $\lambda = \exp(\eta)$."""
         return jnp.exp(self.log_rates)
 
     def sample(
@@ -48,6 +56,7 @@ class Poisson(typing.NamedTuple):
         key: jax.Array,
         sample_shape: tuple[int, ...] = (),
     ) -> jax.Array:
+        """Sample from the distribution."""
         return jax.random.poisson(
             key,
             lam=self.rates,
@@ -83,7 +92,7 @@ class Poisson(typing.NamedTuple):
         return self.log_prob(values)
 
     def mixture_mean(self, weights: jax.Array) -> jax.Array:
-        """Mean of a mixture over the last batch dimension."""
+        """Mean of mixture over last batch dimension."""
         return jnp.sum(
             weights[..., :, None] * self.rates,
             axis=-2,
@@ -91,72 +100,84 @@ class Poisson(typing.NamedTuple):
 
 
 class LinearPoisson(typing.NamedTuple):
-    """A linear Poisson model ``y | x ~ Poisson(exp(A x + b))``.
+    r"""Linear-Poisson conditional distribution.
 
-    Leading dimensions are batch dimensions and must be shared between attributes.
+    $$y \mid x \sim \operatorname{Poisson}(\exp(Wx + b)).$$
+
+    `affine` encodes $(W, b)$. Tensor-shaped inputs resolve as tensor contractions.
+    Leading dimensions are batch dimensions, shared across all attributes.
     """
 
     affine: Affine
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
+        """Batch shape."""
         return self.affine.batch_shape
 
     @property
     def input_shape(self) -> tuple[int, ...]:
+        """Input shape of the affine map."""
         return self.affine.input_shape
 
     @property
     def input_ndim(self) -> int:
+        """Number of input dimensions."""
         return self.affine.input_ndim
 
     @property
     def input_size(self) -> int:
+        """Total size of input."""
         return self.affine.input_size
 
     @property
     def output_dim(self) -> int:
+        """Output dimension."""
         return self.affine.output_dim
 
     @property
     def dtype(self) -> jax.typing.DTypeLike:
+        """Data type."""
         return jnp.result_type(
             self.affine.dtype,
             self.affine.bias.dtype,
         )
 
     def reshape_input(self, input_shape: tuple[int, ...]) -> typing.Self:
-        """Return the same model with a different affine input shape."""
+        """Return same model with input shape reshaped."""
         return self._replace(
             affine=self.affine.input_reshape(input_shape),
         )
 
     def select(self, index) -> typing.Self:
-        """Index into the batch dimensions."""
+        """Index into batch dimensions."""
         return self.__class__(
             affine=self.affine.select(index),
         )
 
     def astype(self, dtype: jax.typing.DTypeLike) -> typing.Self:
+        """Convert to a different data type."""
         return self._replace(affine=self.affine.astype(dtype))
 
     def log_rates(self, values: jax.Array) -> jax.Array:
+        r"""Log rates $\eta = Wx + b$ at deterministic input."""
         return self.affine.apply(values)
 
     def conditional(self, values: jax.Array) -> Poisson:
-        """Conditional distribution of outputs for deterministic inputs."""
+        """Conditional distribution at deterministic input."""
         return Poisson(log_rates=self.log_rates(values))
 
     def log_rate_moments(self, values: Gaussian) -> tuple[jax.Array, jax.Array]:
-        """Gaussian moments of each linear predictor under Gaussian inputs."""
+        """Mean and variance of log rates under Gaussian input."""
         return (values.affine_mean(self.affine), values.affine_variance(self.affine))
 
     def expected_rates(self, values: Gaussian) -> jax.Array:
+        r"""Expected rates $\mathbb{E}[\exp(\eta)]$ under Gaussian input."""
         mean, variance = self.log_rate_moments(values)
         return jnp.exp(mean + 0.5 * variance)
 
     def expected_log_prob_each(self, values: jax.Array, inputs: Gaussian) -> jax.Array:
-        """Expected Poisson log probability under Gaussian input marginals."""
+        """Expected log probabilities under Gaussian input marginals, per dimension."""
         mean, variance = self.log_rate_moments(inputs)
 
         return (
@@ -171,6 +192,7 @@ class LinearPoisson(typing.NamedTuple):
         inputs: Gaussian,
         weights: jax.Array | None = None,
     ) -> jax.Array:
+        r"""Evaluate weighted $\mathbb{E}_{q(u)}[\log p(v\mid u)]$ under Gaussian inputs."""
         log_probs = self.expected_log_prob_each(
             values=values,
             inputs=inputs,
@@ -185,7 +207,7 @@ class LinearPoisson(typing.NamedTuple):
         self,
         affine: Affine,
     ) -> typing.Self:
-        """Precompose the conditional model with an affine input map."""
+        """Precompose with input map."""
         return self._replace(
             affine=self.affine.compose(affine),
         )

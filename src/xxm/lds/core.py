@@ -44,8 +44,12 @@ def _gaussian_log_prob_residuals(
 
 
 class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
-    r"""
-    Container for LDS model parameters.
+    r"""Linear Dynamical System model.
+
+    $$x_0 \sim p(x_0), \quad x_t|x_{t-1} \sim \mathcal{N}(Ax_{t-1}+b, Q), \quad y_t|x_t \sim p(y_t|x_t).$$
+
+    `initial` stores $p(x_0)$, `dynamics` stores the linear-Gaussian state evolution,
+    and `emissions` stores $p(y_t|x_t)$.
     """
 
     initial: GaussianInitial
@@ -53,12 +57,14 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     emissions: EmissionsT
 
     def compute_initial_potential(self) -> GaussianPotential:
+        """Return the canonical potential for the initial latent distribution."""
         return GaussianPotential.from_moments(self.initial.model)
 
     def compute_pair_potentials(
         self,
         num_steps: int,
     ) -> GaussianPairPotential:
+        """Return the $T-1$ repeated pair potentials for latent dynamics."""
         potential = GaussianPairPotential.from_linear_conditional(self.dynamics.model)
 
         return potential.broadcast(batch_shape=(num_steps - 1,))
@@ -68,7 +74,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         key: jax.Array,
         num_steps: int,
     ) -> tuple[jax.Array, jax.Array]:
-        """Sample latents and observations from the LDS."""
+        r"""Sample complete trajectory $(x_{0:T-1}, y_{0:T-1})$ from the prior."""
         key_initial, key_latents, key_observations = jax.random.split(key, 3)
 
         initial_latent = self.initial.sample(key_initial)
@@ -80,7 +86,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         return latents, observations
 
     def compute_prior_means(self, num_steps: int) -> jax.Array:
-        """Compute the mean latent trajectory under the model's prior."""
+        r"""Compute prior latent means $\mathbb{E}[x_t]$ under the generative model."""
 
         def step(
             latent: jax.Array,
@@ -111,7 +117,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         observations: jax.Array,
         latents: jax.Array,
     ) -> jax.Array:
-        """Compute log p(x, y) for a latentsstrajectory."""
+        r"""Compute $\log p(x_{0:T-1}, y_{0:T-1})$ for a latent trajectory."""
 
         initial_residual = (latents[0] - self.initial.model.mean)[None]
 
@@ -154,6 +160,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         )
 
     def align(self, alignment: Affine) -> typing.Self:
+        """Express the LDS in aligned continuous latent coordinates."""
         inverse = alignment.inverse()
 
         return self._replace(

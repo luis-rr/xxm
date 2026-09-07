@@ -1,3 +1,5 @@
+"""Exact and approximate inference for HMMs."""
+
 import jax
 from jax import numpy as jnp
 
@@ -9,6 +11,7 @@ def to_chain(
     model: Model,
     num_steps: int,
 ) -> Chain:
+    """Construct discrete chain from model structure and time horizon."""
     transition_probs = jnp.broadcast_to(
         model.transitions.model.probs,
         (
@@ -32,12 +35,10 @@ def infer_exact(
     model: Model,
     observations: jax.Array,
 ) -> tuple[Posterior, jax.Array]:
-    """
-    Compute the exact posterior over latent states.
+    r"""Run forward-backward inference, returning marginals $p(z_t|y)$ and log likelihood.
 
-    The number of latent steps is determined by the emission potential. This
-    equals the observation length for ordinary HMMs and excludes the fixed
-    conditioning history for autoregressive HMMs.
+    The number of latent steps is determined by the emission potential:
+    equals observation length for ordinary HMMs, excludes conditioning history for AR HMMs.
     """
     observation_potential = model.emissions.compute_potential(observations)
 

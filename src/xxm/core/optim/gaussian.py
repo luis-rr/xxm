@@ -1,3 +1,5 @@
+"""Moment-matching and weighted least-squares fitting for Gaussian models."""
+
 import jax
 import jax.numpy as jnp
 

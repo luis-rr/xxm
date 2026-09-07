@@ -1,3 +1,5 @@
+"""Iterative parameter fitting loops and convergence control."""
+
 import typing
 from collections.abc import Callable
 
@@ -10,14 +12,7 @@ DataT = typing.TypeVar('DataT')
 
 
 class Fit(typing.NamedTuple, typing.Generic[ModelT]):
-    """
-    Results from fitting a single model.
-
-    Attributes:
-        model: The fitted model.
-        objective_trace: The value of the objective function (e.g. log-likelihood or ELBO)
-            over iterations, including the final value (num_iters + 1,).
-    """
+    """Fitted model and objective values recorded before and after optimization."""
 
     model: ModelT
     objective_trace: jax.Array

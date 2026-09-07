@@ -1,3 +1,5 @@
+"""HMM initialization from data via clustering."""
+
 import jax
 from jax import numpy as jnp
 
@@ -25,7 +27,7 @@ def _kmeans(
     num_states: int,
     num_iters: int = 20,
 ) -> jax.Array:
-    """Return hard K-means assignments with shape (T,)."""
+    """Compute K-means cluster assignments."""
     observations = jnp.asarray(
         observations,
         dtype=jnp.result_type(observations, jnp.float32),
@@ -149,6 +151,7 @@ def init_gaussian(
     num_states: int,
     self_transition_prob: float = 0.9,
 ) -> Model:
+    """Initialize Gaussian-emission HMM via K-means clustering."""
     emissions = _init_gaussian_emissions(
         observations=observations,
         num_states=num_states,
@@ -229,12 +232,7 @@ def init_gaussian_ar(
     num_lags: int,
     self_transition_prob: float = 0.9,
 ) -> Model:
-    """
-    Initialize a Gaussian AR-HMM conditional on the first ``num_lags`` values.
-
-    ``observations[:num_lags]`` provide the fixed autoregressive history.
-    Latent states correspond only to ``observations[num_lags:]``.
-    """
+    r"""Initialize Gaussian AR-HMM with first $L$ observations as fixed history."""
     emissions = _init_ar_gaussian_emissions(
         key=key,
         observations=observations,
@@ -278,6 +276,7 @@ def init_poisson(
     num_states: int,
     self_transition_prob: float = 0.9,
 ) -> Model:
+    """Initialize a Poisson-emission HMM via K-means clustering."""
     emissions = _init_poisson_emissions(
         key=key,
         observations=observations,

@@ -1,22 +1,11 @@
-r"""Inference for a block-tridiagonal Gaussian chain.
-
-Uses sequential block elimination to compute local marginal moments and
-the log normalizer without forming the full dense precision matrix.
+r"""Gaussian chain inference using canonical form and sequential block elimination.
 
 The canonical potential is
 
-    log f(x) = -1/2 x.T @ J @ x + h.T @ x + constant
+$$\log f(x) = -\frac12 x^\top J x + h^\top x + c,$$
 
-where J is symmetric positive definite. The corresponding normalized Gaussian
-has
-
-    mean = J^{-1} h
-    covariance = J^{-1}.
-
-The reported log normalizer is
-
-    log \int f(x) dx.
-
+where $J$ is symmetric positive definite. The corresponding normalized Gaussian has mean
+$J^{-1}h$ and covariance $J^{-1}$. The log normalizer is $\log \int f(x)\, dx$.
 """
 
 from __future__ import annotations
@@ -34,7 +23,7 @@ from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 def _precision_and_log_det(
     covariance: jax.Array,  # (..., N, N)
 ) -> tuple[jax.Array, jax.Array]:
-    """Compute precision matrices and covariance log determinants."""
+    """Convert covariance to precision and log determinant."""
 
     if covariance.shape[-2] != covariance.shape[-1]:
         raise ValueError('covariance must have shape (..., N, N)')
@@ -64,14 +53,10 @@ def _precision_and_log_det(
 class GaussianPotential(typing.NamedTuple):
     r"""Gaussian potential in canonical form.
 
-    Represents
+    $$\log f(x) = -\frac12 x^\top J x + h^\top x + c.$$
 
-        log f(x) = -1/2 x.T @ J @ x + h.T @ x + c,
-
-    where ``precision_blocks`` contains J, ``information_vectors``
-    contains h, and ``log_constant`` is c.
-
-    Leading dimensions are treated as batch dimensions for independent potentials.
+    `precision_blocks` stores $J$, `information_vectors` stores $h$,
+    and `log_constant` stores $c$. Leading dimensions are batch dimensions.
     """
 
     precision_blocks: jax.Array  # (..., N, N)
@@ -95,6 +80,7 @@ class GaussianPotential(typing.NamedTuple):
         cls,
         gaussian: Gaussian,
     ) -> GaussianPotential:
+        r"""Convert Gaussian moments $(\mu,\Sigma)$ to canonical parameters $(J,h,c)$."""
         if gaussian.mean.ndim < 1:
             raise ValueError('mean must have shape (..., N)')
 
@@ -322,15 +308,12 @@ class GaussianPotential(typing.NamedTuple):
 class GaussianPairPotential(typing.NamedTuple):
     r"""Pairwise Gaussian potential in canonical form.
 
-    Represents
+    $$\log f(x_0,x_1) = -\frac12x_0^\top J_{00}x_0
+    -x_1^\top J_{10}x_0 -\frac12x_1^\top J_{11}x_1
+    +h_0^\top x_0+h_1^\top x_1+c.$$
 
-        log f(x_0, x_1)
-        = -1/2 x_0.T @ J_00 @ x_0
-          - x_1.T @ J_10 @ x_0
-          - 1/2 x_1.T @ J_11 @ x_1
-          + h_0.T @ x_0
-          + h_1.T @ x_1
-          + c.
+    `lower_precision` stores the lower off-diagonal block $J_{10}$; its
+    transpose is the upper block $J_{01}$.
 
     Leading dimensions are treated as batch dimensions for independent potentials.
     """
@@ -369,6 +352,7 @@ class GaussianPairPotential(typing.NamedTuple):
         cls,
         lin_gaussian: LinearGaussian,
     ) -> GaussianPairPotential:
+        r"""Convert $p(x_1\mid x_0)$ into a joint pair potential over $(x_0,x_1)$."""
         if lin_gaussian.input_ndim != 1:
             raise ValueError(
                 'Gaussian pair potentials require vector-shaped inputs; '
@@ -437,6 +421,7 @@ class GaussianPairPotential(typing.NamedTuple):
         )
 
     def broadcast(self, batch_shape) -> GaussianPairPotential:
+        """Prepend batch dimensions by broadcasting this pair potential."""
         return GaussianPairPotential(
             left_precision=jnp.broadcast_to(
                 self.left_precision,
@@ -520,15 +505,7 @@ class GaussianPairPotential(typing.NamedTuple):
         self,
         posterior: GaussianChainMarginals,
     ) -> jax.Array:
-        r"""Compute each log potential's expectation under the chain posterior.
-
-        Returns
-
-            E_q[log f_k(x_t, x_{t+1})]
-
-        for every transition ``t`` and batched potential ``k``, with
-        shape ``(T - 1, K)``.
-        """
+        r"""Compute $\mathbb{E}_{q(x_t,x_{t+1})}[\log f_k(x_t,x_{t+1})]$."""
 
         means = posterior.means
         second = posterior.raw_second_moments()
@@ -569,26 +546,13 @@ class GaussianPairPotential(typing.NamedTuple):
 class GaussianChain(typing.NamedTuple):
     r"""Represents a Gaussian chain with block-tridiagonal structure in canonical form.
 
-    The canonical potential is
-
-        log f(x) = -1/2 x.T @ J @ x + h.T @ x + c
+    $$\log f(x)=-\frac12x^\top Jx+h^\top x+c.$$
 
     where J is symmetric positive definite and block tridiagonal,
     h is the information vector, and c is ``log_constant``.
 
-    The block convention is
-
-        diagonal_precision_blocks[t] = J[t, t]
-        lower_precision_blocks[t] = J[t + 1, t]
-
-    so that the dense precision has the form
-
-        D0      B0.T
-        B0      D1      B1.T
-                B1      D2
-                        ...
-
-    with ``B_t = lower_precision_blocks[t]``.
+    The lower block convention is $B_t=J_{t+1,t}$, so the upper block is
+    $B_t^\top$.
 
     ``information_vectors[t]`` contains the block of ``h`` associated
     with the variable ``x_t``.
@@ -608,7 +572,7 @@ class GaussianChain(typing.NamedTuple):
         initial_potential: GaussianPotential,  # (N, N)
         pair_potentials: GaussianPairPotential,  # (T-1, N, N)
     ) -> GaussianChain:
-        """Construct a Gaussian chain from initial and time-indexed pair potentials."""
+        """Construct a chain from an initial potential and $T-1$ pair potentials."""
 
         if pair_potentials.variable_dim != initial_potential.variable_dim:
             raise ValueError(

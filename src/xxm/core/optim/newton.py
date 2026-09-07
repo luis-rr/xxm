@@ -1,4 +1,6 @@
 """
+Newton's method optimization for scalar and vector objectives.
+
 Damped Newton optimization for one or more independent optimization problems.
 The objective may be scalar or batched; parameter operations must follow the
 same objective batch shape.
@@ -11,26 +13,41 @@ import jax.numpy as jnp
 
 
 class FreeParams(typing.Protocol):
-    def take_step(
-        self, direction: typing.Self, step_size: jax.Array
-    ) -> typing.Self: ...
-    def relative_change_from(self, other: typing.Self) -> jax.Array: ...
-    def where(self, mask: jax.Array, other: typing.Self) -> typing.Self: ...
+    """Protocol for parameter objects updated by batched Newton steps."""
+
+    def take_step(self, direction: typing.Self, step_size: jax.Array) -> typing.Self:
+        """Apply a scaled Newton direction."""
+        ...
+
+    def relative_change_from(self, other: typing.Self) -> jax.Array:
+        """Return the elementwise relative change from `other`."""
+        ...
+
+    def where(self, mask: jax.Array, other: typing.Self) -> typing.Self:
+        """Select this parameter object or `other` according to `mask`."""
+        ...
 
 
 FreeParamsT = typing.TypeVar('FreeParamsT', bound=FreeParams)
 
 
 class Model(typing.Protocol[FreeParamsT]):
-    def objective(self, params: FreeParamsT) -> jax.Array: ...
-    def newton_direction(self, params: FreeParamsT) -> FreeParamsT: ...
+    """Protocol for objectives supporting Newton optimization."""
+
+    def objective(self, params: FreeParamsT) -> jax.Array:
+        """Evaluate the objective to maximize."""
+        ...
+
+    def newton_direction(self, params: FreeParamsT) -> FreeParamsT:
+        """Compute a Newton ascent direction."""
+        ...
 
 
 ModelT = typing.TypeVar('ModelT', bound=Model)
 
 
 class NewtonState(typing.NamedTuple, typing.Generic[FreeParamsT]):
-    """State for damped Newton optimization of Poisson readout parameters."""
+    """State of a batched damped Newton optimization."""
 
     iteration: jax.Array
     params: FreeParamsT
@@ -120,7 +137,7 @@ class NewtonSearch(typing.NamedTuple, typing.Generic[FreeParamsT]):
         )
 
     def optimize(self, params: FreeParamsT) -> NewtonState[FreeParamsT]:
-        """Iteratively refine Poisson readout parameters with damped Newton steps."""
+        """Iteratively maximize the objective with damped Newton steps."""
         initial = self.initial_state(params)
         return self._iterate(initial)
 

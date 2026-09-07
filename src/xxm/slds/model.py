@@ -42,28 +42,39 @@ from .learning import (
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, eq=False)
 class GaussianSLDS:
-    """Switching linear dynamical system with Gaussian emissions."""
+    r"""Switching linear dynamical system with Gaussian emissions.
+
+    $$z_0 \sim \operatorname{Categorical}(\pi), \quad
+    z_t|z_{t-1} \sim \operatorname{Categorical}(P_{z_{t-1},:}), \quad
+    x_t|x_{t-1},z_t=k \sim \mathcal{N}(A_kx_{t-1}+b_k,Q_k),$$
+    $$y_t\mid x_t \sim \mathcal{N}(Cx_t+d,R).$$
+    """
 
     model: Model[GaussianEmissions]
 
     @property
     def num_states(self) -> int:
+        """Number of discrete dynamical states $K$."""
         return self.model.num_states
 
     @property
     def latent_dim(self) -> int:
+        """Dimension $D_x$ of the continuous latent state."""
         return self.model.dynamics.model.output_dim
 
     @property
     def observation_dim(self) -> int:
+        """Dimension $D_y$ of each observation."""
         return self.model.emissions.model.output_dim
 
     @property
     def dynamics(self) -> LinearGaussian:
+        """State-conditioned linear-Gaussian transition distributions."""
         return self.model.dynamics.model
 
     @property
     def emissions(self) -> LinearGaussian:
+        """Linear-Gaussian observation distribution."""
         return self.model.emissions.model
 
     def permute(self, permutation: jax.Array) -> typing.Self:
@@ -110,6 +121,7 @@ class GaussianSLDS:
         emission_bias: jax.Array,  # (N,)
         emission_covariance: jax.Array,  # (N, N)
     ) -> typing.Self:
+        """Construct a Gaussian SLDS from discrete, latent, and emission parameters."""
         return cls(
             model=Model(
                 state_initial=CategoricalInitial(
@@ -160,6 +172,7 @@ class GaussianSLDS:
         self_transition_prob: float = 0.9,
         covariance_floor: float = 1e-2,
     ) -> typing.Self:
+        """Initialize a Gaussian SLDS from a principal-component decomposition."""
         model = init_pca_gaussian(
             key=key,
             observations=observations,
@@ -184,6 +197,7 @@ class GaussianSLDS:
         covariance_floor: float = 1e-2,
         progress: bool | str = 'AR-HMM',
     ) -> typing.Self:
+        """Initialize a Gaussian SLDS using an autoregressive HMM fit."""
         model = init_arhmm_gaussian(
             key=key,
             observations=observations,
@@ -202,6 +216,7 @@ class GaussianSLDS:
         key: jax.Array,
         num_steps: int,
     ) -> tuple[jax.Array, jax.Array, jax.Array]:
+        r"""Sample states $z_{0:T-1}$, latents $x_{0:T-1}$, and observations $y_{0:T-1}$."""
         return self.model.sample(
             key,
             num_steps,
@@ -213,6 +228,7 @@ class GaussianSLDS:
         *,
         num_iters: int,
     ) -> tuple[Posterior, jax.Array]:
+        """Compute a variational posterior over discrete states and continuous latents."""
         return infer_variational(
             self.model,
             observations,
@@ -227,6 +243,7 @@ class GaussianSLDS:
         num_inference_iters: int,
         progress: bool | str = 'Variational EM',
     ) -> Fit[typing.Self]:
+        """Fit model parameters with variational expectation-maximization."""
         fit = fit_variational_em(
             self.model,
             observations,
@@ -250,6 +267,7 @@ class GaussianSLDS:
         num_inference_iters: int,
         progress: bool | str = 'Multi-Variational EM',
     ) -> FitCollection[typing.Self]:
+        """Fit multiple Gaussian SLDS initializations with variational EM."""
         fit = fit_variational_em_many(
             tuple(model.model for model in models),
             observations,
@@ -267,28 +285,39 @@ class GaussianSLDS:
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, eq=False)
 class PoissonSLDS:
-    """Switching linear dynamical system with Poisson emissions."""
+    r"""Switching linear dynamical system with Poisson emissions.
+
+    $$z_0 \sim \operatorname{Categorical}(\pi), \quad
+    z_t|z_{t-1} \sim \operatorname{Categorical}(P_{z_{t-1},:}), \quad
+    x_t|x_{t-1},z_t=k \sim \mathcal{N}(A_kx_{t-1}+b_k,Q_k),$$
+    $$y_t\mid x_t \sim \operatorname{Poisson}(\exp(Cx_t+d)).$$
+    """
 
     model: Model[PoissonEmissions]
 
     @property
     def num_states(self) -> int:
+        """Number of discrete dynamical states $K$."""
         return self.model.num_states
 
     @property
     def latent_dim(self) -> int:
+        """Dimension $D_x$ of the continuous latent state."""
         return self.model.dynamics.model.output_dim
 
     @property
     def observation_dim(self) -> int:
+        """Dimension $D_y$ of each observation."""
         return self.model.emissions.model.output_dim
 
     @property
     def dynamics(self) -> LinearGaussian:
+        """State-conditioned linear-Gaussian transition distributions."""
         return self.model.dynamics.model
 
     @property
     def emissions(self) -> LinearPoisson:
+        """Linear-Poisson observation distribution in log-rate form."""
         return self.model.emissions.model
 
     def permute(self, permutation: jax.Array) -> typing.Self:
@@ -334,6 +363,7 @@ class PoissonSLDS:
         emission_coefficients: jax.Array,  # (N, D)
         emission_bias: jax.Array,  # (N,)
     ) -> typing.Self:
+        """Construct a Poisson SLDS from discrete, latent, and emission parameters."""
         return cls(
             model=Model(
                 state_initial=CategoricalInitial(
@@ -383,6 +413,7 @@ class PoissonSLDS:
         self_transition_prob: float = 0.9,
         covariance_floor: float = 1e-2,
     ) -> typing.Self:
+        """Initialize a Poisson SLDS from a principal-component decomposition."""
         model = init_pca_poisson(
             key=key,
             observations=observations,
@@ -407,6 +438,7 @@ class PoissonSLDS:
         covariance_floor: float = 1e-2,
         progress: bool | str = 'AR-HMM',
     ) -> typing.Self:
+        """Initialize a Poisson SLDS using an autoregressive HMM fit."""
         model = init_arhmm_poisson(
             key=key,
             observations=observations,
@@ -425,6 +457,7 @@ class PoissonSLDS:
         key: jax.Array,
         num_steps: int,
     ) -> tuple[jax.Array, jax.Array, jax.Array]:
+        r"""Sample states $z_{0:T-1}$, latents $x_{0:T-1}$, and observations $y_{0:T-1}$."""
         return self.model.sample(
             key,
             num_steps,
@@ -438,6 +471,7 @@ class PoissonSLDS:
         initial_latents: jax.Array | None = None,
         params: OptimParams = DEFAULT_OPTIM_PARAMS,
     ) -> tuple[Posterior, jax.Array]:
+        """Compute a Laplace posterior approximation over states and latents."""
         return infer_laplace(
             self.model,
             observations,
@@ -455,6 +489,7 @@ class PoissonSLDS:
         laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
         progress: bool | str = 'Laplace EM',
     ) -> Fit[typing.Self]:
+        """Fit model parameters with Laplace-approximated expectation-maximization."""
         fit = fit_laplace_em(
             self.model,
             observations,
@@ -480,6 +515,7 @@ class PoissonSLDS:
         laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
         progress: bool | str = 'Multi-Laplace EM',
     ) -> FitCollection[typing.Self]:
+        """Fit multiple Poisson SLDS initializations with Laplace EM."""
         fit = fit_laplace_em_many(
             tuple(model.model for model in models),
             observations,

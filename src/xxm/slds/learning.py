@@ -1,3 +1,5 @@
+"""SLDS parameter learning via expectation-maximization."""
+
 from __future__ import annotations
 
 import jax

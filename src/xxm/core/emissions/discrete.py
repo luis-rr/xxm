@@ -1,3 +1,5 @@
+"""Emission models for discrete latent variables (HMM emissions)."""
+
 import typing
 
 import jax
@@ -11,38 +13,48 @@ from xxm.core.posteriors import DiscretePosterior
 
 
 class Emissions(typing.Protocol):
-    """Emission capabilities shared by HMM inference and parameter fitting."""
+    """Protocol for emission models over discrete latent states."""
 
     def log_likelihoods(
         self,
         observations: jax.Array,
-    ) -> jax.Array: ...
+    ) -> jax.Array:
+        """Evaluate state-conditional log likelihoods over time."""
+        ...
 
     def compute_potential(
         self,
         observations: jax.Array,
-    ) -> DiscretePotential: ...
+    ) -> DiscretePotential:
+        """Construct discrete state potentials from observation likelihoods."""
+        ...
 
     def fit_params(
         self,
         observations: jax.Array,
         posterior: DiscretePosterior,
-    ) -> typing.Self: ...
+    ) -> typing.Self:
+        """Fit emission parameters from observations and posterior state weights."""
+        ...
 
     def permute(
         self,
         permutation: jax.Array,
-    ) -> typing.Self: ...
+    ) -> typing.Self:
+        """Relabel state-specific emission parameters."""
+        ...
 
     def sample(
         self,
         key: jax.Array,
         states: jax.Array,
-    ) -> jax.Array: ...
+    ) -> jax.Array:
+        """Sample observations conditional on discrete states."""
+        ...
 
 
 class ContinuationEmissions(Emissions, typing.Protocol):
-    """Emissions that can generate conditionally from an explicit history."""
+    """Emissions that can conditionally sample given history."""
 
     def sample_continuation(
         self,
@@ -53,6 +65,11 @@ class ContinuationEmissions(Emissions, typing.Protocol):
 
 
 class GaussianEmissions(typing.NamedTuple):
+    r"""State-dependent Gaussian emissions.
+
+    $$y_t|z_t=k \sim \mathcal{N}(\mu_k, \Sigma_k).$$
+    """
+
     model: Gaussian  # K-batched
 
     @property
@@ -60,10 +77,11 @@ class GaussianEmissions(typing.NamedTuple):
         return self.model.batch_shape[0]
 
     def log_likelihoods(self, observations: jax.Array) -> jax.Array:
-
+        r"""Evaluate log probabilities $\log p(y_t|z_t=k)$ for all states and time."""
         return self.model.log_prob_broadcast(observations)
 
     def compute_potential(self, observations: jax.Array) -> DiscretePotential:
+        """Construct one state potential from each observation log likelihood."""
         return DiscretePotential(
             log_values=self.log_likelihoods(observations),
         )
@@ -83,6 +101,7 @@ class GaussianEmissions(typing.NamedTuple):
         )
 
     def sample(self, key: jax.Array, states: jax.Array) -> jax.Array:
+        """Sample observations conditional on discrete state indices."""
         return self.model.select(states).sample(key)
 
     def permute(self, permutation: jax.Array) -> 'GaussianEmissions':
@@ -92,6 +111,8 @@ class GaussianEmissions(typing.NamedTuple):
 
 
 class PoissonEmissions(typing.NamedTuple):
+    r"""State-dependent Poisson emissions parameterized by log rates $\eta_k=\log\lambda_k$."""
+
     model: Poisson  # K-batched
 
     @property
@@ -99,9 +120,11 @@ class PoissonEmissions(typing.NamedTuple):
         return self.model.batch_shape[0]
 
     def log_likelihoods(self, observations: jax.Array) -> jax.Array:
+        r"""Evaluate $\log p(y_t\mid z_t=k)$ for all states and time."""
         return self.model.log_prob_broadcast(observations)
 
     def compute_potential(self, observations: jax.Array) -> DiscretePotential:
+        """Construct one state potential from each observation log likelihood."""
         return DiscretePotential(
             log_values=self.log_likelihoods(observations),
         )
@@ -109,6 +132,7 @@ class PoissonEmissions(typing.NamedTuple):
     def fit_params(
         self, observations: jax.Array, posterior: DiscretePosterior
     ) -> 'PoissonEmissions':
+        """Fit state-specific Poisson log rates from posterior state weights."""
         return self._replace(
             model=poisson_fit.from_samples_weighted(
                 values=observations,
@@ -120,6 +144,7 @@ class PoissonEmissions(typing.NamedTuple):
         self,
         permutation: jax.Array,
     ) -> 'PoissonEmissions':
+        """Relabel state-specific emission parameters."""
         return self._replace(
             model=self.model.select(permutation),
         )
@@ -129,4 +154,5 @@ class PoissonEmissions(typing.NamedTuple):
         key: jax.Array,
         states: jax.Array,
     ) -> jax.Array:
+        """Sample observations conditional on discrete state indices."""
         return self.model.select(states).sample(key)

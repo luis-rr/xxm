@@ -1,4 +1,4 @@
-"""Lightweight JAX implementation of SLDS inference routines."""
+"""Lightweight JAX implementation of statistical state space models."""
 
 from xxm.hmm import (
     GaussianARHMM,

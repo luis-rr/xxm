@@ -68,24 +68,33 @@ def _latent_components_from_params(
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, eq=False)
 class GaussianLDS:
-    """Linear dynamical system with Gaussian emissions."""
+    r"""Linear dynamical system with Gaussian emissions.
+
+    $$x_0 \sim \mathcal{N}(m_0, S_0), \quad
+    x_t|x_{t-1} \sim \mathcal{N}(Ax_{t-1}+b, Q), \quad
+    y_t|x_t \sim \mathcal{N}(Cx_t+d, R).$$
+    """
 
     model: Model[GaussianEmissions]
 
     @property
     def latent_dim(self) -> int:
+        """Dimension $D_x$ of the continuous latent state."""
         return self.model.dynamics.model.output_dim
 
     @property
     def observation_dim(self) -> int:
+        """Dimension $D_y$ of each observation."""
         return self.model.emissions.model.output_dim
 
     @property
     def dynamics(self) -> LinearGaussian:
+        """Linear-Gaussian latent transition distribution."""
         return self.model.dynamics.model
 
     @property
     def emissions(self) -> LinearGaussian:
+        """Linear-Gaussian observation distribution."""
         return self.model.emissions.model
 
     @classmethod
@@ -101,6 +110,7 @@ class GaussianLDS:
         emission_bias: jax.Array,
         emission_covariance: jax.Array,
     ) -> typing.Self:
+        """Construct a Gaussian LDS from initial, dynamics, and emission parameters."""
         initial, dynamics = _latent_components_from_params(
             initial_mean=initial_mean,
             initial_covariance=initial_covariance,
@@ -133,6 +143,7 @@ class GaussianLDS:
         *,
         covariance_floor: float = 1e-2,
     ) -> typing.Self:
+        """Initialize a Gaussian LDS from a principal-component decomposition."""
         model = init_pca_gaussian(
             observations=observations,
             latent_dim=latent_dim,
@@ -149,6 +160,7 @@ class GaussianLDS:
         *,
         covariance_floors: jax.Array,
     ) -> tuple[typing.Self, ...]:
+        """Construct one Gaussian LDS for each requested covariance floor."""
         models = init_pca_gaussian_many(
             observations=observations,
             latent_dim=latent_dim,
@@ -158,12 +170,14 @@ class GaussianLDS:
         return tuple(cls(model) for model in models)
 
     def sample(self, key: jax.Array, num_steps: int) -> tuple[jax.Array, jax.Array]:
+        r"""Sample latent states $x_{0:T-1}$ and observations $y_{0:T-1}$."""
         return self.model.sample(
             key,
             num_steps,
         )
 
     def infer(self, observations: jax.Array) -> tuple[Posterior, jax.Array]:
+        """Compute the exact Gaussian posterior and observation log likelihood."""
         return infer_exact(
             self.model,
             observations,
@@ -176,6 +190,7 @@ class GaussianLDS:
         num_iters: int,
         progress: bool | str = 'EM',
     ) -> Fit[typing.Self]:
+        """Fit model parameters by expectation-maximization."""
         fit = fit_em(
             self.model,
             observations,
@@ -197,6 +212,7 @@ class GaussianLDS:
         num_iters: int,
         progress: bool | str = 'Multi-EM',
     ) -> FitCollection[typing.Self]:
+        """Fit multiple LDS initializations to the same observations by EM."""
         fit = fit_em_many(
             tuple(model.model for model in models),
             observations,
@@ -227,24 +243,33 @@ class GaussianLDS:
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, eq=False)
 class PoissonLDS:
-    """Linear dynamical system with Poisson emissions."""
+    r"""Linear dynamical system with Poisson emissions.
+
+    $$x_0 \sim \mathcal{N}(m_0, S_0), \quad
+    x_t|x_{t-1} \sim \mathcal{N}(Ax_{t-1}+b, Q), \quad
+    y_t|x_t \sim \operatorname{Poisson}(\exp(Cx_t+d)).$$
+    """
 
     model: Model[PoissonEmissions]
 
     @property
     def latent_dim(self) -> int:
+        """Dimension $D_x$ of the continuous latent state."""
         return self.model.dynamics.model.output_dim
 
     @property
     def observation_dim(self) -> int:
+        """Dimension $D_y$ of each observation."""
         return self.model.emissions.model.output_dim
 
     @property
     def dynamics(self) -> LinearGaussian:
+        """Linear-Gaussian latent transition distribution."""
         return self.model.dynamics.model
 
     @property
     def emissions(self) -> LinearPoisson:
+        """Linear-Poisson observation distribution in log-rate form."""
         return self.model.emissions.model
 
     @classmethod
@@ -259,6 +284,7 @@ class PoissonLDS:
         emission_coefficients: jax.Array,
         emission_bias: jax.Array,
     ) -> typing.Self:
+        """Construct a Poisson LDS from initial, dynamics, and emission parameters."""
         initial, dynamics = _latent_components_from_params(
             initial_mean=initial_mean,
             initial_covariance=initial_covariance,
@@ -290,6 +316,7 @@ class PoissonLDS:
         *,
         covariance_floor: float = 1e-2,
     ) -> typing.Self:
+        """Initialize a Poisson LDS from a principal-component decomposition."""
         model = init_pca_poisson(
             observations=observations,
             latent_dim=latent_dim,
@@ -306,6 +333,7 @@ class PoissonLDS:
         *,
         covariance_floors: jax.Array,
     ) -> tuple[typing.Self, ...]:
+        """Construct one Poisson LDS for each requested covariance floor."""
         models = init_pca_poisson_many(
             observations=observations,
             latent_dim=latent_dim,
@@ -315,6 +343,7 @@ class PoissonLDS:
         return tuple(cls(model) for model in models)
 
     def sample(self, key: jax.Array, num_steps: int) -> tuple[jax.Array, jax.Array]:
+        r"""Sample latent states $x_{0:T-1}$ and observations $y_{0:T-1}$."""
         return self.model.sample(
             key,
             num_steps,
@@ -327,6 +356,7 @@ class PoissonLDS:
         initial_latents: jax.Array | None = None,
         laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
     ) -> tuple[Posterior, jax.Array]:
+        """Compute a Laplace posterior approximation and its objective value."""
         return infer_laplace(
             self.model,
             observations,
@@ -342,6 +372,7 @@ class PoissonLDS:
         progress: bool | str = 'Laplace EM',
         laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
     ) -> Fit[typing.Self]:
+        """Fit model parameters with Laplace-approximated expectation-maximization."""
         fit = fit_laplace_em(
             self.model,
             observations,
@@ -365,6 +396,7 @@ class PoissonLDS:
         progress: bool | str = 'Multi-Laplace EM',
         laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
     ) -> FitCollection[typing.Self]:
+        """Fit multiple Poisson LDS initializations with Laplace EM."""
         fit = fit_laplace_em_many(
             tuple(model.model for model in models),
             observations,

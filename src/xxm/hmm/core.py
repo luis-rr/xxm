@@ -19,16 +19,13 @@ ContinuationEmissionsT = typing.TypeVar(
 
 
 class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
-    r"""
-    Container for HMM model parameters.
+    r"""Hidden Markov Model with discrete latent states.
 
-    ``initial`` defines the prior over the first modeled state,
-    ``transitions`` defines the state Markov chain, and ``emissions`` defines
-    the observation model associated with each state.
+    $$p(z_{0:T-1}, y_{0:T-1}) = p(z_0) \prod_{t=0}^{T-2} p(z_{t+1}|z_t) \prod_{t=0}^{T-1} p(y_t|z_t).$$
 
-    Ordinary HMMs associate one state with every observation. Autoregressive
-    emissions may condition on an initial observation history, so their first
-    modeled state corresponds to the first observation following that history.
+    `initial` stores $p(z_0)$, `transitions` stores $p(z_{t+1}|z_t)$,
+    and `emissions` stores $p(y_t|z_t)$. For autoregressive emissions,
+    the first modeled state corresponds to the first observation after the history.
     """
 
     initial: CategoricalInitial
@@ -37,12 +34,14 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
     @property
     def num_states(self) -> int:
+        """Number of discrete states $K$."""
         return self.initial.num_states
 
     def permute(
         self,
         permutation: jax.Array,
     ) -> Model:
+        """Relabel discrete states by permutation."""
         return Model(
             initial=self.initial.permute(permutation),
             transitions=self.transitions.permute(permutation),
@@ -54,7 +53,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         key: jax.Array,
         num_steps: int,
     ) -> jax.Array:
-        """Sample a complete discrete state trajectory."""
+        """Sample state trajectory $z_{0:T-1}$ from the prior."""
         key_initial, key_transitions = jax.random.split(key)
 
         initial_state = self.initial.sample(
@@ -72,7 +71,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         key: jax.Array,
         num_steps: int,
     ) -> tuple[jax.Array, jax.Array]:
-        """Sample latent states and observations autonomously."""
+        r"""Sample complete trajectory $(z_{0:T-1}, y_{0:T-1})$ autonomously."""
         key_states, key_observations = jax.random.split(key)
 
         states = self.sample_states(
@@ -106,7 +105,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         observations: jax.Array,
         posterior: Posterior,
     ) -> Model[EmissionsT]:
-        """Fit model parameters to observations and a state posterior."""
+        r"""Fit parameters via maximum likelihood from state posterior $p(z_t|y)$."""
         return Model(
             initial=self.initial.fit_params(posterior),
             transitions=self.transitions.fit_params(posterior),

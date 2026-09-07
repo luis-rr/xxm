@@ -1,3 +1,5 @@
+"""Categorical distributions over finite discrete states."""
+
 import typing
 
 import jax
@@ -5,23 +7,28 @@ import jax.numpy as jnp
 
 
 class Categorical(typing.NamedTuple):
-    """A categorical distribution.
+    r"""Categorical distribution.
 
-    Leading dimensions are batch dimensions and must be shared between attributes.
+    $$\pi_k = p(z=k).$$
+
+    `probs` stores the category probabilities. Leading dimensions are batch dimensions,
+    shared across all attributes.
     """
 
     probs: jax.Array  # (..., K)
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
+        """Batch shape."""
         return self.probs.shape[:-1]
 
     @property
     def num_categories(self) -> int:
+        """Number of categories."""
         return self.probs.shape[-1]
 
     def select(self, index) -> 'Categorical':
-        """Index into the batch dimensions of the distribution."""
+        """Index into batch dimensions."""
         return self.__class__(
             probs=self.probs[index],
         )
@@ -30,7 +37,7 @@ class Categorical(typing.NamedTuple):
         self,
         permutation: jax.Array,  # (K,)
     ) -> 'Categorical':
-        """Return a copy with categories reordered by ``permutation``."""
+        """Relabel categories by permutation."""
         return self._replace(
             probs=self.probs[..., permutation],
         )
@@ -39,7 +46,7 @@ class Categorical(typing.NamedTuple):
         self,
         batch_shape: tuple[int, ...],
     ) -> 'Categorical':
-        """Broadcast the distribution over additional leading batch dimensions."""
+        """Broadcast over leading batch dimensions."""
         return self.__class__(
             probs=jnp.broadcast_to(
                 self.probs,
@@ -51,6 +58,7 @@ class Categorical(typing.NamedTuple):
         self,
         dtype: jax.typing.DTypeLike,
     ) -> 'Categorical':
+        """Convert to a different data type."""
         return self._replace(
             probs=self.probs.astype(dtype),
         )
@@ -71,7 +79,7 @@ class Categorical(typing.NamedTuple):
         self,
         values: jax.Array,  # (...)
     ) -> jax.Array:  # (...)
-        """Evaluate log probabilities with aligned batch dimensions."""
+        """Evaluate log probabilities."""
         return jnp.take_along_axis(
             jnp.log(self.probs),
             values[..., None],
@@ -83,7 +91,7 @@ class Categorical(typing.NamedTuple):
         cls,
         counts: jax.Array,  # (..., K)
     ) -> 'Categorical':
-        """Construct a categorical distribution from category counts."""
+        """Construct from category counts, handling zero-count cases with uniform."""
         total = counts.sum(axis=-1, keepdims=True)
         valid = total > 0
 

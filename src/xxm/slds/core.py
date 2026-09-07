@@ -1,3 +1,5 @@
+"""Switched Linear Dynamical System: discrete and continuous latent states."""
+
 import typing
 
 import jax
@@ -17,30 +19,30 @@ from xxm.core.optim import gaussian as gaussian_fit
 
 
 class Posterior(typing.NamedTuple):
-    """Structured SLDS posterior over aligned discrete and continuous states."""
+    r"""SLDS posterior over discrete states $z$ and continuous latents $x$."""
 
     discrete: DiscreteChainMarginals  # T discrete states
     continuous: GaussianChainMarginals  # T continuous latents
 
     def permute(self, permutation: jax.Array) -> typing.Self:
-        """Relabel the discrete latent states."""
+        r"""Relabel discrete states $z$ by permutation."""
         return self._replace(
             discrete=self.discrete.permute(permutation),
         )
 
 
 class GaussianLinearSwitchingDynamics(typing.NamedTuple):
-    r"""State-dependent linear Gaussian latent dynamics.
+    r"""State-dependent linear-Gaussian dynamics.
 
-    Under the SLDS convention, state ``z[t]`` indexes the dynamics that generate
-    ``x[t]`` from ``x[t-1]``. Consequently, the first transition uses ``z[1]``;
-    ``z[0]`` instead indexes the initial latent distribution.
+    Under SLDS convention, state $z[t]$ indexes dynamics generating $x[t]$ from $x[t-1]$.
+    Consequently the first transition uses $z[1]$; $z[0]$ indexes the initial distribution.
     """
 
     model: LinearGaussian  # K-batched, input dimension D, output dimension D
 
     @property
     def num_states(self) -> int:
+        """Number of discrete states $K$."""
         return self.model.covariance.shape[0]
 
     def compute_pair_potentials(self) -> GaussianPairPotential:
@@ -50,7 +52,7 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         )
 
     def fit_params(self, posterior: Posterior) -> typing.Self:
-        """Fit one linear-Gaussian dynamics model per incoming state."""
+        r"""Fit state-dependent dynamics from posterior pair marginals."""
         weights = posterior.discrete.state_probs[1:]  # (T-1, K)
 
         continuous = posterior.continuous
@@ -170,6 +172,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
     @property
     def num_states(self) -> int:
+        """Number of discrete states $K$."""
         return self.dynamics.num_states
 
     def fit_params(
@@ -227,6 +230,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         return states, latents, observations
 
     def permute(self, permutation: jax.Array) -> typing.Self:
+        """Relabel the discrete state-dependent initial and transition parameters."""
         return self._replace(
             state_initial=self.state_initial.permute(permutation),
             transitions=self.transitions.permute(permutation),
@@ -238,6 +242,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         self,
         alignment: Affine,
     ) -> typing.Self:
+        """Express continuous latent parameters in aligned coordinates."""
         latent_dim = self.dynamics.model.output_dim
 
         if alignment.batch_shape:

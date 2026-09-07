@@ -1,3 +1,5 @@
+"""Emission models for continuous latent variables."""
+
 from __future__ import annotations
 
 import typing
@@ -15,52 +17,53 @@ from xxm.core.posteriors import ContinuousPosterior
 
 
 class Emissions(typing.Protocol):
-    def sample(self, key, latents) -> jax.Array: ...
+    """Protocol for emission models over continuous latents."""
+
+    def sample(self, key, latents) -> jax.Array:
+        """Sample observations conditional on latent values."""
+        ...
 
     def fit_params(
         self,
         observations: jax.Array,
         posterior: ContinuousPosterior,
-    ) -> typing.Self: ...
+    ) -> typing.Self:
+        """Fit emission parameters from observations and posterior moments."""
+        ...
 
     def log_likelihood(
         self,
         observations: jax.Array,
         latents: jax.Array,
-    ) -> jax.Array: ...
+    ) -> jax.Array:
+        """Evaluate the total conditional log likelihood."""
+        ...
 
     def compose_input(
         self,
         alignment: Affine,
-    ) -> typing.Self: ...
+    ) -> typing.Self:
+        """Transform the latent input coordinates of the emission model."""
+        ...
 
 
 EmissionsT = typing.TypeVar('EmissionsT', bound=Emissions)
 
 
 class QuadraticEmissions(Emissions, typing.Protocol):
-    r"""
-    Emissions with a likelihood that is quadratic in the latent variables.
+    r"""Emissions with quadratic log likelihood in latent variables.
 
-    The observation log likelihood can be represented exactly as a Gaussian
-    potential in ``x``, so continuous latent inference remains conjugate.
+    The observation log likelihood is exactly a Gaussian potential in $x$,
+    so continuous latent inference remains conjugate.
     """
 
     def compute_potential(
         self,
         observations: jax.Array,
     ) -> GaussianPotential:
-        r"""
-        Construct the exact Gaussian likelihood potential.
+        r"""Construct the exact Gaussian potential for $\log p(y\mid x)$.
 
-        Returns a potential representing
-
-        .. math::
-
-            \log p(y \mid x)
-
-        as a quadratic function of the latent variables. Unlike Laplace
-        emissions, no expansion point or local approximation is required.
+        No expansion point or local approximation is required.
         """
         ...
 
@@ -72,12 +75,10 @@ QuadraticEmissionsT = typing.TypeVar(
 
 
 class LaplaceEmissions(Emissions, typing.Protocol):
-    r"""
-    Emissions supporting Laplace updates and ELBO evaluation.
+    r"""Emissions with Laplace and ELBO support.
 
-    The likelihood need not be conjugate to a Gaussian latent posterior, but it
-    must admit a local quadratic approximation and an expectation under
-    Gaussian latent marginals.
+    The likelihood need not be conjugate to Gaussian latents but must admit
+    a local quadratic approximation and expectations under Gaussian marginals.
     """
 
     def compute_local_potential(
@@ -85,18 +86,7 @@ class LaplaceEmissions(Emissions, typing.Protocol):
         observations: jax.Array,
         latents: jax.Array,
     ) -> GaussianPotential:
-        r"""
-        Construct the local Gaussian likelihood potential at ``latents``.
-
-        Returns the quadratic approximation to
-
-        .. math::
-
-            \log p(y \mid x)
-
-        obtained from its value, gradient, and Hessian at the supplied latent
-        trajectory. This potential is used to form the Gaussian Laplace update.
-        """
+        r"""Construct a local Gaussian approximation to $\log p(y\mid x)$ at `latents`."""
         ...
 
     def expected_log_likelihood(
@@ -104,18 +94,7 @@ class LaplaceEmissions(Emissions, typing.Protocol):
         observations: jax.Array,
         posterior: GaussianChainMarginals,
     ) -> jax.Array:
-        r"""
-        Evaluate the expected log likelihood under Gaussian latent marginals.
-
-        Computes
-
-        .. math::
-
-            \mathbb{E}_{q(x)}[\log p(y \mid x)],
-
-        where ``q(x)`` is represented by ``posterior``. The expectation may be
-        evaluated analytically or numerically by the emission implementation.
-        """
+        r"""Evaluate $\mathbb{E}_{q(x)}[\log p(y\mid x)]$ under Gaussian marginals."""
         ...
 
 
@@ -126,7 +105,10 @@ LaplaceEmissionsT = typing.TypeVar(
 
 
 class GaussianEmissions(typing.NamedTuple):
-    """Linear Gaussian emissions for continuous latent variables."""
+    r"""Linear-Gaussian emissions.
+
+    $$y_t|x_t \sim \mathcal{N}(Cx_t + d, R).$$
+    """
 
     model: LinearGaussian  # no batch
 
@@ -134,7 +116,7 @@ class GaussianEmissions(typing.NamedTuple):
         self,
         latents: jax.Array,  # (..., D)
     ) -> Gaussian:
-        """Conditional observation distribution given latent values."""
+        """Conditional distribution $p(y|x)$ at deterministic latent."""
         return self.model.conditional(latents)
 
     def log_likelihood(
@@ -149,7 +131,7 @@ class GaussianEmissions(typing.NamedTuple):
         self,
         observations: jax.Array,
     ) -> GaussianPotential:
-        """Convert the Gaussian likelihood into a potential over latents."""
+        """Construct exact Gaussian likelihood potential over latents."""
         return GaussianPotential.from_linear_likelihood(
             self.model,
             observations,
@@ -168,7 +150,7 @@ class GaussianEmissions(typing.NamedTuple):
         observations: jax.Array,
         posterior: ContinuousPosterior,
     ) -> typing.Self:
-        """Fit the emission parameters from Gaussian latent marginals."""
+        """Fit emission parameters from Gaussian latent marginals."""
 
         return self._replace(
             model=gaussian_fit.linear_from_marginals(
@@ -181,6 +163,7 @@ class GaussianEmissions(typing.NamedTuple):
         )
 
     def observation_mean(self, posterior: ContinuousPosterior) -> jax.Array:
+        """Expected observations under posterior marginals."""
         return self.model.conditional_mean(
             posterior.means,
         )
@@ -311,6 +294,7 @@ class PoissonEmissions(typing.NamedTuple):
         )
 
     def observation_mean(self, posterior: ContinuousPosterior) -> jax.Array:
+        """Compute expected observations under posterior latent marginals."""
         return self.model.expected_rates(
             Gaussian(
                 mean=posterior.means,

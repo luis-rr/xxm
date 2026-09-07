@@ -1,3 +1,5 @@
+"""Laplace approximation and local quadratic approximation utilities."""
+
 import typing
 
 import jax

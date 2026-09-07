@@ -1,3 +1,5 @@
+"""Poisson parameter fitting routines."""
+
 import typing
 
 import jax
@@ -234,6 +236,7 @@ class _NewtonSearchModel(typing.NamedTuple):
 def from_samples(
     values: jax.Array,  # (T, N)
 ) -> Poisson:
+    """Fit independent Poisson log rates from sample means."""
     rates = jnp.mean(values, axis=0)
     return Poisson(log_rates=jnp.log(jnp.maximum(rates, EPS)))
 

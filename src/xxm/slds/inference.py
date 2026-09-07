@@ -1,3 +1,5 @@
+"""SLDS inference via message passing over joint discrete-continuous states."""
+
 import typing
 
 import jax
@@ -31,6 +33,8 @@ from .core import Model, Posterior
 
 
 class Inferred(typing.NamedTuple):
+    """Structured posterior and objective returned by SLDS inference."""
+
     posterior: Posterior
     objective: jax.Array
 
@@ -46,6 +50,7 @@ class QuadraticContinuousFactors(typing.NamedTuple):
         model: Model[QuadraticEmissionsT],
         observations: jax.Array,
     ) -> typing.Self:
+        """Build quadratic observation factors from an SLDS and observations."""
         return cls(
             observations=model.emissions.compute_potential(observations),
         )
@@ -86,6 +91,7 @@ class LaplaceContinuousFactors(
         observations: jax.Array,
         search_params: OptimParams,
     ) -> typing.Self:
+        """Build Laplace observation factors from an SLDS and observations."""
         return cls(
             emissions=model.emissions,
             observations=observations,
@@ -125,6 +131,7 @@ class DiscreteFactors(typing.NamedTuple):
         model: Model[EmissionsT],
         num_steps: int,
     ) -> typing.Self:
+        """Build the discrete Markov-chain prior for `num_steps` states."""
         transition_probs = model.transitions.model.broadcast((num_steps - 1,)).probs
 
         return cls(
@@ -165,6 +172,7 @@ class SwitchingFactors(typing.NamedTuple):
         cls,
         model: Model[EmissionsT],
     ) -> typing.Self:
+        """Build state-dependent initial and transition factors from an SLDS."""
         return cls(
             initial_model=model.latent_initial.model,
             dynamics_model=model.dynamics.model,
@@ -228,6 +236,8 @@ class SwitchingFactors(typing.NamedTuple):
 
 
 class QuadraticVI(typing.NamedTuple):
+    """Structured mean-field factors for conjugate SLDS inference."""
+
     switching: SwitchingFactors
     continuous: QuadraticContinuousFactors
     discrete: DiscreteFactors
@@ -238,6 +248,7 @@ class QuadraticVI(typing.NamedTuple):
         model: Model[QuadraticEmissionsT],
         observations: jax.Array,
     ) -> typing.Self:
+        """Construct all variational factors for a quadratic-emission SLDS."""
         num_steps = observations.shape[0]
 
         return cls(
@@ -253,6 +264,7 @@ class QuadraticVI(typing.NamedTuple):
         self,
         discrete_posterior: DiscretePosterior,
     ) -> tuple[ContinuousPosterior, jax.Array]:
+        """Update $q(x)$ using expected factors under $q(z)$."""
 
         initial_potential, dynamics_potential = self.switching.continuous_potentials(
             discrete_posterior
@@ -267,6 +279,7 @@ class QuadraticVI(typing.NamedTuple):
         self,
         continuous_posterior: ContinuousPosterior,
     ) -> DiscretePosterior:
+        """Update $q(z)$ using expected factors under $q(x)$."""
         return self.discrete.infer(
             self.switching.discrete_potential(
                 continuous_posterior,
@@ -330,11 +343,15 @@ def infer_variational(
 
 
 class LaplaceState(typing.NamedTuple):
+    """Iterative state for Laplace structured mean-field inference."""
+
     discrete: DiscretePosterior
     latents: jax.Array
 
 
 class LaplaceVI(typing.NamedTuple):
+    """Structured mean-field factors with local Laplace updates for $q(x)$."""
+
     switching: SwitchingFactors
     continuous: LaplaceContinuousFactors
     discrete: DiscreteFactors
@@ -346,6 +363,7 @@ class LaplaceVI(typing.NamedTuple):
         observations: jax.Array,
         search_params: OptimParams,
     ) -> typing.Self:
+        """Construct all variational factors for a nonconjugate SLDS."""
         num_steps = observations.shape[0]
         return cls(
             switching=SwitchingFactors.from_model(
@@ -365,6 +383,7 @@ class LaplaceVI(typing.NamedTuple):
     def infer_continuous(
         self, state: LaplaceState
     ) -> tuple[ContinuousPosterior, jax.Array]:
+        """Update $q(x)$ around the current latent trajectory."""
 
         initial_potential, dynamics_potential = self.switching.continuous_potentials(
             state.discrete,
@@ -380,6 +399,7 @@ class LaplaceVI(typing.NamedTuple):
         self,
         continuous_posterior: ContinuousPosterior,
     ) -> DiscretePosterior:
+        """Update $q(z)$ using expected continuous-state factors."""
 
         return self.discrete.infer(
             self.switching.discrete_potential(
@@ -388,6 +408,7 @@ class LaplaceVI(typing.NamedTuple):
         )
 
     def initial_latents(self, discrete_posterior: DiscretePosterior) -> jax.Array:
+        """Construct an initial latent trajectory from expected switching dynamics."""
         initial_potential, dynamics_potential = self.switching.continuous_potentials(
             discrete_posterior,
         )
@@ -402,6 +423,7 @@ class LaplaceVI(typing.NamedTuple):
         return prior_posterior.means
 
     def initial_state(self, initial_latents: jax.Array | None = None) -> LaplaceState:
+        """Construct the initial discrete prior and Laplace latent trajectory."""
         discrete_posterior = self.discrete.prior()
 
         if initial_latents is None:

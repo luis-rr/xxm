@@ -30,6 +30,7 @@ def pca_latents(
     observations: jax.Array,
     latent_dim: int,
 ) -> jax.Array:
+    """Project centered observations onto their leading `latent_dim` components."""
     centered = observations - jnp.mean(observations, axis=0)
 
     _, _, vt = jnp.linalg.svd(
@@ -45,6 +46,7 @@ def init_pca_gaussian(
     latent_dim: int,
     covariance_floor: float = 1e-2,
 ) -> Model[GaussianEmissions]:
+    """Initialize a Gaussian LDS from PCA latents and a covariance floor."""
     _validate_initialization(observations, latent_dim)
 
     latents = pca_latents(
@@ -86,6 +88,7 @@ def init_pca_poisson(
     latent_dim: int,
     covariance_floor: float = 1e-2,
 ) -> Model[PoissonEmissions]:
+    """Initialize a Poisson LDS from PCA latents and Gaussian latent dynamics."""
     _validate_initialization(observations, latent_dim)
 
     latents = pca_latents(

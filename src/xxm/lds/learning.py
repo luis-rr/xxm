@@ -1,3 +1,5 @@
+"""LDS parameter learning via expectation-maximization."""
+
 from __future__ import annotations
 
 import typing
@@ -24,6 +26,7 @@ def em_step(
     model: Model[QuadraticEmissionsT],
     observations: jax.Array,
 ) -> tuple[Model[QuadraticEmissionsT], jax.Array]:
+    """Perform one exact E-M update and return its marginal log likelihood."""
 
     posterior, log_normalizer = infer_exact(
         model,
@@ -43,6 +46,7 @@ def laplace_em_step(
     observations: jax.Array,
     params: OptimParams,
 ) -> tuple[Model[LaplaceEmissionsT], jax.Array]:
+    """Perform one Laplace E-M update and return its approximate objective."""
 
     posterior, log_normalizer = infer_laplace(
         model,
@@ -64,6 +68,7 @@ def fit_em(
     num_iters: int,
     progress: bool | str = 'EM',
 ) -> Fit[Model[QuadraticEmissionsT]]:
+    """Fit a quadratic-emission LDS by exact expectation-maximization."""
 
     return _fit_one(
         model,
@@ -81,6 +86,7 @@ def fit_em_many(
     num_iters: int,
     progress: bool | str = 'Multi-EM',
 ) -> FitCollection[Model[QuadraticEmissionsT]]:
+    """Fit multiple quadratic-emission LDS initializations by exact EM."""
 
     return _fit_many(
         models,
@@ -99,6 +105,7 @@ def fit_laplace_em(
     progress: bool | str = 'Laplace EM',
     laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
 ) -> Fit[Model[LaplaceEmissionsT]]:
+    """Fit a nonconjugate LDS using Laplace-approximated expectation-maximization."""
 
     laplace_params = laplace_params or OptimParams()
 
@@ -123,6 +130,7 @@ def fit_laplace_em_many(
     laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
     progress: bool | str = 'Multi-Laplace EM',
 ) -> FitCollection[Model[LaplaceEmissionsT]]:
+    """Fit multiple nonconjugate LDS initializations with Laplace EM."""
 
     laplace_params = laplace_params or OptimParams()
 

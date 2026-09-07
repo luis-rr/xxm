@@ -1,3 +1,5 @@
+"""HMM parameter learning via expectation-maximization."""
+
 from __future__ import annotations
 
 import jax
@@ -14,6 +16,7 @@ def em_step(
     model: Model,
     observations: jax.Array,
 ) -> tuple[Model, jax.Array]:
+    """Run one E-M iteration: infer posterior, then update parameters."""
 
     posterior, log_normalizer = infer_exact(
         model,
@@ -34,6 +37,7 @@ def fit_em(
     num_iters: int,
     progress: bool | str = 'EM',
 ) -> Fit[Model]:
+    """Fit model via EM, returning parameters and log-likelihood history."""
 
     return _fit_one(
         model,
@@ -51,6 +55,7 @@ def fit_em_many(
     num_iters: int,
     progress: bool | str = 'Multi-EM',
 ) -> FitCollection[Model]:
+    """Fit multiple model initializations in parallel via EM."""
 
     return _fit_many(
         models,
