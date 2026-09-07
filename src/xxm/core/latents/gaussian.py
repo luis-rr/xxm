@@ -29,7 +29,9 @@ class GaussianInitial(typing.NamedTuple):
         return self.dist.sample(key)
 
     def align(self, alignment: Affine) -> typing.Self:
-        r"""Express initial distribution in aligned coordinates $x' = A^{-1}x$."""
+        r"""
+        Express the initial distribution in coordinates $x' = f(x)$ defined by `alignment`.
+        """
         return self._replace(dist=self.dist.affine(alignment))
 
     @classmethod
@@ -150,7 +152,9 @@ class GaussianLinearDynamics(typing.NamedTuple):
         )
 
     def align(self, alignment: Affine) -> typing.Self:
-        r"""Express dynamics in aligned coordinates $x' = A^{-1}x$."""
+        """
+        Express the dynamics in coordinates $x' = f(x)$ defined by `alignment`.
+        """
         inverse = alignment.inverse()
 
         return self._replace(
@@ -175,7 +179,11 @@ class GaussianLinearDynamics(typing.NamedTuple):
 
 
 class StateConditionedGaussian(typing.NamedTuple):
-    """Gaussian distribution conditioned on a discrete state."""
+    r"""
+    Gaussian distribution conditioned on a discrete state.
+
+    $$x \mid z=k \sim \mathcal{N}(\mu_k,\Sigma_k).$$
+    """
 
     dist: Gaussian  # K-batched
 
@@ -205,9 +213,13 @@ class StateConditionedGaussian(typing.NamedTuple):
         return self.conditional(state).sample(key)
 
     def permute(self, permutation: jax.Array) -> typing.Self:
-        """Relabel state-conditioned initial distributions."""
+        """
+        Relabel state-conditioned Gaussian distributions.
+        """
         return self._replace(dist=self.dist.select(permutation))
 
     def align(self, alignment: Affine) -> typing.Self:
-        """Express state-conditioned initial distributions in aligned coordinates."""
+        """
+        Express the conditional distributions in coordinates $x' = f(x)$.
+        """
         return self._replace(dist=self.dist.affine(alignment))

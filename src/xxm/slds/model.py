@@ -42,12 +42,19 @@ from .learning import (
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, eq=False)
 class GaussianSLDS:
-    r"""Switching linear dynamical system with Gaussian emissions.
+    r"""
+    Switching linear dynamical system with Gaussian emissions.
 
-    $$z_0 \sim \operatorname{Categorical}(\pi), \quad
-    z_t|z_{t-1} \sim \operatorname{Categorical}(P_{z_{t-1},:}), \quad
-    x_t|x_{t-1},z_t=k \sim \mathcal{N}(A_kx_{t-1}+b_k,Q_k),$$
-    $$y_t\mid x_t \sim \mathcal{N}(Cx_t+d,R).$$
+    $$z_0 \sim \operatorname{Categorical}(\pi), \qquad
+    z_t \mid z_{t-1} \sim \operatorname{Categorical}(P_{z_{t-1},:}),$$
+
+    $$x_0 \mid z_0=k \sim \mathcal{N}(m_k,S_k), \qquad
+    x_t \mid x_{t-1},z_t=k
+    \sim \mathcal{N}(A_kx_{t-1}+b_k,Q_k),$$
+
+    $$y_t \mid x_t \sim \mathcal{N}(Cx_t+d,R).$$
+
+    For $t>0$, $z_t$ selects the dynamics generating $x_t$ from $x_{t-1}$.
     """
 
     _model: Model[GaussianEmissions]
@@ -228,7 +235,10 @@ class GaussianSLDS:
         *,
         num_iters: int,
     ) -> tuple[Posterior, jax.Array]:
-        """Compute a variational posterior over discrete states and continuous latents."""
+        """
+        Compute a structured mean-field posterior with conjugate updates for $q(x)$,
+        returning its ELBO.
+        """
         return infer_variational(
             self._model,
             observations,
@@ -285,12 +295,19 @@ class GaussianSLDS:
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, eq=False)
 class PoissonSLDS:
-    r"""Switching linear dynamical system with Poisson emissions.
+    r"""
+    Switching linear dynamical system with Poisson emissions.
 
-    $$z_0 \sim \operatorname{Categorical}(\pi), \quad
-    z_t|z_{t-1} \sim \operatorname{Categorical}(P_{z_{t-1},:}), \quad
-    x_t|x_{t-1},z_t=k \sim \mathcal{N}(A_kx_{t-1}+b_k,Q_k),$$
-    $$y_t\mid x_t \sim \operatorname{Poisson}(\exp(Cx_t+d)).$$
+    $$z_0 \sim \operatorname{Categorical}(\pi), \qquad
+    z_t \mid z_{t-1} \sim \operatorname{Categorical}(P_{z_{t-1},:}),$$
+
+    $$x_0 \mid z_0=k \sim \mathcal{N}(m_k,S_k), \qquad
+    x_t \mid x_{t-1},z_t=k
+    \sim \mathcal{N}(A_kx_{t-1}+b_k,Q_k),$$
+
+    $$y_t \mid x_t \sim \operatorname{Poisson}(\exp(Cx_t+d)).$$
+
+    For $t>0$, $z_t$ selects the dynamics generating $x_t$ from $x_{t-1}$.
     """
 
     _model: Model[PoissonEmissions]
@@ -471,7 +488,10 @@ class PoissonSLDS:
         initial_latents: jax.Array | None = None,
         params: OptimParams = DEFAULT_OPTIM_PARAMS,
     ) -> tuple[Posterior, jax.Array]:
-        """Compute a Laplace posterior approximation over states and latents."""
+        """
+        Compute a structured mean-field posterior with Laplace updates for $q(x)$,
+        returning its ELBO.
+        """
         return infer_laplace(
             self._model,
             observations,

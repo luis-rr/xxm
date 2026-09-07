@@ -356,7 +356,9 @@ class PoissonLDS:
         initial_latents: jax.Array | None = None,
         laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
     ) -> tuple[Posterior, jax.Array]:
-        """Compute a Laplace posterior approximation and its objective value."""
+        """
+        Compute the Laplace posterior and approximate observation log likelihood.
+        """
         return infer_laplace(
             self._model,
             observations,

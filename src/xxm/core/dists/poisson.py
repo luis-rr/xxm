@@ -11,7 +11,7 @@ from xxm.core.dists.gaussian import Gaussian
 class Poisson(typing.NamedTuple):
     r"""Independent Poisson variables parameterized by log rates.
 
-    $$y_i \sim \operatorname{Poisson}(\exp(\eta_i)).$$
+    $$u_i \sim \operatorname{Poisson}(\exp(\eta_i)).$$
 
     `log_rates` stores $\eta$. Leading dimensions are batch dimensions,
     shared across all attributes.
@@ -84,7 +84,7 @@ class Poisson(typing.NamedTuple):
         self,
         values: jax.Array,  # (..., N)
     ) -> jax.Array:  # (..., *batch_shape)
-        """Evaluate every observation against every batched distribution."""
+        """Evaluate every value against every batched distribution."""
         values = values.reshape(
             values.shape[:-1] + (1,) * len(self.batch_shape) + (self.variable_dim,)
         )  # (..., 1, ..., 1, N)
@@ -100,9 +100,10 @@ class Poisson(typing.NamedTuple):
 
 
 class LinearPoisson(typing.NamedTuple):
-    r"""Linear-Poisson conditional distribution.
+    r"""
+    Linear-Poisson conditional distribution.
 
-    $$y \mid x \sim \operatorname{Poisson}(\exp(Wx + b)).$$
+    $$v \mid u \sim \operatorname{Poisson}(\exp(Wu + b)).$$
 
     `affine` encodes $(W, b)$. Tensor-shaped inputs resolve as tensor contractions.
     Leading dimensions are batch dimensions, shared across all attributes.
@@ -160,7 +161,9 @@ class LinearPoisson(typing.NamedTuple):
         return self._replace(affine=self.affine.astype(dtype))
 
     def log_rates(self, values: jax.Array) -> jax.Array:
-        r"""Log rates $\eta = Wx + b$ at deterministic input."""
+        r"""
+        Log rates $\eta = Wu + b$ at deterministic input.
+        """
         return self.affine.apply(values)
 
     def conditional(self, values: jax.Array) -> Poisson:

@@ -183,7 +183,9 @@ class Gaussian(typing.NamedTuple):
         self,
         other: 'Gaussian',
     ) -> jax.Array:
-        r"""Expected log density $\mathbb{E}_{\sim \text{other}}[\log p(u)]$ under `other`."""
+        r"""
+        Expected log density $\mathbb{E}_{u\sim\text{other}}[\log p(u)]$.
+        """
         if other.mean.shape[-1] != self.variable_dim:
             raise ValueError(
                 f'mean must have trailing dimension {self.variable_dim}; '
@@ -388,7 +390,9 @@ class LinearGaussian(typing.NamedTuple):
         self,
         affine: Affine,
     ) -> typing.Self:
-        r"""Precompose with input map, returning $v \mid u' \sim \mathcal{N}(W(A' u' + b') + b, \Sigma)$."""
+        """
+        Precompose with $u=W'u'+b'$.
+        """
         return self._replace(
             affine=self.affine.compose(affine),
         )
@@ -397,7 +401,9 @@ class LinearGaussian(typing.NamedTuple):
         self,
         affine: Affine,
     ) -> typing.Self:
-        r"""Postcompose with output map, returning $w \mid u \sim \mathcal{N}(A(Wu + b) + b', \ldots)$."""
+        """
+        Postcompose the output with $w=W'v+b'$.
+        """
         if affine.input_shape != (self.output_dim,):
             raise ValueError(
                 'output affine input must match the model output dimension; '
@@ -585,12 +591,12 @@ class PairedGaussian(typing.NamedTuple):
 
     @property
     def mean(self) -> jax.Array:
-        """Mean of concatenated variable $[\text{left}, \text{right}]$."""
+        r"""Mean of concatenated variable $[\text{left}, \text{right}]$."""
         return jnp.concatenate([self.left.mean, self.right.mean], axis=-1)
 
     @property
     def covariance(self) -> jax.Array:
-        """Covariance of concatenated variable $[\text{left}, \text{right}]$."""
+        r"""Covariance of concatenated variable $[\text{left}, \text{right}]$."""
         left_right_covariance = jnp.swapaxes(self.cross_covariance, -2, -1)
 
         top = jnp.concatenate([self.left.covariance, left_right_covariance], axis=-1)

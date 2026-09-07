@@ -1,4 +1,6 @@
-"""SLDS inference via message passing over joint discrete-continuous states."""
+"""
+Structured mean-field inference for Switching Linear Dynamical Systems.
+"""
 
 import typing
 
@@ -33,7 +35,9 @@ from .core import Model, Posterior
 
 
 class Inferred(typing.NamedTuple):
-    """Structured posterior and objective returned by SLDS inference."""
+    """
+    Structured mean-field posterior and ELBO returned by SLDS inference.
+    """
 
     posterior: Posterior
     objective: jax.Array
@@ -305,7 +309,9 @@ def infer_variational(
     observations: jax.Array,
     num_iters: int,
 ) -> Inferred:
-    """Run structured mean-field inference for the SLDS."""
+    """
+    Run structured mean-field inference with conjugate Gaussian updates for $q(x)$.
+    """
     inference = QuadraticVI.from_model(model, observations)
 
     def step(_, discrete_posterior):
@@ -478,7 +484,9 @@ def infer_laplace(
     initial_latents: jax.Array | None = None,
     params: OptimParams = DEFAULT_OPTIM_PARAMS,
 ) -> Inferred:
-    """Run structured mean-field inference with Laplace continuous updates."""
+    """
+    Run structured mean-field inference with Laplace updates for $q(x)$.
+    """
 
     params = params or OptimParams()
 

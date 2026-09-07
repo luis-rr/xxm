@@ -45,7 +45,7 @@ class ContinuousPosterior(typing.Protocol):
         ...
 
     def raw_second_moments(self) -> jax.Array:  # (T, D, D)
-        """Raw second moments $\\mathbb{E}[x_t x_t^\top\\mid y]$."""
+        r"""Raw second moments $\mathbb{E}[x_t x_t^\top\mid y]$."""
         ...
 
     def raw_cross_moments(self) -> jax.Array:  # (T-1, D, D)

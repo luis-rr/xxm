@@ -19,13 +19,19 @@ ContinuationEmissionsT = typing.TypeVar(
 
 
 class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
-    r"""Hidden Markov Model with discrete latent states.
+    r"""
+    Hidden Markov Model with discrete latent states.
 
-    $$p(z_{0:T-1}, y_{0:T-1}) = p(z_0) \prod_{t=0}^{T-2} p(z_{t+1}|z_t) \prod_{t=0}^{T-1} p(y_t|z_t).$$
+    For memoryless emissions,
 
-    `initial` stores $p(z_0)$, `transitions` stores $p(z_{t+1}|z_t)$,
-    and `emissions` stores $p(y_t|z_t)$. For autoregressive emissions,
-    the first modeled state corresponds to the first observation after the history.
+    $$p(z_{0:T-1}, y_{0:T-1}) =
+    p(z_0)
+    \prod_{t=0}^{T-2} p(z_{t+1}\mid z_t)
+    \prod_{t=0}^{T-1} p(y_t\mid z_t).$$
+
+    `initial` stores $p(z_0)$, `transitions` stores $p(z_{t+1}\mid z_t)$,
+    and `emissions` stores the state-conditional observation model.
+    Autoregressive emissions additionally condition on observation history.
     """
 
     initial: CategoricalInitial
@@ -105,7 +111,9 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         observations: jax.Array,
         posterior: Posterior,
     ) -> Model[EmissionsT]:
-        r"""Fit parameters via maximum likelihood from state posterior $p(z_t|y)$."""
+        """
+        Perform the EM M-step from posterior state and pair marginals.
+        """
         return Model(
             initial=self.initial.fit_params(posterior),
             transitions=self.transitions.fit_params(posterior),

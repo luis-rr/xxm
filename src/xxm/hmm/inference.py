@@ -1,4 +1,6 @@
-"""Exact and approximate inference for HMMs."""
+"""
+Exact inference for Hidden Markov Models.
+"""
 
 import jax
 from jax import numpy as jnp
@@ -35,10 +37,11 @@ def infer_exact(
     model: Model,
     observations: jax.Array,
 ) -> tuple[Posterior, jax.Array]:
-    r"""Run forward-backward inference, returning marginals $p(z_t|y)$ and log likelihood.
+    """
+    Run forward-backward inference, returning state marginals and log likelihood.
 
-    The number of latent steps is determined by the emission potential:
-    equals observation length for ordinary HMMs, excludes conditioning history for AR HMMs.
+    For autoregressive emissions, the likelihood is conditional on the fixed
+    initial observation history.
     """
     observation_potential = model.emissions.compute_potential(observations)
 

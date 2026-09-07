@@ -33,7 +33,7 @@ class DiscretePotential(typing.NamedTuple):
 class DiscreteChain(typing.NamedTuple):
     r"""Finite-state chain with local state potentials.
 
-    For observations, the unnormalized joint distribution is
+    The unnormalized joint distribution is
 
     $$f(z_{0:T-1}) = p(z_0) \prod_{t=0}^{T-2} p(z_{t+1} \mid z_t) \prod_{t=0}^{T-1} \phi_t(z_t).$$
 
@@ -117,10 +117,13 @@ class DiscreteChain(typing.NamedTuple):
 
 
 class DiscreteChainMarginals(typing.NamedTuple):
-    r"""Posterior marginals of a finite-state chain.
+    r"""
+    Marginals of the normalized finite-state chain distribution.
 
-    - `state_probs[t,k]` stores $\gamma_t(k) = p(z_t=k|\text{obs})$
-    - `pair_probs[t,i,j]` stores $\xi_t(i,j) = p(z_t=i, z_{t+1}=j|\text{obs})$
+    For $q(z) = f(z) / Z$,
+
+    - `state_probs[t,k]` stores $\gamma_t(k) = q(z_t=k)$
+    - `pair_probs[t,i,j]` stores $\xi_t(i,j) = q(z_t=i,z_{t+1}=j)$
 
     Represents marginals of one chain. Apply `jax.vmap` to introduce batch dimensions.
     """
@@ -129,7 +132,9 @@ class DiscreteChainMarginals(typing.NamedTuple):
     pair_probs: jax.Array  # (T - 1, K, K)
 
     def entropy(self) -> jax.Array:
-        """Entropy of posterior chain distribution."""
+        """
+        Entropy of the normalized chain distribution.
+        """
 
         initial_entropy = -jnp.sum(
             jsp.special.xlogy(
@@ -158,7 +163,7 @@ class DiscreteChainMarginals(typing.NamedTuple):
         self,
         chain: DiscreteChain,
     ) -> jax.Array:
-        r"""Expected log potential $\mathbb{E}_q[\log f(z)]$ for the chain."""
+        r"""Expected chain log potential $\mathbb{E}_q[\log f(z)]$."""
 
         expected_initial = jnp.sum(
             jsp.special.xlogy(
@@ -187,10 +192,12 @@ class DiscreteChainMarginals(typing.NamedTuple):
 
 
 class _DiscreteChainMessages(typing.NamedTuple):
-    r"""Normalized forward and backward messages for one chain.
+    """
+    Normalized forward and backward messages for one chain.
 
-    - `forward_messages[t,k]` and `backward_messages[t,k]` are messages in log space
-    - `log_scaling_factors[t]` are the per-step log normalization constants
+    - `forward_messages[t,k]` and `backward_messages[t,k]` are normalized
+    probability-space messages
+    - `log_scaling_factors[t]` are per-step log normalization constants
     """
 
     forward_messages: jax.Array  # (T, K)
@@ -201,6 +208,7 @@ class _DiscreteChainMessages(typing.NamedTuple):
         self,
         chain: DiscreteChain,
     ) -> tuple[DiscreteChainMarginals, jax.Array]:
+        """Compute normalized chain marginals and the log normalizer."""
 
         posterior = DiscreteChainMarginals(
             state_probs=self.compute_state_marginals(),
@@ -212,7 +220,9 @@ class _DiscreteChainMessages(typing.NamedTuple):
         return posterior, log_normalizer
 
     def compute_state_marginals(self) -> jax.Array:
-        r"""Compute posterior state marginals $\gamma_t(k)$."""
+        r"""
+        Compute state marginals $\gamma_t(k)$.
+        """
         if (
             self.forward_messages.ndim != 2
             or self.backward_messages.ndim != 2
@@ -241,7 +251,9 @@ class _DiscreteChainMessages(typing.NamedTuple):
         self,
         chain: DiscreteChain,
     ) -> jax.Array:
-        r"""Compute posterior pair marginals $\xi_t(i,j)$."""
+        r"""
+        Compute adjacent-state marginals $\xi_t(i,j)$.
+        """
         if (
             self.forward_messages.ndim != 2
             or self.backward_messages.ndim != 2
@@ -294,7 +306,7 @@ class _DiscreteChainMessages(typing.NamedTuple):
         )
 
     def compute_log_normalizer(self) -> jax.Array:
-        """Compute log marginal likelihood from message log factors."""
+        """Compute the chain log normalizer from forward scaling factors."""
         return jnp.sum(self.log_scaling_factors)
 
 

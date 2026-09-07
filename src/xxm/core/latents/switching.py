@@ -124,7 +124,9 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         )
 
     def permute(self, permutation: jax.Array) -> typing.Self:
-        """Express the states in a reordered coordinate system."""
+        """
+        Relabel discrete-state-indexed dynamics by permutation.
+        """
         return self._replace(
             dist=self.dist.select(permutation),
         )

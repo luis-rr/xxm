@@ -46,7 +46,9 @@ def laplace_em_step(
     observations: jax.Array,
     params: OptimParams,
 ) -> tuple[Model[LaplaceEmissionsT], jax.Array]:
-    """Perform one Laplace E-M update and return its approximate objective."""
+    """
+    Perform one Laplace EM update and return the approximate marginal log likelihood.
+    """
 
     posterior, log_normalizer = infer_laplace(
         model,
@@ -130,8 +132,9 @@ def fit_laplace_em_many(
     laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
     progress: bool | str = 'Multi-Laplace EM',
 ) -> FitCollection[Model[LaplaceEmissionsT]]:
-    """Fit multiple nonconjugate LDS initializations with Laplace EM."""
-
+    """
+    Fit multiple nonconjugate LDS initializations with Laplace EM.
+    """
     laplace_params = laplace_params or OptimParams()
 
     return _fit_many(

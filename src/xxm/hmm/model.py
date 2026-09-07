@@ -201,9 +201,10 @@ class GaussianHMM:
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, eq=False)
 class PoissonHMM:
-    r"""Hidden Markov model with Poisson emissions.
+    r"""
+    Hidden Markov model with Poisson emissions.
 
-    $$p(y_t|z_t=k) = \operatorname{Poisson}(\exp(\eta_k)).$$
+    $$y_t\mid z_t=k \sim \operatorname{Poisson}(\exp(\eta_k)).$$
     """
 
     _model: Model[PoissonEmissions]

@@ -52,17 +52,16 @@ def infer_laplace(
     params: OptimParams = DEFAULT_OPTIM_PARAMS,
 ) -> tuple[Posterior, jax.Array]:
     """
-    Approximate the posterior over latents using Laplace inference.
+    Approximate the latent posterior and marginal log likelihood using Laplace inference.
 
     The posterior mode is found with damped Newton iterations. At each
     iteration, the emission likelihood is replaced by its local quadratic
     approximation, producing a Gaussian chain whose mean gives the Newton
     candidate.
 
-    The final Gaussian chain, evaluated at the converged mode, is returned
-    as the Laplace approximation to p(x | y).
+    The final local Gaussian approximation defines both the returned posterior
+    marginals and Laplace approximation to the marginal log likelihood.
     """
-
     params = params or OptimParams()
 
     num_steps = observations.shape[0]

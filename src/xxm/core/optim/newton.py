@@ -1,9 +1,8 @@
 """
-Newton's method optimization for scalar and vector objectives.
+Damped Newton optimization for one or more independent scalar objectives.
 
-Damped Newton optimization for one or more independent optimization problems.
-The objective may be scalar or batched; parameter operations must follow the
-same objective batch shape.
+Batched objective values represent independent optimization problems whose
+parameter operations share the same batch shape.
 """
 
 import typing
@@ -64,7 +63,9 @@ class OptimParams(typing.NamedTuple):
     max_line_search_iters: int = 20
 
     def validate(self) -> None:
-        """Validate the parameters for Laplace inference."""
+        """
+        Validate damped Newton optimization parameters.
+        """
 
         if self.max_iter < 1:
             raise ValueError('max_iter must be at least 1')
@@ -80,6 +81,10 @@ DEFAULT_OPTIM_PARAMS = OptimParams()
 
 
 class NewtonSearch(typing.NamedTuple, typing.Generic[FreeParamsT]):
+    """
+    Damped Newton search for one or more independent objectives.
+    """
+
     model: Model[FreeParamsT]
     optim_params: OptimParams
 
@@ -162,7 +167,9 @@ class NewtonSearch(typing.NamedTuple, typing.Generic[FreeParamsT]):
         active: jax.Array,
         max_iter: int,
     ) -> tuple[FreeParamsT, jax.Array, jax.Array]:
-        """Find an improving step independently for each active neuron."""
+        """
+        Find an improving step independently for each active optimization problem.
+        """
         search = LineSearch(
             model=self.model,
             current_objective=current_objective,

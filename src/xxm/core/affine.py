@@ -126,7 +126,10 @@ class Affine(typing.NamedTuple):
         return jnp.sqrt(jnp.sum(self.coefficients_flat**2, axis=-1) + self.bias**2)
 
     def shift(self, center: jax.Array) -> typing.Self:
-        """Translate input origin, compensating bias to preserve $f(u-\text{center})$."""
+        r"""
+        Translate the input origin so the shifted map $g$ satisfies
+        $g(u-\text{center}) = f(u)$.
+        """
         shift = jnp.einsum(
             '...oi,...i->...o',
             self.coefficients_flat,
@@ -166,7 +169,7 @@ class Affine(typing.NamedTuple):
         self,
         inner: typing.Self,
     ) -> typing.Self:
-        """Compose affine maps, returning $f_\text{outer} \\circ f_\text{inner}$."""
+        r"""Compose affine maps, returning $f_\text{outer} \circ f_\text{inner}$."""
         if self.input_shape != (inner.output_dim,):
             raise ValueError(
                 'affine composition requires the outer input shape '

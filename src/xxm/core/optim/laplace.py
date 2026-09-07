@@ -98,8 +98,8 @@ def laplace_inference(
     approximation, producing a Gaussian chain whose mean gives the Newton
     candidate.
 
-    The final Gaussian chain, evaluated at the converged mode, is returned
-    as the Laplace approximation to p(x | y).
+    The final local Gaussian approximation defines the returned posterior
+    marginals and Laplace approximation to the marginal log likelihood.
     """
 
     latents = initial_latents

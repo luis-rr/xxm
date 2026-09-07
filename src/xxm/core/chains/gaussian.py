@@ -986,7 +986,8 @@ def _conditional_log_det(
 
 
 class GaussianChainMarginals(typing.NamedTuple):
-    r"""Marginal central moments of a Gaussian chain.
+    r"""
+    Marginal moments of the normalized Gaussian chain distribution.
 
     * ``means[t] = E[x_t]``.
     * ``covariances[t] = Cov(x_t, x_t)``.
@@ -1018,7 +1019,7 @@ class GaussianChainMarginals(typing.NamedTuple):
         return self.cross_covariances + extra
 
     def entropy(self) -> jax.Array:
-        """Entropy of the Gaussian Markov-chain posterior."""
+        """Entropy of the normalized Gaussian chain distribution."""
 
         num_steps, variable_dim = self.means.shape
 

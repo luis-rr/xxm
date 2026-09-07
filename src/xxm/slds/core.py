@@ -1,4 +1,6 @@
-"""Switched Linear Dynamical System: discrete and continuous latent states."""
+"""
+Switching Linear Dynamical System: discrete and continuous latent states.
+"""
 
 import typing
 
@@ -16,7 +18,9 @@ from xxm.core.latents.switching import GaussianLinearSwitchingDynamics
 
 
 class Posterior(typing.NamedTuple):
-    r"""SLDS posterior over discrete states $z$ and continuous latents $x$."""
+    r"""
+    Structured mean-field posterior over discrete states $z$ and continuous latents $x$.
+    """
 
     discrete: DiscreteChainMarginals  # T discrete states
     continuous: GaussianChainMarginals  # T continuous latents
@@ -106,7 +110,9 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         return states, latents, observations
 
     def permute(self, permutation: jax.Array) -> typing.Self:
-        """Relabel the discrete state-dependent initial and transition parameters."""
+        """
+        Relabel all discrete-state-dependent parameters by permutation.
+        """
         return self._replace(
             state_initial=self.state_initial.permute(permutation),
             transitions=self.transitions.permute(permutation),

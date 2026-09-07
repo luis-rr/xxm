@@ -63,7 +63,9 @@ class _NewtonSearchParams(typing.NamedTuple):
 
 
 class _NewtonSearchModel(typing.NamedTuple):
-    """Quantities held fixed while fitting a Poisson linear model."""
+    """
+    Quantities held fixed while fitting a linear-Poisson model.
+    """
 
     values: jax.Array  # (T, O)
     input_means: jax.Array  # (T, I)
@@ -85,7 +87,9 @@ class _NewtonSearchModel(typing.NamedTuple):
         )
 
     def objective(self, params: _NewtonSearchParams) -> jax.Array:
-        """Expected Poisson log likelihood for each output."""
+        """
+        Penalized expected Poisson log likelihood for each output.
+        """
         linear_model = params.to_linear_model()
 
         if self.input_covariances is None:
