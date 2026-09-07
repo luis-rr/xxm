@@ -10,7 +10,10 @@ from xxm.lds import (
     GaussianLDS,
     PoissonLDS,
 )
-from xxm.slds import GaussianSLDS
+from xxm.slds import (
+    GaussianSLDS,
+    PoissonSLDS,
+)
 
 __all__ = [
     'GaussianARHMM',
@@ -20,4 +23,5 @@ __all__ = [
     'PoissonARHMM',
     'PoissonHMM',
     'PoissonLDS',
+    'PoissonSLDS',
 ]
