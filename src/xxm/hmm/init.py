@@ -139,7 +139,7 @@ def _init_gaussian_emissions(
     )  # (K, N, N)
 
     return GaussianEmissions(
-        model=gaussian._replace(
+        dist=gaussian._replace(
             covariance=covariance,
         )
     )
@@ -266,7 +266,7 @@ def _init_poisson_emissions(
     )
 
     return PoissonEmissions(
-        model=poisson,
+        dist=poisson,
     )
 
 

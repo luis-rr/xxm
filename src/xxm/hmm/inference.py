@@ -13,7 +13,7 @@ def to_chain(
 ) -> Chain:
     """Construct discrete chain from model structure and time horizon."""
     transition_probs = jnp.broadcast_to(
-        model.transitions.model.probs,
+        model.transitions.dist.probs,
         (
             num_steps - 1,
             model.num_states,
@@ -22,11 +22,11 @@ def to_chain(
     )
 
     return Chain(
-        initial_probs=model.initial.model.probs,
+        initial_probs=model.initial.dist.probs,
         transition_probs=transition_probs,
         state_log_potentials=jnp.zeros(
             (num_steps, model.num_states),
-            dtype=model.initial.model.probs.dtype,
+            dtype=model.initial.dist.probs.dtype,
         ),
     )
 

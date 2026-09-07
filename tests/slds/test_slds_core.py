@@ -16,12 +16,12 @@ from xxm.slds.core import GaussianLinearSwitchingDynamics, Model
 def _make_model() -> Model:
     return Model(
         state_initial=CategoricalInitial(
-            model=Categorical(
+            dist=Categorical(
                 probs=jnp.array([0.7, 0.3]),
             )
         ),
         transitions=CategoricalTransitions(
-            model=Categorical(
+            dist=Categorical(
                 probs=jnp.array(
                     [
                         [0.9, 0.1],
@@ -31,7 +31,7 @@ def _make_model() -> Model:
             )
         ),
         latent_initial=StateConditionedGaussian(
-            model=Gaussian(
+            dist=Gaussian(
                 mean=jnp.array(
                     [
                         [1.0, 2.0],
@@ -47,7 +47,7 @@ def _make_model() -> Model:
             )
         ),
         dynamics=GaussianLinearSwitchingDynamics(
-            model=LinearGaussian(
+            dist=LinearGaussian(
                 affine=Affine(
                     coefficients=jnp.array(
                         [
@@ -71,7 +71,7 @@ def _make_model() -> Model:
             )
         ),
         emissions=GaussianEmissions(
-            model=LinearGaussian(
+            dist=LinearGaussian(
                 affine=Affine(
                     coefficients=jnp.array(
                         [
@@ -95,20 +95,20 @@ def test_permute_relabels_all_state_dependent_components():
     permuted = model.permute(permutation)
 
     np.testing.assert_allclose(
-        permuted.state_initial.model.probs,
-        model.state_initial.model.probs[permutation],
+        permuted.state_initial.dist.probs,
+        model.state_initial.dist.probs[permutation],
     )
     np.testing.assert_allclose(
-        permuted.transitions.model.probs,
-        model.transitions.model.probs[permutation][:, permutation],
+        permuted.transitions.dist.probs,
+        model.transitions.dist.probs[permutation][:, permutation],
     )
     np.testing.assert_allclose(
-        permuted.latent_initial.model.mean,
-        model.latent_initial.model.mean[permutation],
+        permuted.latent_initial.dist.mean,
+        model.latent_initial.dist.mean[permutation],
     )
     np.testing.assert_allclose(
-        permuted.dynamics.model.affine.coefficients,
-        model.dynamics.model.affine.coefficients[permutation],
+        permuted.dynamics.dist.affine.coefficients,
+        model.dynamics.dist.affine.coefficients[permutation],
     )
 
 
@@ -144,9 +144,9 @@ def test_align_preserves_the_model_in_aligned_latent_coordinates():
     )
 
     expected_next = (
-        model.dynamics.model.select(state).conditional(latent).affine(alignment)
+        model.dynamics.dist.select(state).conditional(latent).affine(alignment)
     )
-    actual_next = aligned.dynamics.model.select(state).conditional(aligned_latent)
+    actual_next = aligned.dynamics.dist.select(state).conditional(aligned_latent)
 
     np.testing.assert_allclose(
         actual_next.mean,

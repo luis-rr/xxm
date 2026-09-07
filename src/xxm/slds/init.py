@@ -88,7 +88,7 @@ def _state_conditioned_initial_from_latents(
     )
 
     return StateConditionedGaussian(
-        model=gaussian._replace(
+        dist=gaussian._replace(
             covariance=covariance,
         )
     )
@@ -116,7 +116,7 @@ def _from_arhmm(
     state_probs = posterior.state_probs  # (T-1, K), aligned with latents[1:]
 
     state_initial = CategoricalInitial(
-        model=Categorical.from_counts(
+        dist=Categorical.from_counts(
             jnp.sum(
                 state_probs,
                 axis=0,
@@ -131,7 +131,7 @@ def _from_arhmm(
     )
 
     dynamics = GaussianLinearSwitchingDynamics(
-        model=arhmm.emissions.model.reshape_input((latents.shape[-1],))
+        dist=arhmm.emissions.dist.reshape_input((latents.shape[-1],))
     )
 
     return Model(

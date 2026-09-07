@@ -12,39 +12,39 @@ from xxm.core.posteriors import DiscretePosterior
 class CategoricalInitial(typing.NamedTuple):
     r"""Initial distribution $p(z_0)$ for discrete latent state."""
 
-    model: Categorical  # no batch
+    dist: Categorical  # no batch
 
     @property
     def num_states(self) -> int:
-        return self.model.num_categories
+        return self.dist.num_categories
 
     def sample(self, key: jax.Array) -> jax.Array:
         """Sample initial discrete state."""
-        return self.model.sample(key)
+        return self.dist.sample(key)
 
     def permute(self, permutation: jax.Array) -> 'CategoricalInitial':
         """Relabel states by permutation."""
         return self._replace(
-            model=self.model.permute(permutation),
+            dist=self.dist.permute(permutation),
         )
 
     def fit_params(self, posterior: DiscretePosterior) -> typing.Self:
         r"""Fit initial distribution from posterior marginals $\gamma_0(k)$."""
-        return self._replace(model=Categorical.from_counts(posterior.state_probs[0]))
+        return self._replace(dist=Categorical.from_counts(posterior.state_probs[0]))
 
 
 class CategoricalTransitions(typing.NamedTuple):
     r"""Transition probabilities $p(z_{t+1}|z_t)$ for discrete latent state."""
 
-    model: Categorical  # K-batched
+    dist: Categorical  # K-batched
 
     @property
     def num_states(self) -> int:
-        return self.model.num_categories
+        return self.dist.num_categories
 
     def conditional(self, previous: jax.Array) -> Categorical:
         """Conditional distribution $p(z_t|z_{t-1})$ for next state."""
-        return self.model.select(previous)
+        return self.dist.select(previous)
 
     def sample_next(self, key: jax.Array, previous: jax.Array) -> jax.Array:
         """Sample next state conditional on previous state."""
@@ -83,10 +83,10 @@ class CategoricalTransitions(typing.NamedTuple):
 
     def permute(self, permutation: jax.Array) -> 'CategoricalTransitions':
         """Relabel states by permutation."""
-        return self._replace(model=self.model.select(permutation).permute(permutation))
+        return self._replace(dist=self.dist.select(permutation).permute(permutation))
 
     def fit_params(self, posterior: DiscretePosterior) -> typing.Self:
         r"""Fit transition probabilities from posterior pair marginals $\xi_t(i,j)$."""
         expected_transitions = posterior.pair_probs.sum(axis=0)  # (K, K)
 
-        return self._replace(model=Categorical.from_counts(expected_transitions))
+        return self._replace(dist=Categorical.from_counts(expected_transitions))

@@ -132,11 +132,11 @@ class DiscreteFactors(typing.NamedTuple):
         num_steps: int,
     ) -> typing.Self:
         """Build the discrete Markov-chain prior for `num_steps` states."""
-        transition_probs = model.transitions.model.broadcast((num_steps - 1,)).probs
+        transition_probs = model.transitions.dist.broadcast((num_steps - 1,)).probs
 
         return cls(
             chain=DiscreteChain.from_markov_prior(
-                initial_probs=model.state_initial.model.probs,
+                initial_probs=model.state_initial.dist.probs,
                 transition_probs=transition_probs,
             )
         )
@@ -161,8 +161,8 @@ class DiscreteFactors(typing.NamedTuple):
 class SwitchingFactors(typing.NamedTuple):
     """State-dependent factors coupling discrete and continuous latents."""
 
-    initial_model: Gaussian  # (K,)
-    dynamics_model: LinearGaussian  # (K,)
+    initial_dist: Gaussian  # (K,)
+    dynamics_dist: LinearGaussian  # (K,)
 
     initial_potential: GaussianPotential  # (K,)
     dynamics_potential: GaussianPairPotential  # (K,)
@@ -174,8 +174,8 @@ class SwitchingFactors(typing.NamedTuple):
     ) -> typing.Self:
         """Build state-dependent initial and transition factors from an SLDS."""
         return cls(
-            initial_model=model.latent_initial.model,
-            dynamics_model=model.dynamics.model,
+            initial_dist=model.latent_initial.dist,
+            dynamics_dist=model.dynamics.dist,
             initial_potential=model.latent_initial.compute_potentials(),
             dynamics_potential=model.dynamics.compute_pair_potentials(),
         )
@@ -205,14 +205,14 @@ class SwitchingFactors(typing.NamedTuple):
         covariances = continuous_posterior.covariances
         cross_covariances = continuous_posterior.cross_covariances
 
-        initial_log_values = self.initial_model.expected_log_prob(
+        initial_log_values = self.initial_dist.expected_log_prob(
             Gaussian(
                 mean=means[0],
                 covariance=covariances[0],
             )
         )  # (K,)
 
-        dynamics_log_values = self.dynamics_model.expected_log_prob_broadcast(
+        dynamics_log_values = self.dynamics_dist.expected_log_prob_broadcast(
             input=Gaussian(
                 mean=means[:-1],
                 covariance=covariances[:-1],

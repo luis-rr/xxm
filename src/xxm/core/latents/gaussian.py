@@ -15,22 +15,22 @@ from xxm.core.posteriors import ContinuousPosterior
 class GaussianInitial(typing.NamedTuple):
     r"""Initial distribution $p(x_0)$ for continuous latent state."""
 
-    model: Gaussian  # no batch
+    dist: Gaussian  # no batch
 
     def fit_params(self, posterior: ContinuousPosterior) -> typing.Self:
         r"""Fit the initial Gaussian from the posterior moments of $x_0$."""
         mean = posterior.means[0]
         covariance = posterior.covariances[0]
 
-        return self._replace(model=Gaussian(mean=mean, covariance=covariance))
+        return self._replace(dist=Gaussian(mean=mean, covariance=covariance))
 
     def sample(self, key: jax.Array) -> jax.Array:
         """Sample initial latent state."""
-        return self.model.sample(key)
+        return self.dist.sample(key)
 
     def align(self, alignment: Affine) -> typing.Self:
         r"""Express initial distribution in aligned coordinates $x' = A^{-1}x$."""
-        return self._replace(model=self.model.affine(alignment))
+        return self._replace(dist=self.dist.affine(alignment))
 
     @classmethod
     def from_latents(
@@ -76,7 +76,7 @@ class GaussianInitial(typing.NamedTuple):
 class GaussianLinearDynamics(typing.NamedTuple):
     r"""Linear-Gaussian dynamics $x_t|x_{t-1} \sim \mathcal{N}(Ax_{t-1}+b, Q)$."""
 
-    model: LinearGaussian  # no batch
+    dist: LinearGaussian  # no batch
 
     def fit_params(self, posterior: ContinuousPosterior) -> typing.Self:
         r"""Fit dynamics from posterior pair marginals via moment matching."""
@@ -101,7 +101,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
         paired = gaussian_fit.paired_from_moment_match(paired)
 
         return self._replace(
-            model=gaussian_fit.linear_from_paired(paired),
+            dist=gaussian_fit.linear_from_paired(paired),
         )
 
     def sample_next(
@@ -110,7 +110,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
         previous: jax.Array,
     ) -> jax.Array:
         """Sample next latent conditional on previous latent."""
-        return self.model.sample(
+        return self.dist.sample(
             key,
             previous,
         )
@@ -154,7 +154,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
         inverse = alignment.inverse()
 
         return self._replace(
-            model=(self.model.compose_input(inverse).compose_output(alignment)),
+            dist=(self.dist.compose_input(inverse).compose_output(alignment)),
         )
 
     @classmethod
@@ -177,23 +177,23 @@ class GaussianLinearDynamics(typing.NamedTuple):
 class StateConditionedGaussian(typing.NamedTuple):
     """Gaussian distribution conditioned on a discrete state."""
 
-    model: Gaussian  # K-batched
+    dist: Gaussian  # K-batched
 
     @property
     def num_states(self) -> int:
-        return self.model.batch_shape[0]
+        return self.dist.batch_shape[0]
 
     def conditional(
         self,
         state: jax.Array,
     ) -> Gaussian:
         """Gaussian distribution conditional on the given state."""
-        return self.model.select(state)
+        return self.dist.select(state)
 
     def compute_potentials(self) -> GaussianPotential:
         """Return one Gaussian potential per discrete state."""
         return GaussianPotential.from_moments(
-            self.model,
+            self.dist,
         )
 
     def sample(
@@ -206,8 +206,8 @@ class StateConditionedGaussian(typing.NamedTuple):
 
     def permute(self, permutation: jax.Array) -> typing.Self:
         """Relabel state-conditioned initial distributions."""
-        return self._replace(model=self.model.select(permutation))
+        return self._replace(dist=self.dist.select(permutation))
 
     def align(self, alignment: Affine) -> typing.Self:
         """Express state-conditioned initial distributions in aligned coordinates."""
-        return self._replace(model=self.model.affine(alignment))
+        return self._replace(dist=self.dist.affine(alignment))

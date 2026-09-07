@@ -58,14 +58,14 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
     def compute_initial_potential(self) -> GaussianPotential:
         """Return the canonical potential for the initial latent distribution."""
-        return GaussianPotential.from_moments(self.initial.model)
+        return GaussianPotential.from_moments(self.initial.dist)
 
     def compute_pair_potentials(
         self,
         num_steps: int,
     ) -> GaussianPairPotential:
         """Return the $T-1$ repeated pair potentials for latent dynamics."""
-        potential = GaussianPairPotential.from_linear_conditional(self.dynamics.model)
+        potential = GaussianPairPotential.from_linear_conditional(self.dynamics.dist)
 
         return potential.broadcast(batch_shape=(num_steps - 1,))
 
@@ -93,20 +93,20 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
             _: None,
         ) -> tuple[jax.Array, jax.Array]:
 
-            next_latent = self.dynamics.model.conditional(latent).mean
+            next_latent = self.dynamics.dist.conditional(latent).mean
 
             return next_latent, next_latent
 
         _, remaining_latents = jax.lax.scan(
             step,
-            self.initial.model.mean,
+            self.initial.dist.mean,
             None,
             length=num_steps - 1,
         )
 
         return jnp.concatenate(
             [
-                self.initial.model.mean[None],
+                self.initial.dist.mean[None],
                 remaining_latents,
             ],
             axis=0,
@@ -119,20 +119,20 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     ) -> jax.Array:
         r"""Compute $\log p(x_{0:T-1}, y_{0:T-1})$ for a latent trajectory."""
 
-        initial_residual = (latents[0] - self.initial.model.mean)[None]
+        initial_residual = (latents[0] - self.initial.dist.mean)[None]
 
         initial_log_prob = _gaussian_log_prob_residuals(
             initial_residual,
-            self.initial.model.covariance,
+            self.initial.dist.covariance,
         )
 
-        dynamics_means = self.dynamics.model.conditional(latents[:-1]).mean
+        dynamics_means = self.dynamics.dist.conditional(latents[:-1]).mean
 
         dynamics_residuals = latents[1:] - dynamics_means
 
         dynamics_log_prob = _gaussian_log_prob_residuals(
             dynamics_residuals,
-            self.dynamics.model.covariance,
+            self.dynamics.dist.covariance,
         )
 
         emission_log_prob = self.emissions.log_likelihood(

@@ -66,7 +66,7 @@ def _posterior() -> Posterior:
 
 def _dynamics() -> GaussianLinearSwitchingDynamics:
     return GaussianLinearSwitchingDynamics(
-        model=LinearGaussian(
+        dist=LinearGaussian(
             affine=Affine(
                 coefficients=jnp.zeros((1, 1, 1)),
                 bias=jnp.zeros((1, 1)),
@@ -79,24 +79,24 @@ def _dynamics() -> GaussianLinearSwitchingDynamics:
 def _model() -> Model:
     return Model(
         state_initial=CategoricalInitial(
-            model=Categorical(
+            dist=Categorical(
                 probs=jnp.array([1.0]),
             )
         ),
         transitions=CategoricalTransitions(
-            model=Categorical(
+            dist=Categorical(
                 probs=jnp.array([[1.0]]),
             )
         ),
         latent_initial=StateConditionedGaussian(
-            model=Gaussian(
+            dist=Gaussian(
                 mean=jnp.array([[7.0]]),
                 covariance=jnp.array([[[2.0]]]),
             )
         ),
         dynamics=_dynamics(),
         emissions=GaussianEmissions(
-            model=LinearGaussian(
+            dist=LinearGaussian(
                 affine=Affine(
                     coefficients=jnp.array([[1.0]]),
                     bias=jnp.array([0.0]),
@@ -111,17 +111,17 @@ def test_switching_dynamics_fit_recovers_known_linear_gaussian_model():
     fitted = _dynamics().fit_params(_posterior())
 
     np.testing.assert_allclose(
-        fitted.model.affine.coefficients,
+        fitted.dist.affine.coefficients,
         [[[2.0]]],
         atol=ATOL,
     )
     np.testing.assert_allclose(
-        fitted.model.affine.bias,
+        fitted.dist.affine.bias,
         [[1.0]],
         atol=ATOL,
     )
     np.testing.assert_allclose(
-        fitted.model.covariance,
+        fitted.dist.covariance,
         [[[0.5]]],
         atol=ATOL,
     )
@@ -142,12 +142,12 @@ def test_model_fit_params_keeps_latent_initial_fixed():
     )
 
     np.testing.assert_allclose(
-        fitted.latent_initial.model.mean,
-        model.latent_initial.model.mean,
+        fitted.latent_initial.dist.mean,
+        model.latent_initial.dist.mean,
     )
     np.testing.assert_allclose(
-        fitted.latent_initial.model.covariance,
-        model.latent_initial.model.covariance,
+        fitted.latent_initial.dist.covariance,
+        model.latent_initial.dist.covariance,
     )
 
 
@@ -171,10 +171,10 @@ def test_variational_em_step_returns_finite_objective():
     assert np.isfinite(objective)
 
     np.testing.assert_allclose(
-        fitted.latent_initial.model.mean,
-        model.latent_initial.model.mean,
+        fitted.latent_initial.dist.mean,
+        model.latent_initial.dist.mean,
     )
     np.testing.assert_allclose(
-        fitted.latent_initial.model.covariance,
-        model.latent_initial.model.covariance,
+        fitted.latent_initial.dist.covariance,
+        model.latent_initial.dist.covariance,
     )

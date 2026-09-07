@@ -40,20 +40,20 @@ def lagged_observations(
     )
 
 
-ConditionalModelT = typing.TypeVar(
-    'ConditionalModelT',
+ConditionalDistT = typing.TypeVar(
+    'ConditionalDistT',
     LinearGaussian,
     LinearPoisson,
 )
 
 
 def _fit_ar_model(
-    model: ConditionalModelT,
+    dist: ConditionalDistT,
     inputs: jax.Array,
     outputs: jax.Array,
     weights: jax.Array,
-) -> ConditionalModelT:
-    if isinstance(model, LinearGaussian):
+) -> ConditionalDistT:
+    if isinstance(dist, LinearGaussian):
         return gaussian_fit.linear_from_samples_weighted(
             inputs=inputs,
             outputs=outputs,
@@ -61,20 +61,20 @@ def _fit_ar_model(
             ridge=1e-6,
         )
 
-    if isinstance(model, LinearPoisson):
+    if isinstance(dist, LinearPoisson):
         return poisson_fit.linear_from_samples_weighted(
             inputs=inputs,
             outputs=outputs,
             weights=weights,
-            initial_affine=model.affine,
+            initial_affine=dist.affine,
         )
 
-    typing.assert_never(model)
+    typing.assert_never(dist)
 
 
 class AREmissions(
     typing.NamedTuple,
-    typing.Generic[ConditionalModelT],
+    typing.Generic[ConditionalDistT],
 ):
     r"""
     State-dependent autoregressive emissions with structured lagged inputs.
@@ -93,30 +93,30 @@ class AREmissions(
     to most recent.
     """
 
-    model: ConditionalModelT  # K-batched, input shape (L, N)
+    dist: ConditionalDistT  # K-batched, input shape (L, N)
 
     @property
     def num_states(self) -> int:
-        return self.model.batch_shape[0]
+        return self.dist.batch_shape[0]
 
     @property
     def output_dim(self) -> int:
-        return self.model.output_dim
+        return self.dist.output_dim
 
     @property
     def num_lags(self) -> int:
-        if len(self.model.input_shape) != 2:
+        if len(self.dist.input_shape) != 2:
             raise ValueError(
                 'autoregressive emissions require model input shape (L, N); '
-                f'got {self.model.input_shape}'
+                f'got {self.dist.input_shape}'
             )
 
-        num_lags, input_dim = self.model.input_shape
+        num_lags, input_dim = self.dist.input_shape
 
         if input_dim != self.output_dim:
             raise ValueError(
                 'autoregressive input variable dimension must match output '
-                f'dimension; got input shape {self.model.input_shape} '
+                f'dimension; got input shape {self.dist.input_shape} '
                 f'and output dimension {self.output_dim}'
             )
 
@@ -146,7 +146,7 @@ class AREmissions(
 
     @typing.overload
     def conditional(
-        self: 'AREmissions[ConditionalModelT]',
+        self: 'AREmissions[ConditionalDistT]',
         observations: jax.Array,
     ) -> Gaussian | Poisson: ...
 
@@ -159,7 +159,7 @@ class AREmissions(
             observations,
         )  # (T-L, L, N)
 
-        return self.model.conditional(
+        return self.dist.conditional(
             predictors[:, None, ...],
         )  # (T-L, K)
 
@@ -196,14 +196,14 @@ class AREmissions(
         current = observations[self.num_lags :]  # (T-L, N)
 
         model = _fit_ar_model(
-            model=self.model,
+            dist=self.dist,
             inputs=predictors,
             outputs=current,
             weights=posterior.state_probs,  # (T-L, K)
         )
 
         return self._replace(
-            model=model,
+            dist=model,
         )
 
     def permute(
@@ -212,7 +212,7 @@ class AREmissions(
     ) -> typing.Self:
         """Relabel state-specific autoregressive emission parameters."""
         return self._replace(
-            model=self.model.select(permutation),
+            dist=self.dist.select(permutation),
         )
 
     def sample_continuation(
@@ -245,7 +245,7 @@ class AREmissions(
 
             key, key_observation = jax.random.split(key)
 
-            conditional = self.model.select(state).conditional(
+            conditional = self.dist.select(state).conditional(
                 history,
             )
 
@@ -287,7 +287,7 @@ class AREmissions(
                 self.num_lags,
                 self.output_dim,
             ),
-            dtype=self.model.dtype,
+            dtype=self.dist.dtype,
         )
 
         return self.sample_continuation(

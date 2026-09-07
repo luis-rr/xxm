@@ -38,17 +38,17 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
     Consequently the first transition uses $z[1]$; $z[0]$ indexes the initial distribution.
     """
 
-    model: LinearGaussian  # K-batched, input dimension D, output dimension D
+    dist: LinearGaussian  # K-batched, input dimension D, output dimension D
 
     @property
     def num_states(self) -> int:
         """Number of discrete states $K$."""
-        return self.model.covariance.shape[0]
+        return self.dist.covariance.shape[0]
 
     def compute_pair_potentials(self) -> GaussianPairPotential:
         """Return one Gaussian transition potential per discrete state."""
         return GaussianPairPotential.from_linear_conditional(
-            self.model,
+            self.dist,
         )
 
     def fit_params(self, posterior: Posterior) -> typing.Self:
@@ -93,18 +93,18 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
                 current,
             ),
             fitted_model,
-            self.model,
+            self.dist,
         )
 
         return self._replace(
-            model=model,
+            dist=model,
         )
 
     def sample_next(
         self, key: jax.Array, previous: jax.Array, state: jax.Array
     ) -> jax.Array:
         """Sample the next latent using the state being entered."""
-        return self.model.select(state).sample(key, previous)
+        return self.dist.select(state).sample(key, previous)
 
     def sample(
         self, key: jax.Array, initial_latent: jax.Array, states: jax.Array
@@ -141,7 +141,7 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
     def permute(self, permutation: jax.Array) -> typing.Self:
         """Express the states in a reordered coordinate system."""
         return self._replace(
-            model=self.model.select(permutation),
+            dist=self.dist.select(permutation),
         )
 
     def align(self, alignment: Affine) -> typing.Self:
@@ -149,7 +149,7 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         inverse = alignment.inverse()
 
         return self._replace(
-            model=(self.model.compose_input(inverse).compose_output(alignment)),
+            dist=(self.dist.compose_input(inverse).compose_output(alignment)),
         )
 
 
@@ -243,7 +243,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         alignment: Affine,
     ) -> typing.Self:
         """Express continuous latent parameters in aligned coordinates."""
-        latent_dim = self.dynamics.model.output_dim
+        latent_dim = self.dynamics.dist.output_dim
 
         if alignment.batch_shape:
             raise ValueError('SLDS latent alignment must be unbatched')

@@ -24,16 +24,16 @@ from xxm.lds.inference import (
 def make_scalar_poisson_model() -> Model[PoissonEmissions]:
     return Model(
         initial=GaussianInitial(
-            model=Gaussian(mean=jnp.zeros(1), covariance=jnp.eye(1))
+            dist=Gaussian(mean=jnp.zeros(1), covariance=jnp.eye(1))
         ),
         dynamics=GaussianLinearDynamics(
-            model=LinearGaussian(
+            dist=LinearGaussian(
                 affine=Affine(coefficients=jnp.eye(1), bias=jnp.zeros(1)),
                 covariance=jnp.eye(1),
             ),
         ),
         emissions=PoissonEmissions(
-            model=LinearPoisson(
+            dist=LinearPoisson(
                 affine=Affine(coefficients=jnp.ones((1, 1)), bias=jnp.zeros(1))
             ),
         ),

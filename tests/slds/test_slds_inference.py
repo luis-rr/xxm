@@ -22,7 +22,7 @@ def _mock_gaussian_emissions(
     noise_covariance: jax.Array,
 ) -> GaussianEmissions:
     return GaussianEmissions(
-        model=LinearGaussian(
+        dist=LinearGaussian(
             affine=Affine(
                 coefficients=jnp.eye(1),
                 bias=jnp.zeros(1),
@@ -35,23 +35,23 @@ def _mock_gaussian_emissions(
 def _single_state_model() -> Model:
     return Model(
         state_initial=CategoricalInitial(
-            model=Categorical(
+            dist=Categorical(
                 probs=jnp.array([1.0]),
             )
         ),
         transitions=CategoricalTransitions(
-            model=Categorical(
+            dist=Categorical(
                 probs=jnp.array([[1.0]]),
             )
         ),
         latent_initial=StateConditionedGaussian(
-            model=Gaussian(
+            dist=Gaussian(
                 mean=jnp.array([[0.0]]),
                 covariance=jnp.array([[[1.0]]]),
             ),
         ),
         dynamics=GaussianLinearSwitchingDynamics(
-            model=LinearGaussian(
+            dist=LinearGaussian(
                 affine=Affine(
                     coefficients=jnp.array([[[0.8]]]),
                     bias=jnp.array([[0.2]]),
@@ -68,12 +68,12 @@ def _single_state_model() -> Model:
 def _two_state_model() -> Model:
     return Model(
         state_initial=CategoricalInitial(
-            model=Categorical(
+            dist=Categorical(
                 probs=jnp.array([0.7, 0.3]),
             )
         ),
         transitions=CategoricalTransitions(
-            model=Categorical(
+            dist=Categorical(
                 probs=jnp.array(
                     [
                         [0.9, 0.1],
@@ -83,7 +83,7 @@ def _two_state_model() -> Model:
             )
         ),
         latent_initial=StateConditionedGaussian(
-            model=Gaussian(
+            dist=Gaussian(
                 mean=jnp.array(
                     [
                         [0.0],
@@ -99,7 +99,7 @@ def _two_state_model() -> Model:
             ),
         ),
         dynamics=GaussianLinearSwitchingDynamics(
-            model=LinearGaussian(
+            dist=LinearGaussian(
                 affine=Affine(
                     coefficients=jnp.array(
                         [

@@ -19,7 +19,7 @@ from xxm.slds.core import (
 
 def test_categorical_transitions_sample_includes_initial():
     transitions = CategoricalTransitions(
-        model=Categorical(
+        dist=Categorical(
             probs=jnp.array(
                 [
                     [0.0, 1.0],
@@ -43,13 +43,13 @@ def test_categorical_transitions_sample_includes_initial():
 
 def _make_model() -> Model:
     state_initial = CategoricalInitial(
-        model=Categorical(
+        dist=Categorical(
             probs=jnp.array([1.0, 0.0]),
         )
     )
 
     transitions = CategoricalTransitions(
-        model=Categorical(
+        dist=Categorical(
             probs=jnp.array(
                 [
                     [0.0, 1.0],
@@ -60,7 +60,7 @@ def _make_model() -> Model:
     )
 
     latent_initial = StateConditionedGaussian(
-        model=Gaussian(
+        dist=Gaussian(
             mean=jnp.array(
                 [
                     [5.0],
@@ -77,7 +77,7 @@ def _make_model() -> Model:
     )
 
     dynamics = GaussianLinearSwitchingDynamics(
-        model=LinearGaussian(
+        dist=LinearGaussian(
             affine=Affine(
                 coefficients=jnp.array(
                     [
@@ -102,7 +102,7 @@ def _make_model() -> Model:
     )
 
     emissions = GaussianEmissions(
-        model=LinearGaussian(
+        dist=LinearGaussian(
             affine=Affine(
                 coefficients=jnp.array([[1.0]]),
                 bias=jnp.array([3.0]),

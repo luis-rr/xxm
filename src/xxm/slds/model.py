@@ -60,22 +60,22 @@ class GaussianSLDS:
     @property
     def latent_dim(self) -> int:
         """Dimension $D_x$ of the continuous latent state."""
-        return self.model.dynamics.model.output_dim
+        return self.model.dynamics.dist.output_dim
 
     @property
     def observation_dim(self) -> int:
         """Dimension $D_y$ of each observation."""
-        return self.model.emissions.model.output_dim
+        return self.model.emissions.dist.output_dim
 
     @property
     def dynamics(self) -> LinearGaussian:
         """State-conditioned linear-Gaussian transition distributions."""
-        return self.model.dynamics.model
+        return self.model.dynamics.dist
 
     @property
     def emissions(self) -> LinearGaussian:
         """Linear-Gaussian observation distribution."""
-        return self.model.emissions.model
+        return self.model.emissions.dist
 
     def permute(self, permutation: jax.Array) -> typing.Self:
         """Relabel the discrete latent states."""
@@ -125,23 +125,23 @@ class GaussianSLDS:
         return cls(
             model=Model(
                 state_initial=CategoricalInitial(
-                    model=Categorical(
+                    dist=Categorical(
                         probs=initial_probs,
                     )
                 ),
                 transitions=CategoricalTransitions(
-                    model=Categorical(
+                    dist=Categorical(
                         probs=transition_probs,
                     )
                 ),
                 latent_initial=StateConditionedGaussian(
-                    model=Gaussian(
+                    dist=Gaussian(
                         mean=latent_initial_means,
                         covariance=latent_initial_covariances,
                     )
                 ),
                 dynamics=GaussianLinearSwitchingDynamics(
-                    model=LinearGaussian(
+                    dist=LinearGaussian(
                         affine=Affine(
                             coefficients=dynamics_coefficients,
                             bias=dynamics_bias,
@@ -150,7 +150,7 @@ class GaussianSLDS:
                     )
                 ),
                 emissions=GaussianEmissions(
-                    model=LinearGaussian(
+                    dist=LinearGaussian(
                         affine=Affine(
                             coefficients=emission_coefficients,
                             bias=emission_bias,
@@ -303,22 +303,22 @@ class PoissonSLDS:
     @property
     def latent_dim(self) -> int:
         """Dimension $D_x$ of the continuous latent state."""
-        return self.model.dynamics.model.output_dim
+        return self.model.dynamics.dist.output_dim
 
     @property
     def observation_dim(self) -> int:
         """Dimension $D_y$ of each observation."""
-        return self.model.emissions.model.output_dim
+        return self.model.emissions.dist.output_dim
 
     @property
     def dynamics(self) -> LinearGaussian:
         """State-conditioned linear-Gaussian transition distributions."""
-        return self.model.dynamics.model
+        return self.model.dynamics.dist
 
     @property
     def emissions(self) -> LinearPoisson:
         """Linear-Poisson observation distribution in log-rate form."""
-        return self.model.emissions.model
+        return self.model.emissions.dist
 
     def permute(self, permutation: jax.Array) -> typing.Self:
         """Relabel the discrete latent states."""
@@ -367,23 +367,23 @@ class PoissonSLDS:
         return cls(
             model=Model(
                 state_initial=CategoricalInitial(
-                    model=Categorical(
+                    dist=Categorical(
                         probs=initial_probs,
                     )
                 ),
                 transitions=CategoricalTransitions(
-                    model=Categorical(
+                    dist=Categorical(
                         probs=transition_probs,
                     )
                 ),
                 latent_initial=StateConditionedGaussian(
-                    model=Gaussian(
+                    dist=Gaussian(
                         mean=latent_initial_means,
                         covariance=latent_initial_covariances,
                     )
                 ),
                 dynamics=GaussianLinearSwitchingDynamics(
-                    model=LinearGaussian(
+                    dist=LinearGaussian(
                         affine=Affine(
                             coefficients=dynamics_coefficients,
                             bias=dynamics_bias,
@@ -392,7 +392,7 @@ class PoissonSLDS:
                     )
                 ),
                 emissions=PoissonEmissions(
-                    model=LinearPoisson(
+                    dist=LinearPoisson(
                         affine=Affine(
                             coefficients=emission_coefficients,
                             bias=emission_bias,

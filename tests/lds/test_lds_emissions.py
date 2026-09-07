@@ -29,7 +29,7 @@ class MockPosterior(typing.NamedTuple):
 
 def test_gaussian_potential_matches_known_value():
     emissions = GaussianEmissions(
-        model=LinearGaussian(
+        dist=LinearGaussian(
             affine=Affine(
                 coefficients=jnp.array(
                     [
@@ -69,7 +69,7 @@ def test_gaussian_potential_matches_known_value():
 
 def test_gaussian_log_likelihood_matches_known_value():
     emissions = GaussianEmissions(
-        model=LinearGaussian(
+        dist=LinearGaussian(
             affine=Affine(
                 coefficients=jnp.array(
                     [
@@ -124,7 +124,7 @@ def test_gaussian_fit_recovers_known_parameters():
     )
 
     emissions = GaussianEmissions(
-        model=LinearGaussian(
+        dist=LinearGaussian(
             affine=Affine(coefficients=jnp.zeros((1, 1)), bias=jnp.zeros(1)),
             covariance=jnp.eye(1),
         ),
@@ -132,10 +132,10 @@ def test_gaussian_fit_recovers_known_parameters():
 
     fitted = emissions.fit_params(observations, posterior)  # type: ignore
 
-    np.testing.assert_allclose(fitted.model.affine.coefficients, [[2.0]], atol=1e-6)
-    np.testing.assert_allclose(fitted.model.affine.bias, [1.0], atol=1e-6)
+    np.testing.assert_allclose(fitted.dist.affine.coefficients, [[2.0]], atol=1e-6)
+    np.testing.assert_allclose(fitted.dist.affine.bias, [1.0], atol=1e-6)
     np.testing.assert_allclose(
-        fitted.model.covariance,
+        fitted.dist.covariance,
         [[0.25]],
         atol=1e-6,
     )
@@ -143,7 +143,7 @@ def test_gaussian_fit_recovers_known_parameters():
 
 def test_gaussian_sample_has_expected_shape():
     emissions = GaussianEmissions(
-        model=LinearGaussian(
+        dist=LinearGaussian(
             affine=Affine(coefficients=jnp.ones((3, 2)), bias=jnp.zeros(3)),
             covariance=jnp.eye(3),
         ),
@@ -161,7 +161,7 @@ def test_gaussian_sample_has_expected_shape():
 def test_gaussian_emissions_potential_has_one_factor_per_observation():
     # y_t | x_t ~ N(2 x_t + 1, 4)
     emissions = GaussianEmissions(
-        model=LinearGaussian(
+        dist=LinearGaussian(
             affine=Affine(coefficients=jnp.array([[2.0]]), bias=jnp.array([1.0])),
             covariance=jnp.array([[4.0]]),
         ),
@@ -219,7 +219,7 @@ def test_gaussian_emissions_potential_has_one_factor_per_observation():
 
 def test_poisson_rates_match_known_values():
     emissions = PoissonEmissions(
-        model=LinearPoisson(
+        dist=LinearPoisson(
             affine=Affine(coefficients=jnp.array([[jnp.log(2.0)]]), bias=jnp.zeros(1)),
         ),
     )
@@ -235,7 +235,7 @@ def test_poisson_rates_match_known_values():
 
 def test_poisson_log_likelihood_matches_known_scalar_value():
     emissions = PoissonEmissions(
-        model=LinearPoisson(
+        dist=LinearPoisson(
             affine=Affine(coefficients=jnp.zeros((1, 1)), bias=jnp.zeros(1)),
         ),
     )
@@ -254,7 +254,7 @@ def test_poisson_log_likelihood_matches_known_scalar_value():
 
 def test_poisson_log_likelihood_handles_zero_count():
     emissions = PoissonEmissions(
-        model=LinearPoisson(
+        dist=LinearPoisson(
             affine=Affine(
                 coefficients=jnp.zeros((1, 1)), bias=jnp.array([jnp.log(2.0)])
             ),
@@ -271,7 +271,7 @@ def test_poisson_log_likelihood_handles_zero_count():
 
 def test_poisson_local_potential_matches_value_gradient_and_hessian():
     emissions = PoissonEmissions(
-        model=LinearPoisson(
+        dist=LinearPoisson(
             affine=Affine(coefficients=jnp.array([[2.0]]), bias=jnp.zeros(1)),
         ),
     )
@@ -317,7 +317,7 @@ def test_poisson_fit_recovers_known_parameters():
     )
 
     true_emissions = PoissonEmissions(
-        model=LinearPoisson(
+        dist=LinearPoisson(
             affine=Affine(
                 coefficients=jnp.array([[jnp.log(2.0)]]), bias=jnp.array([jnp.log(2.0)])
             ),
@@ -332,7 +332,7 @@ def test_poisson_fit_recovers_known_parameters():
     )
 
     initial_emissions = PoissonEmissions(
-        model=LinearPoisson(
+        dist=LinearPoisson(
             affine=Affine(coefficients=jnp.zeros((1, 1)), bias=jnp.zeros(1)),
         ),
     )
@@ -340,20 +340,20 @@ def test_poisson_fit_recovers_known_parameters():
     fitted = initial_emissions.fit_params(observations, posterior)  # type: ignore
 
     np.testing.assert_allclose(
-        fitted.model.affine.coefficients,
-        true_emissions.model.affine.coefficients,
+        fitted.dist.affine.coefficients,
+        true_emissions.dist.affine.coefficients,
         atol=1e-3,
     )
     np.testing.assert_allclose(
-        fitted.model.affine.bias,
-        true_emissions.model.affine.bias,
+        fitted.dist.affine.bias,
+        true_emissions.dist.affine.bias,
         atol=1e-3,
     )
 
 
 def test_poisson_sample_has_expected_shape_and_values():
     emissions = PoissonEmissions(
-        model=LinearPoisson(
+        dist=LinearPoisson(
             affine=Affine(coefficients=jnp.ones((3, 2)), bias=jnp.zeros(3)),
         ),
     )
@@ -375,7 +375,7 @@ def test_poisson_sample_has_expected_shape_and_values():
 
 def test_gaussian_methods_are_jittable():
     emissions = GaussianEmissions(
-        model=LinearGaussian(
+        dist=LinearGaussian(
             affine=Affine(coefficients=jnp.eye(2), bias=jnp.zeros(2)),
             covariance=jnp.eye(2),
         ),
@@ -396,7 +396,7 @@ def test_gaussian_methods_are_jittable():
 
 def test_poisson_methods_are_jittable():
     emissions = PoissonEmissions(
-        model=LinearPoisson(
+        dist=LinearPoisson(
             affine=Affine(coefficients=jnp.eye(2), bias=jnp.zeros(2)),
         ),
     )

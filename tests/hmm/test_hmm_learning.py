@@ -51,7 +51,7 @@ def test_m_step_initial_probs():
 
     result = initial.fit_params(posterior=posterior)
 
-    np.testing.assert_allclose(result.model.probs, [0.8, 0.2])
+    np.testing.assert_allclose(result.dist.probs, [0.8, 0.2])
 
 
 def test_m_step_transition_probs():
@@ -94,13 +94,13 @@ def test_m_step_transition_probs():
         ]
     )
 
-    np.testing.assert_allclose(result.model.probs, expected)
-    np.testing.assert_allclose(result.model.probs.sum(axis=1), 1.0)
+    np.testing.assert_allclose(result.dist.probs, expected)
+    np.testing.assert_allclose(result.dist.probs.sum(axis=1), 1.0)
 
 
 def test_poisson_log_likelihoods():
     emissions = PoissonEmissions(
-        model=Poisson(
+        dist=Poisson(
             log_rates=jnp.log(
                 jnp.array(
                     [
@@ -155,7 +155,7 @@ def test_poisson_m_step():
     )
 
     emissions = PoissonEmissions(
-        model=Poisson(log_rates=jnp.zeros((2, 1))),
+        dist=Poisson(log_rates=jnp.zeros((2, 1))),
     )
 
     result = emissions.fit_params(observations, posterior)
@@ -167,12 +167,12 @@ def test_poisson_m_step():
         ]
     )
 
-    np.testing.assert_allclose(result.model.rates, expected)
+    np.testing.assert_allclose(result.dist.rates, expected)
 
 
 def test_gaussian_log_likelihoods():
     emissions = GaussianEmissions(
-        model=Gaussian(
+        dist=Gaussian(
             mean=jnp.array(
                 [
                     [0.0],
@@ -230,7 +230,7 @@ def test_gaussian_m_step():
     )
 
     emissions = GaussianEmissions(
-        model=Gaussian(mean=jnp.zeros((2, 1)), covariance=jnp.ones((2, 1, 1))),
+        dist=Gaussian(mean=jnp.zeros((2, 1)), covariance=jnp.ones((2, 1, 1))),
     )
 
     result = emissions.fit_params(observations, posterior)
@@ -243,7 +243,7 @@ def test_gaussian_m_step():
     )
 
     np.testing.assert_allclose(
-        result.model.mean,
+        result.dist.mean,
         expected_means,
         atol=1e-6,
     )
@@ -259,7 +259,7 @@ def test_gaussian_m_step():
         expected_variances.append([[variance]])
 
     np.testing.assert_allclose(
-        result.model.covariance,
+        result.dist.covariance,
         expected_variances,
         atol=1e-6,
     )
@@ -279,7 +279,7 @@ def test_em_step_is_jit_compatible():
             )
         ),
         emissions=PoissonEmissions(
-            model=Poisson(
+            dist=Poisson(
                 log_rates=jnp.log(
                     jnp.array(
                         [
@@ -305,18 +305,18 @@ def test_em_step_is_jit_compatible():
     jitted_model, jitted_log_likelihood = jax.jit(em_step)(model, observations)
 
     np.testing.assert_allclose(
-        jitted_model.initial.model.probs,
-        eager_model.initial.model.probs,
+        jitted_model.initial.dist.probs,
+        eager_model.initial.dist.probs,
         atol=1e-6,
     )
     np.testing.assert_allclose(
-        jitted_model.transitions.model.probs,
-        eager_model.transitions.model.probs,
+        jitted_model.transitions.dist.probs,
+        eager_model.transitions.dist.probs,
         atol=1e-6,
     )
     np.testing.assert_allclose(
-        jitted_model.emissions.model.rates,
-        eager_model.emissions.model.rates,
+        jitted_model.emissions.dist.rates,
+        eager_model.emissions.dist.rates,
         atol=1e-6,
     )
     np.testing.assert_allclose(

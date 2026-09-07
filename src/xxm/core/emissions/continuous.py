@@ -110,14 +110,14 @@ class GaussianEmissions(typing.NamedTuple):
     $$y_t|x_t \sim \mathcal{N}(Cx_t + d, R).$$
     """
 
-    model: LinearGaussian  # no batch
+    dist: LinearGaussian  # no batch
 
     def conditional(
         self,
         latents: jax.Array,  # (..., D)
     ) -> Gaussian:
         """Conditional distribution $p(y|x)$ at deterministic latent."""
-        return self.model.conditional(latents)
+        return self.dist.conditional(latents)
 
     def log_likelihood(
         self,
@@ -133,7 +133,7 @@ class GaussianEmissions(typing.NamedTuple):
     ) -> GaussianPotential:
         """Construct exact Gaussian likelihood potential over latents."""
         return GaussianPotential.from_linear_likelihood(
-            self.model,
+            self.dist,
             observations,
         )
 
@@ -153,7 +153,7 @@ class GaussianEmissions(typing.NamedTuple):
         """Fit emission parameters from Gaussian latent marginals."""
 
         return self._replace(
-            model=gaussian_fit.linear_from_marginals(
+            dist=gaussian_fit.linear_from_marginals(
                 inputs=Gaussian(
                     mean=posterior.means,
                     covariance=posterior.covariances,
@@ -164,7 +164,7 @@ class GaussianEmissions(typing.NamedTuple):
 
     def observation_mean(self, posterior: ContinuousPosterior) -> jax.Array:
         """Expected observations under posterior marginals."""
-        return self.model.conditional_mean(
+        return self.dist.conditional_mean(
             posterior.means,
         )
 
@@ -174,7 +174,7 @@ class GaussianEmissions(typing.NamedTuple):
     ) -> typing.Self:
         """Express the emissions in aligned latent coordinates."""
         return self._replace(
-            model=self.model.compose_input(
+            dist=self.dist.compose_input(
                 alignment.inverse(),
             ),
         )
@@ -200,14 +200,14 @@ class GaussianEmissions(typing.NamedTuple):
 class PoissonEmissions(typing.NamedTuple):
     """Linear Poisson emissions for continuous latent variables."""
 
-    model: LinearPoisson  # no batch
+    dist: LinearPoisson  # no batch
 
     def conditional(
         self,
         latents: jax.Array,  # (..., D)
     ) -> Poisson:
         """Conditional observation distribution given latent values."""
-        return self.model.conditional(latents)
+        return self.dist.conditional(latents)
 
     def rates(
         self,
@@ -231,7 +231,7 @@ class PoissonEmissions(typing.NamedTuple):
     ) -> jax.Array:
         """Expected conditional log likelihood under Gaussian latent marginals."""
 
-        return self.model.expected_log_prob(
+        return self.dist.expected_log_prob(
             values=observations,
             inputs=Gaussian(
                 mean=posterior.means,
@@ -245,7 +245,7 @@ class PoissonEmissions(typing.NamedTuple):
         latents: jax.Array,  # (T, D)
     ) -> GaussianPotential:
         """Quadratic approximation of the likelihood around ``latents``."""
-        coefficients = self.model.affine.coefficients  # (N, D)
+        coefficients = self.dist.affine.coefficients  # (N, D)
 
         conditional = self.conditional(latents)
         rates = conditional.rates  # (T, N)
@@ -286,16 +286,16 @@ class PoissonEmissions(typing.NamedTuple):
                 mean=posterior.means,
                 covariance=posterior.covariances,
             ),
-            initial_affine=self.model.affine,
+            initial_affine=self.dist.affine,
         )
 
         return self._replace(
-            model=model,
+            dist=model,
         )
 
     def observation_mean(self, posterior: ContinuousPosterior) -> jax.Array:
         """Compute expected observations under posterior latent marginals."""
-        return self.model.expected_rates(
+        return self.dist.expected_rates(
             Gaussian(
                 mean=posterior.means,
                 covariance=posterior.covariances,
@@ -308,7 +308,7 @@ class PoissonEmissions(typing.NamedTuple):
     ) -> typing.Self:
         """Express the emissions in aligned latent coordinates."""
         return self._replace(
-            model=self.model.compose_input(
+            dist=self.dist.compose_input(
                 alignment.inverse(),
             ),
         )

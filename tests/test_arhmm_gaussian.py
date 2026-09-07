@@ -32,7 +32,7 @@ def _make_emissions(
     covariances: jax.Array,  # (K, N_out, N_out)
 ) -> AREmissions[LinearGaussian]:
     return AREmissions(
-        model=LinearGaussian(
+        dist=LinearGaussian(
             affine=Affine(
                 coefficients=coefficients,
                 bias=biases,
@@ -55,7 +55,7 @@ def test_ar_gaussian_properties():
     assert emissions.num_states == 3
     assert emissions.num_lags == 2
     assert emissions.output_dim == 4
-    assert emissions.model.input_shape == (2, 4)
+    assert emissions.dist.input_shape == (2, 4)
 
 
 def test_ar_gaussian_lagged_observations():
@@ -261,19 +261,19 @@ def test_ar_gaussian_fit_recovers_known_ar2_parameters():
     )
 
     np.testing.assert_allclose(
-        fitted.model.affine.coefficients,
+        fitted.dist.affine.coefficients,
         expected_coefficients,
         atol=FIT_ATOL,
     )
 
     np.testing.assert_allclose(
-        fitted.model.affine.bias,
+        fitted.dist.affine.bias,
         [[bias]],
         atol=FIT_ATOL,
     )
 
     np.testing.assert_allclose(
-        fitted.model.covariance,
+        fitted.dist.covariance,
         0.0,
         atol=FIT_ATOL,
     )
@@ -291,16 +291,16 @@ def test_ar_gaussian_permute():
     permuted = emissions.permute(permutation)
 
     np.testing.assert_array_equal(
-        permuted.model.affine.coefficients,
-        emissions.model.affine.coefficients[permutation],
+        permuted.dist.affine.coefficients,
+        emissions.dist.affine.coefficients[permutation],
     )
     np.testing.assert_array_equal(
-        permuted.model.affine.bias,
-        emissions.model.affine.bias[permutation],
+        permuted.dist.affine.bias,
+        emissions.dist.affine.bias[permutation],
     )
     np.testing.assert_array_equal(
-        permuted.model.covariance,
-        emissions.model.covariance[permutation],
+        permuted.dist.covariance,
+        emissions.dist.covariance[permutation],
     )
 
 

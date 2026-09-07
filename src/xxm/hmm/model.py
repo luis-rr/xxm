@@ -40,12 +40,12 @@ def _categorical_components_from_params(
 ) -> tuple[CategoricalInitial, CategoricalTransitions]:
     return (
         CategoricalInitial(
-            model=Categorical(
+            dist=Categorical(
                 probs=initial_probs,
             )
         ),
         CategoricalTransitions(
-            model=Categorical(
+            dist=Categorical(
                 probs=transition_probs,
             )
         ),
@@ -76,7 +76,7 @@ class GaussianHMM:
     @property
     def states(self) -> Gaussian:
         """State-conditional emission distributions."""
-        return self.model.emissions.model
+        return self.model.emissions.dist
 
     def most_likely_states(self, posterior: Posterior) -> jax.Array:
         """Return the marginally most likely state at each time point."""
@@ -111,7 +111,7 @@ class GaussianHMM:
                 initial=initial,
                 transitions=transitions,
                 emissions=GaussianEmissions(
-                    model=Gaussian(
+                    dist=Gaussian(
                         mean=emission_means,
                         covariance=emission_covariances,
                     )
@@ -222,7 +222,7 @@ class PoissonHMM:
     @property
     def states(self) -> Poisson:
         """State-conditional Poisson emission distributions."""
-        return self.model.emissions.model
+        return self.model.emissions.dist
 
     def most_likely_states(self, posterior: Posterior) -> jax.Array:
         """Return the marginally most likely state at each time point."""
@@ -256,7 +256,7 @@ class PoissonHMM:
                 initial=initial,
                 transitions=transitions,
                 emissions=PoissonEmissions(
-                    model=Poisson(
+                    dist=Poisson(
                         log_rates=emission_log_rates,
                     )
                 ),
@@ -388,7 +388,7 @@ class GaussianARHMM:
     @property
     def states(self) -> LinearGaussian:
         """State-conditional autoregressive Gaussian distributions."""
-        return self.model.emissions.model
+        return self.model.emissions.dist
 
     def states_conditional(
         self,
@@ -448,7 +448,7 @@ class GaussianARHMM:
                 initial=initial,
                 transitions=transitions,
                 emissions=AREmissions(
-                    model=LinearGaussian(
+                    dist=LinearGaussian(
                         affine=Affine(
                             coefficients=emission_coefficients,
                             bias=emission_bias,
@@ -619,7 +619,7 @@ class PoissonARHMM:
     @property
     def states(self) -> LinearPoisson:
         """State-conditional autoregressive Poisson distributions."""
-        return self.model.emissions.model
+        return self.model.emissions.dist
 
     def states_conditional(
         self,
@@ -678,7 +678,7 @@ class PoissonARHMM:
                 initial=initial,
                 transitions=transitions,
                 emissions=AREmissions(
-                    model=LinearPoisson(
+                    dist=LinearPoisson(
                         affine=Affine(
                             coefficients=emission_coefficients,
                             bias=emission_bias,

@@ -48,13 +48,13 @@ def _latent_components_from_params(
 ) -> tuple[GaussianInitial, GaussianLinearDynamics]:
     return (
         GaussianInitial(
-            model=Gaussian(
+            dist=Gaussian(
                 mean=initial_mean,
                 covariance=initial_covariance,
             )
         ),
         GaussianLinearDynamics(
-            model=LinearGaussian(
+            dist=LinearGaussian(
                 affine=Affine(
                     coefficients=dynamics_coefficients,
                     bias=dynamics_bias,
@@ -80,22 +80,22 @@ class GaussianLDS:
     @property
     def latent_dim(self) -> int:
         """Dimension $D_x$ of the continuous latent state."""
-        return self.model.dynamics.model.output_dim
+        return self.model.dynamics.dist.output_dim
 
     @property
     def observation_dim(self) -> int:
         """Dimension $D_y$ of each observation."""
-        return self.model.emissions.model.output_dim
+        return self.model.emissions.dist.output_dim
 
     @property
     def dynamics(self) -> LinearGaussian:
         """Linear-Gaussian latent transition distribution."""
-        return self.model.dynamics.model
+        return self.model.dynamics.dist
 
     @property
     def emissions(self) -> LinearGaussian:
         """Linear-Gaussian observation distribution."""
-        return self.model.emissions.model
+        return self.model.emissions.dist
 
     @classmethod
     def from_params(
@@ -124,7 +124,7 @@ class GaussianLDS:
                 initial=initial,
                 dynamics=dynamics,
                 emissions=GaussianEmissions(
-                    model=LinearGaussian(
+                    dist=LinearGaussian(
                         affine=Affine(
                             coefficients=emission_coefficients,
                             bias=emission_bias,
@@ -255,22 +255,22 @@ class PoissonLDS:
     @property
     def latent_dim(self) -> int:
         """Dimension $D_x$ of the continuous latent state."""
-        return self.model.dynamics.model.output_dim
+        return self.model.dynamics.dist.output_dim
 
     @property
     def observation_dim(self) -> int:
         """Dimension $D_y$ of each observation."""
-        return self.model.emissions.model.output_dim
+        return self.model.emissions.dist.output_dim
 
     @property
     def dynamics(self) -> LinearGaussian:
         """Linear-Gaussian latent transition distribution."""
-        return self.model.dynamics.model
+        return self.model.dynamics.dist
 
     @property
     def emissions(self) -> LinearPoisson:
         """Linear-Poisson observation distribution in log-rate form."""
-        return self.model.emissions.model
+        return self.model.emissions.dist
 
     @classmethod
     def from_params(
@@ -298,7 +298,7 @@ class PoissonLDS:
                 initial=initial,
                 dynamics=dynamics,
                 emissions=PoissonEmissions(
-                    model=LinearPoisson(
+                    dist=LinearPoisson(
                         affine=Affine(
                             coefficients=emission_coefficients,
                             bias=emission_bias,
