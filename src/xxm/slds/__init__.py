@@ -10,10 +10,11 @@ from .learning import (
     fit_variational_em,
     fit_variational_em_many,
 )
-from .model import GaussianSLDS
+from .model import GaussianSLDS, PoissonSLDS
 
 __all__ = [
     'GaussianSLDS',
+    'PoissonSLDS',
     'Posterior',
     'fit_variational_em',
     'fit_variational_em_many',
