@@ -486,6 +486,25 @@ def linear_from_paired(
     )
 
 
+def linear_from_marginals(
+    inputs: Gaussian,
+    outputs: jax.Array,
+    weights: jax.Array | None = None,
+    ridge: float = 0.0,
+) -> LinearGaussian:
+    """Fit a linear Gaussian from Gaussian input marginals."""
+    paired = paired_from_left_marginals(
+        left=inputs,
+        right=outputs,
+        weights=weights,
+    )
+
+    return linear_from_paired(
+        paired,
+        ridge=ridge,
+    )
+
+
 def linear_from_samples(
     inputs: jax.Array,  # (T, *input_shape)
     outputs: jax.Array,  # (T, O)
