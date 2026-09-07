@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from xxm.core.affine import Affine
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.dists.gaussian import Gaussian, LinearGaussian, PairedGaussian
 from xxm.core.optim import gaussian as gaussian_fit
 
 ATOL = 1e-5
@@ -56,14 +56,40 @@ def test_fit_weighted_matches_hard_assignments():
 
 
 def test_fit_linear_recovers_exact_affine_map():
-    inputs = jnp.array([[-1.0], [0.0], [1.0], [2.0]])
+    inputs = jnp.array(
+        [
+            [1023.875],
+            [1024.0],
+            [1024.125],
+        ]
+    )
     outputs = 2.0 * inputs + 1.0
 
-    fit = gaussian_fit.linear_from_samples(inputs, outputs)
+    eager = gaussian_fit.linear_from_samples(
+        inputs,
+        outputs,
+    )
+    jitted = jax.jit(gaussian_fit.linear_from_samples)(
+        inputs,
+        outputs,
+    )
 
-    np.testing.assert_allclose(fit.affine.coefficients, [[2.0]], atol=ATOL)
-    np.testing.assert_allclose(fit.affine.bias, [1.0], atol=ATOL)
-    np.testing.assert_allclose(fit.covariance, [[0.0]], atol=ATOL)
+    for fit in (eager, jitted):
+        np.testing.assert_allclose(
+            fit.affine.coefficients,
+            [[2.0]],
+            atol=ATOL,
+        )
+        np.testing.assert_allclose(
+            fit.affine.bias,
+            [1.0],
+            atol=ATOL,
+        )
+        np.testing.assert_allclose(
+            fit.covariance,
+            [[0.0]],
+            atol=ATOL,
+        )
 
 
 def test_fit_weighted_linear_recovers_state_specific_affine_maps():
@@ -208,3 +234,100 @@ def test_fit_linear_preserves_structured_input_shape():
     )
 
     assert fit.input_shape == (2, 1)
+
+
+def test_paired_gaussian_assembles_joint_moments():
+    paired = PairedGaussian(
+        left=Gaussian(
+            mean=jnp.array([1.0]),
+            covariance=jnp.array([[2.0]]),
+        ),
+        right=Gaussian(
+            mean=jnp.array([3.0]),
+            covariance=jnp.array([[4.0]]),
+        ),
+        cross_covariance=jnp.array([[5.0]]),
+    )
+
+    np.testing.assert_allclose(
+        paired.mean,
+        [1.0, 3.0],
+        atol=ATOL,
+    )
+    np.testing.assert_allclose(
+        paired.covariance,
+        [
+            [2.0, 5.0],
+            [5.0, 4.0],
+        ],
+        atol=ATOL,
+    )
+
+
+def test_moment_match_combines_within_and_between_covariance():
+    distributions = Gaussian(
+        mean=jnp.array([[0.0], [2.0]]),
+        covariance=jnp.array([[[1.0]], [[3.0]]]),
+    )
+
+    fit = gaussian_fit.from_moment_match(distributions)
+
+    np.testing.assert_allclose(fit.mean, [1.0], atol=ATOL)
+    np.testing.assert_allclose(fit.covariance, [[3.0]], atol=ATOL)
+
+
+def test_paired_moment_match_combines_cross_covariance():
+    distributions = PairedGaussian(
+        left=Gaussian(
+            mean=jnp.array([[0.0], [2.0]]),
+            covariance=jnp.array([[[1.0]], [[1.0]]]),
+        ),
+        right=Gaussian(
+            mean=jnp.array([[1.0], [5.0]]),
+            covariance=jnp.array([[[2.0]], [[2.0]]]),
+        ),
+        cross_covariance=jnp.array([[[0.5]], [[0.5]]]),
+    )
+
+    fit = gaussian_fit.paired_from_moment_match(distributions)
+
+    np.testing.assert_allclose(fit.left.mean, [1.0], atol=ATOL)
+    np.testing.assert_allclose(fit.left.covariance, [[2.0]], atol=ATOL)
+
+    np.testing.assert_allclose(fit.right.mean, [3.0], atol=ATOL)
+    np.testing.assert_allclose(fit.right.covariance, [[6.0]], atol=ATOL)
+
+    np.testing.assert_allclose(
+        fit.cross_covariance,
+        [[2.5]],
+        atol=ATOL,
+    )
+
+
+def test_linear_from_marginals_accounts_for_input_uncertainty():
+    inputs = Gaussian(
+        mean=jnp.array([[0.0], [2.0]]),
+        covariance=jnp.array([[[1.0]], [[1.0]]]),
+    )
+    outputs = jnp.array([[1.0], [5.0]])
+
+    fit = gaussian_fit.linear_from_marginals(
+        inputs,
+        outputs,
+    )
+
+    np.testing.assert_allclose(
+        fit.affine.coefficients,
+        [[1.0]],
+        atol=ATOL,
+    )
+    np.testing.assert_allclose(
+        fit.affine.bias,
+        [2.0],
+        atol=ATOL,
+    )
+    np.testing.assert_allclose(
+        fit.covariance,
+        [[2.0]],
+        atol=ATOL,
+    )
