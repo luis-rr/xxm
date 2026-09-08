@@ -132,11 +132,11 @@ def test_single_state_slds_matches_gaussian_chain():
     model = _single_state_model()
     observations = jnp.array([[0.2], [1.0], [-0.3]])
 
-    posterior, _ = infer_variational(
+    posterior = infer_variational(
         model,
         observations,
         num_iters=3,
-    )
+    ).posterior
 
     state_probs = jnp.ones((observations.shape[0], 1))
 
@@ -183,11 +183,11 @@ def test_zero_iterations_uses_discrete_prior():
     model = _two_state_model()
     observations = jnp.zeros((4, 1))
 
-    posterior, _ = infer_variational(
+    posterior = infer_variational(
         model,
         observations,
         num_iters=0,
-    )
+    ).posterior
 
     # There are T = 4 discrete states and T - 1 = 3 transitions.
     #
@@ -223,7 +223,7 @@ def test_infer_variational_is_jittable():
         ]
     )
 
-    eager, eager_elbo = infer_variational(
+    eager = infer_variational(
         model,
         observations,
         num_iters=2,
@@ -234,7 +234,7 @@ def test_infer_variational_is_jittable():
         static_argnames=('num_iters',),
     )
 
-    jitted, jitted_elbo = inference_jit(
+    jitted = inference_jit(
         model,
         observations,
         num_iters=2,
@@ -243,32 +243,32 @@ def test_infer_variational_is_jittable():
     jax.block_until_ready(jitted)
 
     np.testing.assert_allclose(
-        jitted.discrete.state_probs,
-        eager.discrete.state_probs,
+        jitted.posterior.discrete.state_probs,
+        eager.posterior.discrete.state_probs,
         atol=ATOL,
     )
     np.testing.assert_allclose(
-        jitted.discrete.pair_probs,
-        eager.discrete.pair_probs,
+        jitted.posterior.discrete.pair_probs,
+        eager.posterior.discrete.pair_probs,
         atol=ATOL,
     )
     np.testing.assert_allclose(
-        jitted.continuous.means,
-        eager.continuous.means,
+        jitted.posterior.continuous.means,
+        eager.posterior.continuous.means,
         atol=ATOL,
     )
     np.testing.assert_allclose(
-        jitted.continuous.covariances,
-        eager.continuous.covariances,
+        jitted.posterior.continuous.covariances,
+        eager.posterior.continuous.covariances,
         atol=ATOL,
     )
     np.testing.assert_allclose(
-        jitted.continuous.cross_covariances,
-        eager.continuous.cross_covariances,
+        jitted.posterior.continuous.cross_covariances,
+        eager.posterior.continuous.cross_covariances,
         atol=ATOL,
     )
     np.testing.assert_allclose(
-        jitted_elbo,
-        eager_elbo,
+        jitted.objective,
+        eager.objective,
         atol=ATOL,
     )

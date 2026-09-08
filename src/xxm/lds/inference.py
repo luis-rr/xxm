@@ -8,6 +8,7 @@ from xxm.core.emissions.continuous import (
     LaplaceEmissionsT,
     QuadraticEmissionsT,
 )
+from xxm.core.inference import Inferred
 from xxm.core.optim.laplace import laplace_inference
 from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
 
@@ -19,6 +20,7 @@ def to_chain(
     num_steps: int,
 ) -> Chain:
     """Construct the Gaussian chain defined by the latent LDS prior."""
+
     return Chain.from_pair_potentials(
         model.compute_initial_potential(),
         model.compute_pair_potentials(num_steps),
@@ -28,8 +30,11 @@ def to_chain(
 def infer_exact(
     model: Model[QuadraticEmissionsT],
     observations: jax.Array,
-) -> tuple[Posterior, jax.Array]:
-    """Run Gaussian forward-backward, returning marginals and log likelihood for quadratic emissions."""
+) -> Inferred[
+    Model[QuadraticEmissionsT],
+    Posterior,
+]:
+    """Run exact Gaussian forward-backward inference."""
 
     latent_chain = to_chain(
         model,
@@ -42,7 +47,13 @@ def infer_exact(
         observation_potential,
     )
 
-    return posterior_chain.forward_backward()
+    posterior, log_normalizer = posterior_chain.forward_backward()
+
+    return Inferred(
+        model=model,
+        posterior=posterior,
+        objective=log_normalizer,
+    )
 
 
 def infer_laplace(
@@ -50,25 +61,26 @@ def infer_laplace(
     observations: jax.Array,
     initial_latents: jax.Array | None = None,
     params: OptimParams = DEFAULT_OPTIM_PARAMS,
-) -> tuple[Posterior, jax.Array]:
+) -> Inferred[
+    Model[LaplaceEmissionsT],
+    Posterior,
+]:
     """
-    Approximate the latent posterior and marginal log likelihood using Laplace inference.
+    Approximate the latent posterior and marginal log likelihood using Laplace
+    inference.
 
-    Damped Newton iterations seek the posterior mode. At each
-    iteration, the emission log likelihood is replaced by its local quadratic
-    approximation, producing a Gaussian chain whose mean gives the Newton
-    candidate.
-
-    The final local Gaussian approximation defines both the returned posterior
-    marginals and Laplace approximation to the marginal log likelihood.
+    Damped Newton iterations seek the posterior mode. The final local Gaussian
+    approximation defines the returned posterior and Laplace approximation to
+    the marginal log likelihood.
     """
+
     params = params or OptimParams()
 
     num_steps = observations.shape[0]
 
     chain = to_chain(
         model,
-        num_steps=observations.shape[0],
+        num_steps=num_steps,
     )
 
     if initial_latents is None:
@@ -76,10 +88,16 @@ def infer_laplace(
     else:
         latents = initial_latents
 
-    return laplace_inference(
+    posterior, log_normalizer = laplace_inference(
         chain=chain,
         emissions=model.emissions,
         observations=observations,
         initial_latents=latents,
         search_params=params,
+    )
+
+    return Inferred(
+        model=model,
+        posterior=posterior,
+        objective=log_normalizer,
     )

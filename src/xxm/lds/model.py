@@ -15,11 +15,11 @@ from xxm.core.emissions.continuous import (
     GaussianEmissions,
     PoissonEmissions,
 )
+from xxm.core.inference import Fitted, FittedCollection, Inferred
 from xxm.core.latents.gaussian import (
     GaussianInitial,
     GaussianLinearDynamics,
 )
-from xxm.core.optim.loop import Fit, FitCollection
 from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
 
 from .core import Model
@@ -214,7 +214,7 @@ class GaussianLDS:
             num_steps,
         )
 
-    def infer(self, observations: jax.Array) -> tuple[Posterior, jax.Array]:
+    def infer(self, observations: jax.Array) -> Inferred[typing.Self, Posterior]:
         """Compute the exact Gaussian posterior and observation log likelihood."""
         return _infer_exact_jit(
             self._model,
@@ -227,7 +227,7 @@ class GaussianLDS:
         *,
         num_iters: int,
         progress: bool | str = 'EM',
-    ) -> Fit[typing.Self]:
+    ) -> Fitted[typing.Self, Posterior]:
         """Fit model parameters by expectation-maximization."""
         fit = _fit_em_jit(
             self._model,
@@ -236,8 +236,9 @@ class GaussianLDS:
             progress=progress,
         )
 
-        return Fit(
-            model=self.__class__(fit.model),
+        return Fitted(
+            model=self.__class__(fit.state.model),
+            posterior=fit.state.posterior,
             objective_trace=fit.objective_trace,
         )
 
@@ -249,7 +250,7 @@ class GaussianLDS:
         *,
         num_iters: int,
         progress: bool | str = 'Multi-EM',
-    ) -> FitCollection[typing.Self]:
+    ) -> FittedCollection[typing.Self, Posterior]:
         """Fit multiple LDS initializations to the same observations by EM."""
         fit = _fit_em_many_jit(
             tuple(model._model for model in models),
@@ -258,8 +259,9 @@ class GaussianLDS:
             progress=progress,
         )
 
-        return FitCollection(
-            models=tuple(cls(model) for model in fit.models),
+        return FittedCollection(
+            models=tuple(cls(state.model) for state in fit.states),
+            posteriors=tuple(state.posterior for state in fit.states),
             objective_traces=fit.objective_traces,
         )
 
@@ -393,7 +395,7 @@ class PoissonLDS:
         *,
         initial_latents: jax.Array | None = None,
         laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
-    ) -> tuple[Posterior, jax.Array]:
+    ) -> Inferred[typing.Self, Posterior]:
         """
         Compute the Laplace posterior and approximate observation log likelihood.
         """
@@ -411,7 +413,7 @@ class PoissonLDS:
         num_iters: int,
         progress: bool | str = 'Laplace EM',
         laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
-    ) -> Fit[typing.Self]:
+    ) -> Fitted[typing.Self, Posterior]:
         """Fit model parameters with Laplace-approximated expectation-maximization."""
         fit = _fit_laplace_em_jit(
             self._model,
@@ -421,8 +423,9 @@ class PoissonLDS:
             laplace_params=laplace_params,
         )
 
-        return Fit(
-            model=self.__class__(fit.model),
+        return Fitted(
+            model=self.__class__(fit.state.model),
+            posterior=fit.state.posterior,
             objective_trace=fit.objective_trace,
         )
 
@@ -435,7 +438,7 @@ class PoissonLDS:
         num_iters: int,
         progress: bool | str = 'Multi-Laplace EM',
         laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
-    ) -> FitCollection[typing.Self]:
+    ) -> FittedCollection[typing.Self, Posterior]:
         """Fit multiple Poisson LDS initializations with Laplace EM."""
         fit = _fit_laplace_em_many_jit(
             tuple(model._model for model in models),
@@ -445,8 +448,9 @@ class PoissonLDS:
             laplace_params=laplace_params,
         )
 
-        return FitCollection(
-            models=tuple(cls(model) for model in fit.models),
+        return FittedCollection(
+            models=tuple(cls(state.model) for state in fit.states),
+            posteriors=tuple(state.posterior for state in fit.states),
             objective_traces=fit.objective_traces,
         )
 

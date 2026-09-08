@@ -110,12 +110,12 @@ def _from_arhmm(
     Trajectory-wide state occupancies are used as proxies for the boundary
     distributions of ``z[0]`` and ``x[0] | z[0]``.
     """
-    posterior, _ = infer_hmm(
+    inferred = infer_hmm(
         arhmm,
         latents,
     )
 
-    state_probs = posterior.state_probs  # (T-1, K), aligned with latents[1:]
+    state_probs = inferred.posterior.state_probs  # (T-1, K), aligned with latents[1:]
 
     state_initial = CategoricalInitial(
         dist=Categorical.from_counts(
@@ -250,7 +250,7 @@ def init_arhmm_gaussian(
         latents,
         num_iters=num_arhmm_iters,
         progress=progress,
-    ).model
+    ).state.model
 
     return _from_arhmm(
         latents=latents,
@@ -325,7 +325,7 @@ def init_arhmm_poisson(
         latents,
         num_iters=num_arhmm_iters,
         progress=progress,
-    ).model
+    ).state.model
 
     return _from_arhmm(
         latents=latents,

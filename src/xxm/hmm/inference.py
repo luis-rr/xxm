@@ -6,7 +6,9 @@ import jax
 from jax import numpy as jnp
 
 from xxm.core.chains.discrete import DiscreteChain as Chain
-from xxm.hmm.core import Model, Posterior
+from xxm.core.inference import Inferred
+
+from .core import Model, Posterior
 
 
 def to_chain(
@@ -14,6 +16,7 @@ def to_chain(
     num_steps: int,
 ) -> Chain:
     """Construct discrete chain from model structure and time horizon."""
+
     transition_probs = jnp.broadcast_to(
         model.transitions.dist.probs,
         (
@@ -36,17 +39,31 @@ def to_chain(
 def infer_exact(
     model: Model,
     observations: jax.Array,
-) -> tuple[Posterior, jax.Array]:
+) -> Inferred[Model, Posterior]:
     """
-    Run forward-backward inference, returning state marginals and log likelihood.
+    Run forward-backward inference.
 
     For autoregressive emissions, the likelihood is conditional on the fixed
     initial observation history.
     """
-    observation_potential = model.emissions.compute_potential(observations)
 
-    latent_chain = to_chain(model, num_steps=observation_potential.log_values.shape[0])
+    observation_potential = model.emissions.compute_potential(
+        observations,
+    )
 
-    posterior_chain = latent_chain.add_local_potential(observation_potential)
+    latent_chain = to_chain(
+        model,
+        num_steps=observation_potential.log_values.shape[0],
+    )
 
-    return posterior_chain.forward_backward()
+    posterior_chain = latent_chain.add_local_potential(
+        observation_potential,
+    )
+
+    posterior, log_normalizer = posterior_chain.forward_backward()
+
+    return Inferred(
+        model=model,
+        posterior=posterior,
+        objective=log_normalizer,
+    )

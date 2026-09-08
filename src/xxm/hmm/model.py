@@ -17,11 +17,11 @@ from xxm.core.emissions.discrete import (
     PoissonEmissions,
 )
 from xxm.core.emissions.discrete_ar import AREmissions
+from xxm.core.inference import Fitted, FittedCollection, Inferred
 from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
 )
-from xxm.core.optim.loop import Fit, FitCollection
 
 from .core import Model, Posterior
 from .inference import infer_exact
@@ -172,7 +172,7 @@ class GaussianHMM:
     def infer(
         self,
         observations: jax.Array,
-    ) -> tuple[Posterior, jax.Array]:
+    ) -> Inferred[typing.Self, Posterior]:
         """Compute the exact posterior over states and the observation log likelihood."""
         return _infer_exact_jit(
             self._model,
@@ -185,7 +185,7 @@ class GaussianHMM:
         *,
         num_iters: int,
         progress: bool | str = 'EM',
-    ) -> Fit[typing.Self]:
+    ) -> Fitted[typing.Self, Posterior]:
         """Fit model parameters by expectation-maximization."""
         fit = _fit_em_jit(
             self._model,
@@ -194,8 +194,9 @@ class GaussianHMM:
             progress=progress,
         )
 
-        return Fit(
-            model=self.__class__(fit.model),
+        return Fitted(
+            model=self.__class__(fit.state.model),
+            posterior=fit.state.posterior,
             objective_trace=fit.objective_trace,
         )
 
@@ -207,7 +208,7 @@ class GaussianHMM:
         *,
         num_iters: int,
         progress: bool | str = 'Multi-EM',
-    ) -> FitCollection[typing.Self]:
+    ) -> FittedCollection[typing.Self, Posterior]:
         """Fit multiple HMM initializations to the same observations by EM."""
         fit = _fit_em_many_jit(
             tuple(model._model for model in models),
@@ -216,8 +217,9 @@ class GaussianHMM:
             progress=progress,
         )
 
-        return FitCollection(
-            models=tuple(cls(model) for model in fit.models),
+        return FittedCollection(
+            models=tuple(cls(state.model) for state in fit.states),
+            posteriors=tuple(state.posterior for state in fit.states),
             objective_traces=fit.objective_traces,
         )
 
@@ -320,7 +322,10 @@ class PoissonHMM:
             num_steps,
         )
 
-    def infer(self, observations: jax.Array) -> tuple[Posterior, jax.Array]:
+    def infer(
+        self,
+        observations: jax.Array,
+    ) -> Inferred[Model[PoissonEmissions], Posterior]:
         """Compute the exact posterior over states and the observation log likelihood."""
         return infer_exact(
             self._model,
@@ -333,7 +338,7 @@ class PoissonHMM:
         *,
         num_iters: int,
         progress: bool | str = 'EM',
-    ) -> Fit[typing.Self]:
+    ) -> Fitted[typing.Self, Posterior]:
         """Fit model parameters by expectation-maximization."""
         fit = fit_em(
             self._model,
@@ -342,8 +347,9 @@ class PoissonHMM:
             progress=progress,
         )
 
-        return Fit(
-            model=self.__class__(fit.model),
+        return Fitted(
+            model=self.__class__(fit.state.model),
+            posterior=fit.state.posterior,
             objective_trace=fit.objective_trace,
         )
 
@@ -355,7 +361,7 @@ class PoissonHMM:
         *,
         num_iters: int,
         progress: bool | str = 'Multi-EM',
-    ) -> FitCollection[typing.Self]:
+    ) -> FittedCollection[typing.Self, Posterior]:
         """Fit multiple HMM initializations to the same observations by EM."""
         fit = fit_em_many(
             tuple(model._model for model in models),
@@ -364,8 +370,9 @@ class PoissonHMM:
             progress=progress,
         )
 
-        return FitCollection(
-            models=tuple(cls(model) for model in fit.models),
+        return FittedCollection(
+            models=tuple(cls(state.model) for state in fit.states),
+            posteriors=tuple(state.posterior for state in fit.states),
             objective_traces=fit.objective_traces,
         )
 
@@ -557,7 +564,7 @@ class GaussianARHMM:
     def infer(
         self,
         observations: jax.Array,
-    ) -> tuple[Posterior, jax.Array]:
+    ) -> Inferred[Model[AREmissions[LinearGaussian]], Posterior]:
         """
         Infer states conditional on the first ``num_lags`` observations.
 
@@ -575,7 +582,7 @@ class GaussianARHMM:
         *,
         num_iters: int,
         progress: bool | str = 'EM',
-    ) -> Fit[typing.Self]:
+    ) -> Fitted[typing.Self, Posterior]:
         """Fit the conditional AR-HMM with expectation maximization."""
         fit = fit_em(
             self.model,
@@ -584,8 +591,9 @@ class GaussianARHMM:
             progress=progress,
         )
 
-        return Fit(
-            model=self.__class__(fit.model),
+        return Fitted(
+            model=self.__class__(fit.state.model),
+            posterior=fit.state.posterior,
             objective_trace=fit.objective_trace,
         )
 
@@ -597,7 +605,7 @@ class GaussianARHMM:
         *,
         num_iters: int,
         progress: bool | str = 'Multi-EM',
-    ) -> FitCollection[typing.Self]:
+    ) -> FittedCollection[typing.Self, Posterior]:
         """Fit multiple AR-HMM initializations to the same sequence."""
         fit = fit_em_many(
             tuple(model.model for model in models),
@@ -606,8 +614,9 @@ class GaussianARHMM:
             progress=progress,
         )
 
-        return FitCollection(
-            models=tuple(cls(model) for model in fit.models),
+        return FittedCollection(
+            models=tuple(cls(state.model) for state in fit.states),
+            posteriors=tuple(state.posterior for state in fit.states),
             objective_traces=fit.objective_traces,
         )
 
@@ -794,7 +803,7 @@ class PoissonARHMM:
             initial_history,
         )
 
-    def infer(self, observations: jax.Array) -> tuple[Posterior, jax.Array]:
+    def infer(self, observations: jax.Array) -> Inferred[typing.Self, Posterior]:
         """
         Infer states conditional on the first ``num_lags`` observations.
 
@@ -812,7 +821,7 @@ class PoissonARHMM:
         *,
         num_iters: int,
         progress: bool | str = 'EM',
-    ) -> Fit[typing.Self]:
+    ) -> Fitted[typing.Self, Posterior]:
         """Fit the conditional AR-HMM with expectation maximization."""
         fit = _fit_em_jit(
             self.model,
@@ -821,8 +830,9 @@ class PoissonARHMM:
             progress=progress,
         )
 
-        return Fit(
-            model=self.__class__(fit.model),
+        return Fitted(
+            model=self.__class__(fit.state.model),
+            posterior=fit.state.posterior,
             objective_trace=fit.objective_trace,
         )
 
@@ -834,7 +844,7 @@ class PoissonARHMM:
         *,
         num_iters: int,
         progress: bool | str = 'Multi-EM',
-    ) -> FitCollection[typing.Self]:
+    ) -> FittedCollection[typing.Self, Posterior]:
         """Fit multiple AR-HMM initializations to the same sequence."""
         fit = _fit_em_many_jit(
             tuple(model.model for model in models),
@@ -843,7 +853,8 @@ class PoissonARHMM:
             progress=progress,
         )
 
-        return FitCollection(
-            models=tuple(cls(model) for model in fit.models),
+        return FittedCollection(
+            models=tuple(cls(state.model) for state in fit.states),
+            posteriors=tuple(state.posterior for state in fit.states),
             objective_traces=fit.objective_traces,
         )

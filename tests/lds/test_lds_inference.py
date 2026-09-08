@@ -41,7 +41,9 @@ def make_scalar_poisson_model() -> Model[PoissonEmissions]:
 
 
 def test_exact_inference_returns_one_posterior_per_observation():
-    posterior, log_normalizer = infer_exact(make_model(), make_observations())
+    inferred = infer_exact(make_model(), make_observations())
+    posterior = inferred.posterior
+    log_normalizer = inferred.objective
 
     assert posterior.means.shape == (3, 2)
     assert posterior.covariances.shape == (3, 2, 2)
@@ -53,18 +55,20 @@ def test_exact_inference_is_jittable():
     model = make_model()
     observations = make_observations()
 
-    eager, log_normalizer = infer_exact(model, observations)
-    jitted, jitted_log_normalizer = jax.jit(infer_exact)(model, observations)
+    eager = infer_exact(model, observations)
+    jitted = jax.jit(infer_exact)(model, observations)
 
-    np.testing.assert_allclose(jitted.means, eager.means)
-    np.testing.assert_allclose(jitted.covariances, eager.covariances)
-    np.testing.assert_allclose(jitted_log_normalizer, log_normalizer)
+    np.testing.assert_allclose(jitted.posterior.means, eager.posterior.means)
+    np.testing.assert_allclose(
+        jitted.posterior.covariances, eager.posterior.covariances
+    )
+    np.testing.assert_allclose(jitted.objective, eager.objective)
 
 
 def test_laplace_recovers_known_scalar_map():
     model = make_scalar_poisson_model()
 
-    posterior, _log_normalizer = infer_laplace(model, jnp.array([[1.0]]))
+    posterior = infer_laplace(model, jnp.array([[1.0]])).posterior
 
     np.testing.assert_allclose(posterior.means, [[0.0]], atol=1e-6)
 

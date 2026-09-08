@@ -9,6 +9,7 @@ from xxm.core.dists.poisson import Poisson
 from xxm.core.emissions.discrete import GaussianEmissions, PoissonEmissions
 from xxm.core.latents.discrete import CategoricalInitial, CategoricalTransitions
 from xxm.hmm.core import Model
+from xxm.hmm.inference import infer_exact
 from xxm.hmm.learning import em_step
 
 jax.config.update('jax_enable_x64', True)
@@ -301,26 +302,27 @@ def test_em_step_is_jit_compatible():
         ]
     )
 
-    eager_model, eager_log_likelihood = em_step(model, observations)
-    jitted_model, jitted_log_likelihood = jax.jit(em_step)(model, observations)
+    inferred = infer_exact(model, observations)
+    eager = em_step(inferred, observations)
+    jitted = jax.jit(em_step)(inferred, observations)
 
     np.testing.assert_allclose(
-        jitted_model.initial.dist.probs,
-        eager_model.initial.dist.probs,
+        jitted.model.initial.dist.probs,
+        eager.model.initial.dist.probs,
         atol=1e-6,
     )
     np.testing.assert_allclose(
-        jitted_model.transitions.dist.probs,
-        eager_model.transitions.dist.probs,
+        jitted.model.transitions.dist.probs,
+        eager.model.transitions.dist.probs,
         atol=1e-6,
     )
     np.testing.assert_allclose(
-        jitted_model.emissions.dist.rates,
-        eager_model.emissions.dist.rates,
+        jitted.model.emissions.dist.rates,
+        eager.model.emissions.dist.rates,
         atol=1e-6,
     )
     np.testing.assert_allclose(
-        jitted_log_likelihood,
-        eager_log_likelihood,
+        jitted.objective,
+        eager.objective,
         atol=1e-6,
     )

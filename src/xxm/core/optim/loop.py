@@ -1,4 +1,4 @@
-"""Iterative parameter fitting loops and convergence control."""
+"""Iterative fitting loops and convergence control."""
 
 import typing
 from collections.abc import Callable
@@ -7,25 +7,40 @@ import jax
 from jax import numpy as jnp
 from jax_tqdm.scan_pbar import scan_tqdm
 
-ModelT = typing.TypeVar('ModelT')
+
+class FitState(typing.Protocol):
+    """State carried by an iterative fitting procedure."""
+
+    @property
+    def objective(self) -> jax.Array:
+        """Current fitting objective."""
+        ...
+
+
+StateT = typing.TypeVar(
+    'StateT',
+    bound=FitState,
+)
 DataT = typing.TypeVar('DataT')
+PytreeT = typing.TypeVar('PytreeT')
 
 
-class Fit(typing.NamedTuple, typing.Generic[ModelT]):
-    """Fitted model and objective values recorded before and after optimization."""
+class Fit(typing.NamedTuple, typing.Generic[StateT]):
+    """Final fitting state and objective history."""
 
-    model: ModelT
+    state: StateT
     objective_trace: jax.Array
 
 
-class FitCollection(typing.NamedTuple, typing.Generic[ModelT]):
-    """Results from fitting multiple models."""
+class FitCollection(typing.NamedTuple, typing.Generic[StateT]):
+    """Results from fitting multiple states independently."""
 
-    models: tuple[ModelT, ...]
+    states: tuple[StateT, ...]
     objective_traces: jax.Array  # (M, num_iters + 1)
 
     def best_index(self) -> int:
         """Index of the best fit among those with NaN-free objective traces."""
+
         valid = self.is_valid()
 
         if not jnp.any(valid):
@@ -40,23 +55,25 @@ class FitCollection(typing.NamedTuple, typing.Generic[ModelT]):
 
     def is_valid(self) -> jax.Array:
         """Boolean array indicating which fits have NaN-free objective traces."""
+
         return ~jnp.isnan(self.objective_traces).any(axis=1)
 
-    def best(self) -> Fit[ModelT]:
+    def best(self) -> Fit[StateT]:
         """Return the fit with the highest final objective."""
-        index = self.best_index()
-        return self.get(index)
 
-    def get(self, index: int) -> Fit[ModelT]:
-        """Return the fit at the given index."""
+        return self.get(self.best_index())
+
+    def get(self, index: int) -> Fit[StateT]:
+        """Return one fit from the collection."""
+
         return Fit(
-            model=self.models[index],
+            state=self.states[index],
             objective_trace=self.objective_traces[index],
         )
 
 
-def stack_models(values: tuple[ModelT, ...]) -> ModelT:
-    """Stack a tuple of pytrees into a single pytree with an additional leading dimension."""
+def stack_states(values: tuple[StateT, ...]) -> StateT:
+    """Stack pytrees along a new leading dimension."""
 
     if not values:
         raise ValueError('Cannot stack an empty tuple of pytrees')
@@ -67,8 +84,8 @@ def stack_models(values: tuple[ModelT, ...]) -> ModelT:
     )
 
 
-def unstack_models(value: ModelT) -> tuple[ModelT, ...]:
-    """Unstack a pytree with a leading dimension into a tuple of pytrees."""
+def unstack_states(value: PytreeT) -> tuple[PytreeT, ...]:
+    """Unstack a pytree along its leading dimension."""
 
     leaves = jax.tree.leaves(value)
 
@@ -77,53 +94,48 @@ def unstack_models(value: ModelT) -> tuple[ModelT, ...]:
 
     num_items = leaves[0].shape[0]
 
-    if any(x.shape[0] != num_items for x in leaves):
+    if any(leaf.shape[0] != num_items for leaf in leaves):
         raise ValueError('Pytree leaves do not share a common batch dimension')
 
-    def take(index):
+    def take(index: int) -> PytreeT:
         return jax.tree.map(lambda x: x[index], value)
 
-    return tuple(take(i) for i in range(num_items))
+    return tuple(take(index) for index in range(num_items))
 
 
 FitStep = Callable[
-    [ModelT, DataT],
-    tuple[ModelT, jax.Array],
+    [StateT, DataT],
+    StateT,
 ]
 
 _ScanStep = Callable[
-    [ModelT, jax.Array],
-    tuple[ModelT, jax.Array],
+    [StateT, jax.Array],
+    tuple[StateT, jax.Array],
 ]
 
 _ProgressDecorator = Callable[
-    [_ScanStep[ModelT]],
-    _ScanStep[ModelT],
+    [_ScanStep[StateT]],
+    _ScanStep[StateT],
 ]
 
-Progress = bool | str | _ProgressDecorator[ModelT]
-
-Objective = Callable[
-    [ModelT, DataT],
-    jax.Array,
-]
+Progress = bool | str | _ProgressDecorator[StateT]
 
 
 def _add_progress_bar(
-    step: _ScanStep,
+    step: _ScanStep[StateT],
     num_iters: int,
-    progress: Progress[ModelT],
-) -> _ScanStep:
+    progress: Progress[StateT],
+) -> _ScanStep[StateT]:
     """Wrap a scan step with a progress bar if requested."""
+
+    if progress is False:
+        return step
 
     if progress is True:
         decorated = scan_tqdm(
             num_iters,
             tqdm_type='auto',
         )(step)
-
-    elif progress is False:
-        decorated = step
 
     elif isinstance(progress, str):
         decorated = scan_tqdm(
@@ -133,18 +145,21 @@ def _add_progress_bar(
         )(step)
 
     else:
-        decorated = progress(step)
+        return progress(step)
 
-    return decorated
+    return typing.cast(
+        _ScanStep[StateT],
+        decorated,
+    )
 
 
 def _scan(
-    model: ModelT,
+    state: StateT,
     *,
     num_iters: int,
-    step: _ScanStep[ModelT],
-    progress: Progress[ModelT],
-) -> tuple[ModelT, jax.Array]:
+    step: _ScanStep[StateT],
+    progress: Progress[StateT],
+) -> tuple[StateT, jax.Array]:
     """Run a fitting scan with optional progress reporting."""
 
     scan_step = _add_progress_bar(
@@ -155,85 +170,101 @@ def _scan(
 
     return jax.lax.scan(
         scan_step,
-        model,
+        state,
         xs=jnp.arange(num_iters),
     )
 
 
 def fit_one(
-    model: ModelT,
+    state: StateT,
     data: DataT,
     *,
     num_iters: int,
-    step: FitStep[ModelT, DataT],
-    objective: Objective[ModelT, DataT],
-    progress: Progress[ModelT] = False,
-) -> Fit[ModelT]:
-    """Fit a single model with the given step function."""
+    step: FitStep[StateT, DataT],
+    progress: Progress[StateT] = False,
+) -> Fit[StateT]:
+    """Iteratively update a fitting state."""
+
+    initial_objective = state.objective
 
     def _step(
-        model: ModelT,
+        state: StateT,
         _: jax.Array,
-    ) -> tuple[ModelT, jax.Array]:
-        return step(model, data)
+    ) -> tuple[StateT, jax.Array]:
 
-    model, objective_trace = _scan(
-        model,
+        state = step(state, data)
+
+        return (state, state.objective)
+
+    state, objective_trace = _scan(
+        state,
         num_iters=num_iters,
         step=_step,
         progress=progress,
     )
 
-    final_value = objective(model, data)
-
     return Fit(
-        model=model,
+        state=state,
         objective_trace=jnp.concatenate(
             [
+                initial_objective[None],
                 objective_trace,
-                final_value[None],
             ]
         ),
     )
 
 
 def fit_many(
-    models: tuple[ModelT, ...],
+    states: tuple[StateT, ...],
     data: DataT,
     *,
     num_iters: int,
-    step: FitStep[ModelT, DataT],
-    objective: Objective[ModelT, DataT],
-    progress: Progress[ModelT] = False,
-) -> FitCollection[ModelT]:
-    """Fit multiple models independently."""
+    step: FitStep[StateT, DataT],
+    progress: Progress[StateT] = False,
+) -> FitCollection[StateT]:
+    """Fit multiple states independently."""
 
-    stacked_models = stack_models(models)
+    stacked_states = stack_states(
+        states,
+    )
+
+    initial_objectives = jax.vmap(lambda state: state.objective)(stacked_states)
 
     def _step(
-        models: ModelT,
+        states: StateT,
         _: jax.Array,
-    ) -> tuple[ModelT, jax.Array]:
-        return jax.vmap(lambda model: step(model, data))(models)
+    ) -> tuple[StateT, jax.Array]:
 
-    stacked_models, objective_traces = _scan(
-        stacked_models,
+        states = jax.vmap(
+            lambda state: step(
+                state,
+                data,
+            )
+        )(states)
+
+        objectives = jax.vmap(lambda state: state.objective)(states)
+
+        return (
+            states,
+            objectives,
+        )
+
+    stacked_states, objective_traces = _scan(
+        stacked_states,
         num_iters=num_iters,
         step=_step,
         progress=progress,
     )
 
-    final_values = jax.vmap(lambda model: objective(model, data))(stacked_models)
-
     objective_traces = jnp.concatenate(
         [
+            initial_objectives[None, :],
             objective_traces,
-            final_values[None, :],
         ],
         axis=0,
     )
 
     return FitCollection(
-        models=unstack_models(stacked_models),
+        states=unstack_states(stacked_states),
         objective_traces=objective_traces.T,
     )

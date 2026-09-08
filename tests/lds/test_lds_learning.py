@@ -2,11 +2,15 @@ import jax
 import numpy as np
 
 from tests.lds.lds_helpers import make_model, make_observations
+from xxm.lds.inference import infer_exact
 from xxm.lds.learning import em_step, fit_em
 
 
 def test_em_step_returns_a_model_and_finite_objective():
-    model, objective = em_step(make_model(), make_observations())
+    inferred = infer_exact(make_model(), make_observations())
+    result = em_step(inferred, make_observations())
+    model = result.model
+    objective = result.objective
 
     assert model.initial.dist.mean.shape == (2,)
     assert model.dynamics.dist.affine.coefficients.shape == (2, 2)
@@ -17,14 +21,15 @@ def test_em_step_is_jittable():
     model = make_model()
     observations = make_observations()
 
-    eager_model, eager_objective = em_step(model, observations)
-    jitted_model, jitted_objective = jax.jit(em_step)(model, observations)
+    inferred = infer_exact(model, observations)
+    eager = em_step(inferred, observations)
+    jitted = jax.jit(em_step)(inferred, observations)
 
     np.testing.assert_allclose(
-        jitted_model.dynamics.dist.affine.coefficients,
-        eager_model.dynamics.dist.affine.coefficients,
+        jitted.model.dynamics.dist.affine.coefficients,
+        eager.model.dynamics.dist.affine.coefficients,
     )
-    np.testing.assert_allclose(jitted_objective, eager_objective)
+    np.testing.assert_allclose(jitted.objective, eager.objective)
 
 
 def test_fit_em_includes_the_final_objective():

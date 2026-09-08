@@ -5,7 +5,7 @@ from jax import numpy as jnp
 
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
-from xxm.core.optim.loop import unstack_models
+from xxm.core.optim.loop import unstack_states
 
 from .core import Model
 
@@ -82,7 +82,7 @@ def init_pca_gaussian_many(
         )
     )(covariance_floors)
 
-    return unstack_models(stacked)
+    return unstack_states(stacked)
 
 
 def init_pca_poisson(
@@ -129,4 +129,4 @@ def init_pca_poisson_many(
         )
     )(covariance_floors)
 
-    return unstack_models(stacked)
+    return unstack_states(stacked)

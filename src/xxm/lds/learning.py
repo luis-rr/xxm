@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-import typing
-
 import jax
 
+from xxm.core.chains.gaussian import (
+    GaussianChainMarginals as Posterior,
+)
 from xxm.core.emissions.continuous import LaplaceEmissionsT, QuadraticEmissionsT
+from xxm.core.inference import Inferred
 from xxm.core.optim.loop import Fit, FitCollection
 from xxm.core.optim.loop import fit_many as _fit_many
 from xxm.core.optim.loop import fit_one as _fit_one
@@ -15,53 +17,54 @@ from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
 from .core import Model
 from .inference import infer_exact, infer_laplace
 
-ModelT = typing.TypeVar('ModelT')
-PosteriorT = typing.TypeVar('PosteriorT')
-
-
-InferenceFn = typing.Callable[[ModelT, jax.Array], PosteriorT]
-
 
 def em_step(
-    model: Model[QuadraticEmissionsT],
+    inferred: Inferred[
+        Model[QuadraticEmissionsT],
+        Posterior,
+    ],
     observations: jax.Array,
-) -> tuple[Model[QuadraticEmissionsT], jax.Array]:
-    """Perform one exact E-M update and return its marginal log likelihood."""
+) -> Inferred[
+    Model[QuadraticEmissionsT],
+    Posterior,
+]:
+    """Perform one exact EM update."""
 
-    posterior, log_normalizer = infer_exact(
+    model = inferred.model.fit_params(
+        observations,
+        inferred.posterior,
+    )
+
+    return infer_exact(
         model,
         observations,
     )
-
-    new_model = model.fit_params(
-        observations,
-        posterior,
-    )
-
-    return new_model, log_normalizer
 
 
 def laplace_em_step(
-    model: Model[LaplaceEmissionsT],
+    inferred: Inferred[
+        Model[LaplaceEmissionsT],
+        Posterior,
+    ],
     observations: jax.Array,
     params: OptimParams,
-) -> tuple[Model[LaplaceEmissionsT], jax.Array]:
-    """
-    Perform one Laplace EM update and return the approximate marginal log likelihood.
-    """
+) -> Inferred[
+    Model[LaplaceEmissionsT],
+    Posterior,
+]:
+    """Perform one warm-started Laplace EM update."""
 
-    posterior, log_normalizer = infer_laplace(
+    model = inferred.model.fit_params(
+        observations,
+        inferred.posterior,
+    )
+
+    return infer_laplace(
         model,
         observations,
+        initial_latents=inferred.posterior.means,
         params=params,
     )
-
-    new_model = model.fit_params(
-        observations,
-        posterior,
-    )
-
-    return new_model, log_normalizer
 
 
 def fit_em(
@@ -69,33 +72,57 @@ def fit_em(
     observations: jax.Array,
     num_iters: int,
     progress: bool | str = 'EM',
-) -> Fit[Model[QuadraticEmissionsT]]:
+) -> Fit[
+    Inferred[
+        Model[QuadraticEmissionsT],
+        Posterior,
+    ]
+]:
     """Fit a quadratic-emission LDS by exact expectation-maximization."""
 
-    return _fit_one(
+    inferred = infer_exact(
         model,
+        observations,
+    )
+
+    return _fit_one(
+        inferred,
         observations,
         num_iters=num_iters,
         step=em_step,
-        objective=lambda m, o: infer_exact(m, o)[1],
         progress=progress,
     )
 
 
 def fit_em_many(
-    models: tuple[Model[QuadraticEmissionsT], ...],
+    models: tuple[
+        Model[QuadraticEmissionsT],
+        ...,
+    ],
     observations: jax.Array,
     num_iters: int,
     progress: bool | str = 'Multi-EM',
-) -> FitCollection[Model[QuadraticEmissionsT]]:
+) -> FitCollection[
+    Inferred[
+        Model[QuadraticEmissionsT],
+        Posterior,
+    ]
+]:
     """Fit multiple quadratic-emission LDS initializations by exact EM."""
 
+    inferred = tuple(
+        infer_exact(
+            model,
+            observations,
+        )
+        for model in models
+    )
+
     return _fit_many(
-        models,
+        inferred,
         observations,
         num_iters=num_iters,
         step=em_step,
-        objective=lambda m, o: infer_exact(m, o)[1],
         progress=progress,
     )
 
@@ -106,46 +133,71 @@ def fit_laplace_em(
     num_iters: int,
     progress: bool | str = 'Laplace EM',
     laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
-) -> Fit[Model[LaplaceEmissionsT]]:
-    """Fit a nonconjugate LDS using Laplace-approximated expectation-maximization."""
+) -> Fit[
+    Inferred[
+        Model[LaplaceEmissionsT],
+        Posterior,
+    ]
+]:
+    """Fit a nonconjugate LDS with Laplace-approximated EM."""
 
     laplace_params = laplace_params or OptimParams()
 
-    return _fit_one(
+    inferred = infer_laplace(
         model,
         observations,
+        params=laplace_params,
+    )
+
+    return _fit_one(
+        inferred,
+        observations,
         num_iters=num_iters,
-        step=lambda m, o: laplace_em_step(m, o, params=laplace_params),
-        objective=lambda m, o: infer_laplace(
-            model=m,
-            observations=o,
+        step=lambda inferred, observations: laplace_em_step(
+            inferred,
+            observations,
             params=laplace_params,
-        )[1],
+        ),
         progress=progress,
     )
 
 
 def fit_laplace_em_many(
-    models: tuple[Model[LaplaceEmissionsT], ...],
+    models: tuple[
+        Model[LaplaceEmissionsT],
+        ...,
+    ],
     observations: jax.Array,
     num_iters: int,
     laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
     progress: bool | str = 'Multi-Laplace EM',
-) -> FitCollection[Model[LaplaceEmissionsT]]:
-    """
-    Fit multiple nonconjugate LDS initializations with Laplace EM.
-    """
+) -> FitCollection[
+    Inferred[
+        Model[LaplaceEmissionsT],
+        Posterior,
+    ]
+]:
+    """Fit multiple nonconjugate LDS initializations with Laplace EM."""
+
     laplace_params = laplace_params or OptimParams()
 
+    inferred = tuple(
+        infer_laplace(
+            model,
+            observations,
+            params=laplace_params,
+        )
+        for model in models
+    )
+
     return _fit_many(
-        models,
+        inferred,
         observations,
         num_iters=num_iters,
-        step=lambda m, o: laplace_em_step(m, o, params=laplace_params),
-        objective=lambda m, o: infer_laplace(
-            model=m,
-            observations=o,
+        step=lambda inferred, observations: laplace_em_step(
+            inferred,
+            observations,
             params=laplace_params,
-        )[1],
+        ),
         progress=progress,
     )

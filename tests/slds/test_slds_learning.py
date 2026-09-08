@@ -7,6 +7,7 @@ from xxm.core.chains.gaussian import GaussianChainMarginals
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.emissions.continuous import GaussianEmissions
+from xxm.core.inference import Inferred
 from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
@@ -157,28 +158,21 @@ def test_model_fit_params_keeps_latent_initial_fixed():
 
 def test_variational_em_step_returns_finite_objective():
     model = _model()
-    observations = jnp.array(
-        [
-            [0.0],
-            [0.5],
-            [1.0],
-            [0.2],
-        ]
-    )
+    observations = jnp.array([[0.0], [1.0], [3.0]])
 
-    fitted, objective = variational_em_step(
-        model,
+    inferred = variational_em_step(
+        Inferred(model=model, posterior=_posterior(), objective=jnp.array(0.0)),
         observations,
         num_inference_iters=2,
     )
 
-    assert np.isfinite(objective)
+    assert np.isfinite(inferred.objective)
 
     np.testing.assert_allclose(
-        fitted.latent_initial.dist.mean,
+        inferred.model.latent_initial.dist.mean,
         model.latent_initial.dist.mean,
     )
     np.testing.assert_allclose(
-        fitted.latent_initial.dist.covariance,
+        inferred.model.latent_initial.dist.covariance,
         model.latent_initial.dist.covariance,
     )
