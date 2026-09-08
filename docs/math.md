@@ -18,7 +18,7 @@ $$
 \text{parameter fitting}.
 $$
 
-When exact chain structure breaks, `xxm` introduces only the additional machinery needed to restore a tractable approximation:
+When exact Gaussian structure breaks, `xxm` introduces only the additional machinery needed to restore a tractable local approximation:
 
 $$
 \text{Newton optimization}
@@ -1883,7 +1883,7 @@ $$
 
 together with the local marginals needed for inference and learning, without solving the corresponding unstructured global problem.
 
-![Local chain factors and the corresponding block-tridiagonal precision structure of a Gaussian chain.](img/chain.png)
+![A chain of variables with unary potentials and nearest-neighbor coupling.](img/chain.png)
 
 ### 1.5.1 Discrete chains
 
@@ -3516,7 +3516,7 @@ J^\star
 -\nabla^2\Psi(u^\star)
 $$
 
-be the negative Hessian of the complete log target.
+be the negative Hessian of the complete log target. Assume $u^\star$ is a local maximum and that $J^\star$ is positive definite, so the quadratic approximation defines a normalized Gaussian.
 
 The Laplace approximation replaces the target locally by
 
@@ -4047,7 +4047,7 @@ Here $A_{k,\ell}$ is an autoregressive coefficient for state $k$ and lag $\ell$.
 
 ![Graphical model for an autoregressive hidden Markov model with one displayed observation lag.](img/arhmm_graphical_model.png)
 
-The diagram shows the first-order case for clarity. For $L>1$, each modeled observation also depends on the additional preceding observations included in its lagged predictor.
+The diagram shows the first-order case for clarity. For $L>1$, each modeled observation also depends on the additional preceding observations included in its lagged predictor. The fixed prehistory used for finite-sequence inference is omitted from the diagram.
 
 ### Fixed observation history
 
@@ -4509,6 +4509,31 @@ $$
 $$
 
 and is not quadratic.
+
+Defining
+
+$$
+\lambda_t=\exp(Cx_t+d),
+$$
+
+the gradient of the log likelihood is
+
+$$
+\nabla_{x_t}\log p(y_t\mid x_t)
+=
+C^\top(y_t-\lambda_t),
+$$
+
+and the negative Hessian is
+
+$$
+-\nabla^2_{x_t}\log p(y_t\mid x_t)
+=
+C^\top\operatorname{diag}(\lambda_t)C
+\succeq 0.
+$$
+
+This local curvature is exactly what Newton's method and the Laplace approximation turn into a unary Gaussian potential over $x_t$.
 
 Therefore the posterior
 
