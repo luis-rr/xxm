@@ -417,7 +417,7 @@ def plot_fit_progress_many(fits, highlight_idx=None, name='Log Likelihood', ax=N
     ax.plot(np.asarray(fits.objective_traces).T)
 
     if highlight_idx is not None:
-        _, objective = fits.get(highlight_idx)
+        objective = fits.get(highlight_idx).objective_trace
         ax.plot(np.asarray(objective), color='k')
 
     ax.set(
