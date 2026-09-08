@@ -6,6 +6,9 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core.affine import Affine
+from xxm.core.dists.gaussian import Gaussian
+from xxm.core.optim.gaussian import from_moment_match as _from_moment_match
+from xxm.core.optim.gaussian import from_samples as _from_samples
 
 
 def match_states(costs: jax.Array) -> jax.Array:
@@ -128,3 +131,34 @@ def align_affine(
         coefficients=coefficients,
         bias=bias,
     )
+
+
+def zscore_gaussian(gaussian: Gaussian) -> Affine:
+    """Return an affine map that z-scores a Gaussian distribution.
+
+    For a batched Gaussian, first moment-match the batch into a single
+    distribution. The returned map centers each variable at zero and scales
+    it to unit marginal variance.
+    """
+    if len(gaussian.batch_shape) > 1:
+        raise ValueError(
+            'gaussian must be unbatched or have exactly one batch dimension'
+        )
+
+    if gaussian.batch_shape:
+        gaussian = _from_moment_match(gaussian)
+
+    scale = jnp.sqrt(gaussian.variance)
+
+    coefficients = jnp.diag(1.0 / scale)
+    bias = -gaussian.mean / scale
+
+    return Affine(
+        coefficients=coefficients,
+        bias=bias,
+    )
+
+
+def zscore_samples(data: jax.Array) -> Affine:
+    """Return an affine map that z-scores samples along the first axis."""
+    return zscore_gaussian(_from_samples(data))
