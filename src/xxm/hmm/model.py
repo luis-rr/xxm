@@ -33,6 +33,24 @@ from .init import (
 )
 from .learning import fit_em, fit_em_many
 
+_infer_exact_jit = jax.jit(infer_exact)
+
+_fit_em_jit = jax.jit(
+    fit_em,
+    static_argnames=(
+        'num_iters',
+        'progress',
+    ),
+)
+
+_fit_em_many_jit = jax.jit(
+    fit_em_many,
+    static_argnames=(
+        'num_iters',
+        'progress',
+    ),
+)
+
 
 def _categorical_components_from_params(
     initial_probs: jax.Array,
@@ -106,7 +124,7 @@ class GaussianHMM:
         emission_means: jax.Array,
         emission_covariances: jax.Array,
     ) -> typing.Self:
-        r"""Construct a Gaussian HMM from its initial, transition, and emission parameters."""
+        r"""Construct a Gaussian HMM from its parameters."""
         initial, transitions = _categorical_components_from_params(
             initial_probs,
             transition_probs,
@@ -156,7 +174,7 @@ class GaussianHMM:
         observations: jax.Array,
     ) -> tuple[Posterior, jax.Array]:
         """Compute the exact posterior over states and the observation log likelihood."""
-        return infer_exact(
+        return _infer_exact_jit(
             self._model,
             observations,
         )
@@ -169,7 +187,7 @@ class GaussianHMM:
         progress: bool | str = 'EM',
     ) -> Fit[typing.Self]:
         """Fit model parameters by expectation-maximization."""
-        fit = fit_em(
+        fit = _fit_em_jit(
             self._model,
             observations,
             num_iters=num_iters,
@@ -191,7 +209,7 @@ class GaussianHMM:
         progress: bool | str = 'Multi-EM',
     ) -> FitCollection[typing.Self]:
         """Fit multiple HMM initializations to the same observations by EM."""
-        fit = fit_em_many(
+        fit = _fit_em_many_jit(
             tuple(model._model for model in models),
             observations,
             num_iters=num_iters,
@@ -783,7 +801,7 @@ class PoissonARHMM:
         For an input sequence of length ``T``, the posterior has
         ``T - num_lags`` latent steps.
         """
-        return infer_exact(
+        return _infer_exact_jit(
             self.model,
             observations,
         )
@@ -796,7 +814,7 @@ class PoissonARHMM:
         progress: bool | str = 'EM',
     ) -> Fit[typing.Self]:
         """Fit the conditional AR-HMM with expectation maximization."""
-        fit = fit_em(
+        fit = _fit_em_jit(
             self.model,
             observations,
             num_iters=num_iters,
@@ -818,7 +836,7 @@ class PoissonARHMM:
         progress: bool | str = 'Multi-EM',
     ) -> FitCollection[typing.Self]:
         """Fit multiple AR-HMM initializations to the same sequence."""
-        fit = fit_em_many(
+        fit = _fit_em_many_jit(
             tuple(model.model for model in models),
             observations,
             num_iters=num_iters,

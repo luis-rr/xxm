@@ -40,6 +40,42 @@ from .learning import (
     fit_laplace_em_many,
 )
 
+_infer_exact_jit = jax.jit(infer_exact)
+
+_infer_laplace_jit = jax.jit(infer_laplace)
+
+_fit_em_jit = jax.jit(
+    fit_em,
+    static_argnames=(
+        'num_iters',
+        'progress',
+    ),
+)
+
+_fit_em_many_jit = jax.jit(
+    fit_em_many,
+    static_argnames=(
+        'num_iters',
+        'progress',
+    ),
+)
+
+_fit_laplace_em_jit = jax.jit(
+    fit_laplace_em,
+    static_argnames=(
+        'num_iters',
+        'progress',
+    ),
+)
+
+_fit_laplace_em_many_jit = jax.jit(
+    fit_laplace_em_many,
+    static_argnames=(
+        'num_iters',
+        'progress',
+    ),
+)
+
 
 def _latent_components_from_params(
     initial_mean: jax.Array,
@@ -180,7 +216,7 @@ class GaussianLDS:
 
     def infer(self, observations: jax.Array) -> tuple[Posterior, jax.Array]:
         """Compute the exact Gaussian posterior and observation log likelihood."""
-        return infer_exact(
+        return _infer_exact_jit(
             self._model,
             observations,
         )
@@ -193,7 +229,7 @@ class GaussianLDS:
         progress: bool | str = 'EM',
     ) -> Fit[typing.Self]:
         """Fit model parameters by expectation-maximization."""
-        fit = fit_em(
+        fit = _fit_em_jit(
             self._model,
             observations,
             num_iters=num_iters,
@@ -215,7 +251,7 @@ class GaussianLDS:
         progress: bool | str = 'Multi-EM',
     ) -> FitCollection[typing.Self]:
         """Fit multiple LDS initializations to the same observations by EM."""
-        fit = fit_em_many(
+        fit = _fit_em_many_jit(
             tuple(model._model for model in models),
             observations,
             num_iters=num_iters,
@@ -361,7 +397,7 @@ class PoissonLDS:
         """
         Compute the Laplace posterior and approximate observation log likelihood.
         """
-        return infer_laplace(
+        return _infer_laplace_jit(
             self._model,
             observations,
             initial_latents=initial_latents,
@@ -377,7 +413,7 @@ class PoissonLDS:
         laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
     ) -> Fit[typing.Self]:
         """Fit model parameters with Laplace-approximated expectation-maximization."""
-        fit = fit_laplace_em(
+        fit = _fit_laplace_em_jit(
             self._model,
             observations,
             num_iters=num_iters,
@@ -401,7 +437,7 @@ class PoissonLDS:
         laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
     ) -> FitCollection[typing.Self]:
         """Fit multiple Poisson LDS initializations with Laplace EM."""
-        fit = fit_laplace_em_many(
+        fit = _fit_laplace_em_many_jit(
             tuple(model._model for model in models),
             observations,
             num_iters=num_iters,

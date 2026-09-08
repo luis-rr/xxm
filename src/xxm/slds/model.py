@@ -40,6 +40,52 @@ from .learning import (
     fit_variational_em_many,
 )
 
+_infer_variational_jit = jax.jit(
+    infer_variational,
+    static_argnames=('num_iters',),
+)
+
+_infer_laplace_jit = jax.jit(
+    infer_laplace,
+    static_argnames=('num_iters',),
+)
+
+_fit_variational_em_jit = jax.jit(
+    fit_variational_em,
+    static_argnames=(
+        'num_iters',
+        'num_inference_iters',
+        'progress',
+    ),
+)
+
+_fit_variational_em_many_jit = jax.jit(
+    fit_variational_em_many,
+    static_argnames=(
+        'num_iters',
+        'num_inference_iters',
+        'progress',
+    ),
+)
+
+_fit_laplace_em_jit = jax.jit(
+    fit_laplace_em,
+    static_argnames=(
+        'num_iters',
+        'num_inference_iters',
+        'progress',
+    ),
+)
+
+_fit_laplace_em_many_jit = jax.jit(
+    fit_laplace_em_many,
+    static_argnames=(
+        'num_iters',
+        'num_inference_iters',
+        'progress',
+    ),
+)
+
 
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, eq=False)
@@ -241,7 +287,7 @@ class GaussianSLDS:
         Compute a structured mean-field posterior with conjugate updates for $q(x)$,
         returning its ELBO.
         """
-        return infer_variational(
+        return _infer_variational_jit(
             self._model,
             observations,
             num_iters=num_iters,
@@ -256,7 +302,7 @@ class GaussianSLDS:
         progress: bool | str = 'Variational EM',
     ) -> Fit[typing.Self]:
         """Fit model parameters with variational expectation-maximization."""
-        fit = fit_variational_em(
+        fit = _fit_variational_em_jit(
             self._model,
             observations,
             num_iters=num_iters,
@@ -280,7 +326,7 @@ class GaussianSLDS:
         progress: bool | str = 'Multi-Variational EM',
     ) -> FitCollection[typing.Self]:
         """Fit multiple Gaussian SLDS initializations with variational EM."""
-        fit = fit_variational_em_many(
+        fit = _fit_variational_em_many_jit(
             tuple(model._model for model in models),
             observations,
             num_iters=num_iters,
@@ -494,7 +540,7 @@ class PoissonSLDS:
         Compute a structured mean-field posterior with Laplace updates for $q(x)$,
         returning its ELBO.
         """
-        return infer_laplace(
+        return _infer_laplace_jit(
             self._model,
             observations,
             num_iters=num_iters,
@@ -512,7 +558,7 @@ class PoissonSLDS:
         progress: bool | str = 'Laplace EM',
     ) -> Fit[typing.Self]:
         """Fit model parameters with Laplace-approximated expectation-maximization."""
-        fit = fit_laplace_em(
+        fit = _fit_laplace_em_jit(
             self._model,
             observations,
             num_iters=num_iters,
@@ -538,7 +584,7 @@ class PoissonSLDS:
         progress: bool | str = 'Multi-Laplace EM',
     ) -> FitCollection[typing.Self]:
         """Fit multiple Poisson SLDS initializations with Laplace EM."""
-        fit = fit_laplace_em_many(
+        fit = _fit_laplace_em_many_jit(
             tuple(model._model for model in models),
             observations,
             num_iters=num_iters,
