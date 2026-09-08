@@ -2900,12 +2900,12 @@ $$
 c
 +
 \frac12
-\su\mu_t h_t^\top \mu_t
+\sum_{t=0}^{T-1} h_t^\top\mu_t
 +
 \frac{TD}{2}\log(2\pi)
 -
 \frac12
-\su\mu_t\log\det\bar J_t.
+\sum_{t=0}^{T-1}\log\det\bar J_t.
 }
 $$
 
@@ -2987,7 +2987,7 @@ H[q]
 \Bigg[
 &TD(1+\log 2\pi)
 +
-\log\det S_0
+\log\det\Sigma_0
 \\
 &+
 \sum_{t=0}^{T-2}
