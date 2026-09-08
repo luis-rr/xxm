@@ -381,6 +381,9 @@ def _forward_pass(
             first_log_normalizer[None],
         )
 
+    # TODO: Explore parallel-prefix inference with jax.lax.associative_scan
+    # for long sequences and accelerators before considering it as an
+    # alternative to the current sequential scan.
     (
         _,
         (
