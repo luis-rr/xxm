@@ -40,8 +40,8 @@ Throughout the model-level discussion,
 
 The main dimensions are
 
-| Symbol           | Meaning                             |
-| ---------------- | ----------------------------------- |
+| Symbol             | Meaning                             |
+| ------------------ | ----------------------------------- |
 | $t=0,\ldots,T-1$ | time index                          |
 | $T$              | number of time steps                |
 | $K$              | number of discrete latent states    |
@@ -280,6 +280,8 @@ $$
 
 Changing the input origin therefore leaves the coefficients unchanged and modifies only the bias.
 
+
+
 ## 1.2 Distributions and conditional distributions
 
 ### 1.2.1 Categorical distributions
@@ -305,6 +307,7 @@ p(u=k)=\rho_k.
 $$
 
 Categorical distributions will later describe initial discrete states and rows of discrete transition matrices. At the core level, however, they are simply normalized finite distributions.
+
 
 ### 1.2.2 Gaussian distributions
 
@@ -398,6 +401,7 @@ W\Sigma W^\top.
 $$
 
 This closure under affine transformations is one of the central reasons Gaussian models remain analytically tractable.
+
 
 ### 1.2.3 Linear-Gaussian conditionals
 
@@ -519,6 +523,7 @@ $$
 
 Thus affine output transformations preserve the linear-Gaussian family.
 
+
 ### 1.2.4 Paired Gaussian variables
 
 For jointly Gaussian variables $u$ and $v$, write
@@ -569,6 +574,7 @@ $$
 $$
 
 Joint Gaussian moments are the natural quantities for fitting a linear-Gaussian relationship between two uncertain variables.
+
 
 ### 1.2.5 Poisson distributions
 
@@ -646,6 +652,7 @@ $$
 =
 \lambda_i.
 $$
+
 
 ### 1.2.6 Linear-Poisson conditionals
 
@@ -763,6 +770,7 @@ $$
 
 Thus an expected Poisson log likelihood can be evaluated exactly from the mean and covariance of a Gaussian input even though the posterior induced by a Poisson likelihood is not itself Gaussian.
 
+
 ## 1.3 Moments and parameter fitting
 
 Inference and learning repeatedly pass information through moments.
@@ -819,7 +827,7 @@ More generally, let normalized nonnegative weights satisfy
 $$
 \omega_n\geq0,
 \qquad
-\sum_n\omega_n=1.
+\sum_n \omega_n=1.
 $$
 
 Then
@@ -827,7 +835,7 @@ Then
 $$
 \mu
 =
-\sum_n\omega_nu_n
+\sum_n \omega_nu_n
 $$
 
 and
@@ -841,6 +849,7 @@ $$
 $$
 
 This weighted form is the one that later appears when posterior state probabilities act as soft assignments.
+
 
 ### 1.3.2 Moment matching uncertain Gaussian variables
 
@@ -970,6 +979,7 @@ This paired representation is sufficient to fit a linear-Gaussian conditional.
 
 The same construction also applies when one side is uncertain. If each input is represented by a Gaussian marginal while the corresponding output is deterministic, the input covariance contributes to the paired second moments even though there is no within-sample uncertainty in the output.
 
+
 ### 1.3.4 Linear-Gaussian fitting from joint moments
 
 Suppose $u$ and $v$ have joint Gaussian moments
@@ -1025,6 +1035,7 @@ This decomposition is used repeatedly in continuous-state parameter updates.
 
 When the input covariance is poorly conditioned, the regression solve may be regularized by replacing it with a ridge-regularized system. This changes the fitted conditional from the exact Gaussian conditional to a regularized approximation, while preserving the same moment-based interpretation.
 
+
 ### 1.3.5 Poisson fitting from samples
 
 For a scalar Poisson variable,
@@ -1070,6 +1081,7 @@ $$
 $$
 
 This gives a closed-form fit for an unconditional Poisson distribution.
+
 
 ### 1.3.6 Linear-Poisson fitting
 
@@ -1153,6 +1165,7 @@ The resulting objective is differentiable but still has no Gaussian-style closed
 This is the first example of an important distinction that will recur later:
 
 > An expectation may be available analytically even when optimization or posterior inference is not.
+
 
 ## 1.4 Potentials
 
@@ -1239,6 +1252,7 @@ $$
 $$
 
 These potentials will later allow an observation likelihood or an expected switching factor to modify a discrete Markov chain without changing its chain structure.
+
 
 ### 1.4.2 Gaussian canonical potentials
 
@@ -1335,6 +1349,7 @@ The canonical parameters simply add.
 
 This is the basic algebra underlying Gaussian-chain construction.
 
+
 ### 1.4.3 From a Gaussian distribution to a potential
 
 Consider
@@ -1380,6 +1395,7 @@ $$
 A normalized Gaussian distribution is therefore a particular Gaussian potential whose normalizing constant is one.
 
 The distinction is still useful: later inference combines normalized Gaussian model factors with unnormalized likelihood or expected factors, after which the resulting object is no longer normalized until its new $Z$ is computed.
+
 
 ### 1.4.4 Gaussian likelihood as a potential over its input
 
@@ -1464,6 +1480,7 @@ c
 $$
 
 This result will later make Gaussian LDS inference immediate: every Gaussian observation contributes a unary Gaussian potential over the corresponding latent state.
+
 
 ### 1.4.5 Gaussian pair potentials
 
@@ -1578,6 +1595,7 @@ $$
 
 This conversion is what allows linear-Gaussian dynamics to become local factors of a Gaussian chain.
 
+
 ### 1.4.6 Weighted sums of Gaussian log potentials
 
 Suppose there is a family of Gaussian potentials
@@ -1625,6 +1643,7 @@ c
 $$
 
 This operation will later be central to switching models. Averaging the **log factors** associated with several possible discrete states produces another Gaussian potential, so expectations over a discrete posterior can preserve Gaussian-chain structure.
+
 
 ### 1.4.7 Expected Gaussian log potentials
 
@@ -1756,6 +1775,7 @@ c.
 $$
 
 This gives the other half of the switching-model interaction: continuous posterior moments can turn a family of state-dependent Gaussian factors into scalar state potentials.
+
 
 ### 1.4.8 Local quadratic potentials
 
@@ -2311,6 +2331,7 @@ $$
 
 so the same quantity becomes the model's marginal likelihood.
 
+
 ### 1.5.2 Gaussian chains
 
 The continuous analogue replaces a finite set of trajectories with a Gaussian distribution over a sequence of vectors.
@@ -2356,7 +2377,7 @@ q(u)
 \mathcal N(J^{-1}h,J^{-1}).
 $$
 
-In principle, one could construct the full $TD\times TD$ matrix $J$, factorize it as a dense matrix, and recover every desired quantity.
+In principle, one could therefore construct the full $TD\times TD$ matrix $J$, factorize it as a dense matrix, and recover every desired quantity.
 
 That ignores the temporal structure.
 
@@ -2442,6 +2463,7 @@ without replacing the chain by an unstructured dense Gaussian calculation.
 
 Sequential block elimination does exactly this. For fixed block dimension $D$, it requires a sequence of $D\times D$ factorizations, giving the characteristic $O(TD^3)$ scaling rather than a generic dense factorization of a $TD$-dimensional system.
 
+
 #### Eliminating the first variable
 
 Consider the terms involving $u_0$ and $u_1$:
@@ -2480,17 +2502,13 @@ $$
 Define
 
 $$
-\bar\Sigma_0=J_0^{-1},
-$$
-
-$$
-\bar m_0=\bar\Sigma_0h_0,
+\bar m_0=J_0^{-1}h_0
 $$
 
 and
 
 $$
-F_0=-\bar\Sigma_0B_0^\top.
+F_0=-J_0^{-1}B_0^\top.
 $$
 
 Then
@@ -2521,7 +2539,7 @@ $$
 =
 J_1
 -
-B_0\bar\Sigma_0B_0^\top,
+B_0J_0^{-1}B_0^\top,
 }
 $$
 
@@ -2533,11 +2551,12 @@ $$
 =
 h_1
 -
-B_0\bar m_0.
+B_0J_0^{-1}h_0.
 }
 $$
 
 After elimination, the remaining variables still form a Gaussian chain. The operation can therefore be repeated.
+
 
 #### Forward block elimination
 
@@ -2613,7 +2632,7 @@ $$
 
 This is block Gaussian elimination specialized to a tridiagonal system.
 
-The implementation uses Cholesky factors of the positive-definite effective precision blocks rather than forming their inverses directly. The inverse notation above is mathematical shorthand for those linear solves.
+The implementation uses Cholesky factors of the positive-definite effective precision blocks rather than forming their inverses directly. The inverse notation above is the mathematical shorthand for those linear solves.
 
 After the final elimination, the terminal marginal is
 
@@ -2654,6 +2673,7 @@ $$
 
 This factorization is sufficient to reconstruct all local posterior moments.
 
+
 #### Backward reconstruction of means
 
 The conditional mean found during elimination is
@@ -2669,7 +2689,13 @@ Taking its expectation gives
 $$
 \mu_t
 =
-\bar m_t+F_t\mu_{t+1}.
+\bar m_t+F_t\mu_{t+1},
+$$
+
+where
+
+$$
+\mu_t=\mathbb E_q[u_t].
 $$
 
 Starting from the terminal mean and moving backward,
@@ -2684,9 +2710,10 @@ $$
 
 Thus the full trajectory mean is recovered without solving a separate dense linear system.
 
+
 #### Backward reconstruction of covariances
 
-Write
+From
 
 $$
 u_t
@@ -2702,9 +2729,23 @@ $$
 \mathcal N(0,\bar\Sigma_t)
 $$
 
-is conditionally independent of $u_{t+1}$.
+is conditionally independent of $u_{t+1}$, the law of total covariance gives
 
-The law of total covariance gives
+$$
+\Sigma_t
+=
+\bar\Sigma_t
++
+F_t\Sigma_{t+1}F_t^\top,
+$$
+
+where
+
+$$
+\Sigma_t=\operatorname{Cov}_q(u_t).
+$$
+
+Therefore
 
 $$
 \boxed{
@@ -2734,7 +2775,7 @@ F_t\Sigma_{t+1}.
 }
 $$
 
-The opposite orientation is its transpose,
+The transpose gives the opposite orientation,
 
 $$
 \operatorname{Cov}_q(u_{t+1},u_t)
@@ -2743,6 +2784,7 @@ $$
 $$
 
 These local covariances are sufficient for the fitting and expected-log-potential calculations used later.
+
 
 #### Raw second and cross moments
 
@@ -2762,15 +2804,14 @@ $$
 \boxed{
 \mathbb E_q[u_tu_{t+1}^\top]
 =
-\Sigma_{t,t+1}
-+
-\mu_t\mu_{t+1}^\top.
+\Sigma_{t,t+1}+\mu_t\mu_{t+1}^\top.
 }
 $$
 
 Again, orientation matters. The expression above places $u_t$ on the left and $u_{t+1}$ on the right.
 
 These are precisely the moments needed to evaluate expected Gaussian unary and pair potentials and to fit linear-Gaussian dynamics.
+
 
 #### Log normalizer
 
@@ -2809,7 +2850,7 @@ h^\top J^{-1}h
 =
 h^\top\mu
 =
-\sum_{t=0}^{T-1}h_t^\top\mu_t.
+\sum_{t=0}^{T-1}h_t^\top \mu_t.
 $$
 
 The block elimination also factorizes the determinant. If
@@ -2859,16 +2900,17 @@ $$
 c
 +
 \frac12
-\sum_t h_t^\top\mu_t
+\su\mu_t h_t^\top \mu_t
 +
 \frac{TD}{2}\log(2\pi)
 -
 \frac12
-\sum_t\log\det\bar J_t.
+\su\mu_t\log\det\bar J_t.
 }
 $$
 
 As in the discrete case, this quantity is a log normalizer for the generic Gaussian chain. It becomes a marginal log likelihood only when the surrounding model gives it that interpretation.
+
 
 #### Entropy
 
@@ -2897,10 +2939,22 @@ H[q(u_0)]
 H[q(u_{t+1}\mid u_t)].
 $$
 
+Let
+
+$$
+\Sigma_t=\operatorname{Cov}(u_t)
+$$
+
+and
+
+$$
+\Sigma_{t,t+1}=\operatorname{Cov}(u_t,u_{t+1}).
+$$
+
 The forward conditional covariance is
 
 $$
-\Sigma_{t+1\mid t}
+S_{t+1\mid t}
 =
 \Sigma_{t+1}
 -
@@ -2933,7 +2987,7 @@ H[q]
 \Bigg[
 &TD(1+\log 2\pi)
 +
-\log\det\Sigma_0
+\log\det S_0
 \\
 &+
 \sum_{t=0}^{T-2}
@@ -2941,9 +2995,7 @@ H[q]
 \left(
 \Sigma_{t+1}
 -
-\Sigma_{t,t+1}^\top
-\Sigma_t^{-1}
-\Sigma_{t,t+1}
+\Sigma_{t,t+1}^\top \Sigma_t^{-1}\Sigma_{t,t+1}
 \right)
 \Bigg].
 \end{aligned}
@@ -2951,6 +3003,7 @@ H[q]
 $$
 
 Like the discrete-chain entropy, this requires only local marginal information rather than the full joint covariance matrix.
+
 
 #### What Gaussian-chain inference provides
 
@@ -2970,9 +3023,7 @@ $$
 
 $$
 \boxed{
-\Sigma_{t,t+1}
-=
-\operatorname{Cov}_q(u_t,u_{t+1}),
+\Sigma_{t,t+1}=\operatorname{Cov}_q(u_t,u_{t+1}),
 }
 $$
 
@@ -3016,6 +3067,9 @@ Some fitting and inference problems in `xxm` have closed-form solutions. Gaussia
 
 `xxm` uses damped Newton optimization for these problems.
 
+![Newton optimization using a local quadratic approximation.](img/newton.png)
+
+
 Let
 
 $$
@@ -3027,7 +3081,7 @@ be a scalar objective to maximize, with gradient
 $$
 g(\theta)
 =
-\nabla_\theta\mathcal J(\theta)
+\nabla_\theta \mathcal J(\theta)
 $$
 
 and Hessian
@@ -3174,6 +3228,7 @@ Each Poisson output dimension has its own regression objective. These can theref
 
 The second important use of Newton optimization is different: the free parameters are not model coefficients, but an entire continuous latent trajectory. That leads to Laplace inference.
 
+
 ## 1.7 Local quadratic approximation and Laplace inference
 
 Gaussian-chain inference relies on one decisive property: the complete log potential must be quadratic in the continuous trajectory.
@@ -3200,7 +3255,7 @@ $$
 \ell(u)
 $$
 
-denote an additional smooth log factor. Define the complete log target
+denote an additional smooth log factor. The target becomes
 
 $$
 \Psi(u)
@@ -3220,9 +3275,8 @@ is no longer Gaussian and the exact Gaussian-chain machinery of Section 1.5 cann
 
 Laplace inference restores that structure locally.
 
-![A one-dimensional toy target showing a Newton quadratic surrogate at the current point](img/newton.png)
 
-![The final Gaussian Laplace approximation around the mode.](img/laplace.png)
+![The Gaussian Laplace approximation around the mode.](img/laplace.png)
 
 ### Local quadratic approximation
 
@@ -3282,7 +3336,7 @@ $$
 Adding it to the Gaussian chain gives
 
 $$
-\widetilde\Psi(u)
+\widetilde{\Psi}(u)
 =
 -\frac12
 u^\top
@@ -3604,3 +3658,1920 @@ This distinction will matter in Chapter 2:
 * Poisson SLDS inference combines that structured approximation with Laplace approximation inside the continuous update.
 
 With this distinction in place, the core mathematical machinery is complete. The next chapter assembles these pieces into the model families implemented by `xxm`.
+
+# 2. Model families
+
+The core machinery of Chapter 1 becomes useful when it is assembled into complete latent-variable models.
+
+The model families in `xxm` differ mainly in two choices:
+
+1. whether the latent state is discrete, continuous, or both;
+2. how observations depend on that latent state.
+
+These choices determine the posterior structure.
+
+An HMM has a discrete latent chain, so exact inference reduces to discrete-chain normalization. An LDS has a continuous Gaussian latent chain; Gaussian observations preserve that structure exactly, while Poisson observations require a local Gaussian approximation. An SLDS combines discrete and continuous latent chains, so exact joint inference is no longer available and the two structures are coupled through structured variational inference.
+
+The sections below follow the same pattern:
+
+$$
+\text{generative model}
+\longrightarrow
+\text{posterior problem}
+\longrightarrow
+\text{tractable structure}
+\longrightarrow
+\text{learning}.
+$$
+
+## 2.1 Hidden Markov models
+
+A hidden Markov model has a discrete latent state
+
+$$
+z_t\in\{0,\ldots,K-1\}
+$$
+
+at each time step.
+
+The initial state is
+
+$$
+z_0
+\sim
+\operatorname{Categorical}(\pi),
+$$
+
+with
+
+$$
+\pi_k=p(z_0=k),
+$$
+
+and the latent sequence follows a Markov chain,
+
+$$
+p(z_{t+1}=j\mid z_t=i)
+=
+P(i,j).
+$$
+
+Here $P$ denotes the discrete transition matrix. The symbol $A$ is reserved for continuous or autoregressive dynamics.
+
+For memoryless emissions, the observation at time $t$ depends only on the current discrete state,
+
+$$
+p(y_t\mid z_t).
+$$
+
+![Graphical model for a hidden Markov model.](img/hmm_graphical_model.png)
+
+The complete joint distribution is
+
+$$
+p(z,y)
+=
+\pi_{z_0}
+\prod_{t=0}^{T-2}
+P(z_t,z_{t+1})
+\prod_{t=0}^{T-1}
+p(y_t\mid z_t).
+$$
+
+### Posterior inference
+
+The quantities of interest include the state marginals
+
+$$
+p(z_t=k\mid y),
+$$
+
+the adjacent-state marginals
+
+$$
+p(z_t=i,z_{t+1}=j\mid y),
+$$
+
+and the marginal likelihood
+
+$$
+p(y)
+=
+\sum_zp(z,y).
+$$
+
+A direct sum over $z$ contains
+
+$$
+K^T
+$$
+
+possible trajectories.
+
+For fixed observations, however, each emission likelihood is simply a unary potential over the current state:
+
+$$
+\phi_t(k)
+=
+p(y_t\mid z_t=k).
+$$
+
+Therefore
+
+$$
+p(z\mid y)
+\propto
+\pi_{z_0}
+\prod_{t=0}^{T-2}
+P(z_t,z_{t+1})
+\prod_{t=0}^{T-1}
+\phi_t(z_t).
+$$
+
+This is exactly the discrete chain of Section 1.5.
+
+Forward-backward inference gives
+
+$$
+\gamma_t(k)
+=
+p(z_t=k\mid y),
+$$
+
+$$
+\xi_t(i,j)
+=
+p(z_t=i,z_{t+1}=j\mid y),
+$$
+
+and the chain normalizer.
+
+Because the unnormalized chain is the model joint probability,
+
+$$
+f(z)=p(z,y),
+$$
+
+its normalizing constant is
+
+$$
+Z
+=
+\sum_zp(z,y)
+=
+p(y).
+$$
+
+Thus
+
+$$
+\boxed{
+\log Z=\log p(y).
+}
+$$
+
+The HMM therefore provides the simplest model-level interpretation of discrete-chain inference:
+
+$$
+\boxed{
+\text{observation likelihoods}
+\longrightarrow
+\text{unary state potentials}
+\longrightarrow
+\text{exact discrete-chain posterior}.
+}
+$$
+
+### 2.1.1 Gaussian emissions
+
+With Gaussian emissions,
+
+$$
+y_t\mid z_t=k
+\sim
+\mathcal N(\mu_k,\Sigma_k).
+$$
+
+The local potential is
+
+$$
+\phi_t(k)
+=
+\mathcal N(y_t\mid\mu_k,\Sigma_k).
+$$
+
+Nothing about the discrete inference algorithm changes. The emission family determines only how the local likelihoods are constructed and how their parameters are updated during learning.
+
+### 2.1.2 Poisson emissions
+
+With independent Poisson emissions,
+
+$$
+y_t\mid z_t=k
+\sim
+\operatorname{Poisson}(\lambda_k).
+$$
+
+Equivalently, when the log-rate parameterization is useful,
+
+$$
+\eta_k=\log\lambda_k.
+$$
+
+The local state log potential is
+
+$$
+\ell_t(k)
+=
+\log p(y_t\mid z_t=k).
+$$
+
+Again, the posterior over $z$ remains exactly the same discrete-chain problem.
+
+The Gaussian and Poisson HMMs therefore share their entire latent inference algorithm. They differ only in the state-conditioned observation distribution.
+
+### 2.1.3 Learning by exact EM
+
+The HMM posterior is exact, so parameter learning can use ordinary expectation-maximization.
+
+For parameters $\theta$, EM alternates between:
+
+* an E-step computing
+
+  $$
+  p(z\mid y,\theta);
+  $$
+
+* an M-step maximizing
+
+  $$
+  \mathbb E_{p(z\mid y,\theta)}
+  [
+  \log p(z,y\mid\theta')
+  ]
+  $$
+
+  with respect to updated parameters $\theta'$.
+
+The posterior marginals provide the weights required by the M-step.
+
+For the initial distribution,
+
+$$
+\pi_k^{\mathrm{new}}
+=
+\gamma_0(k).
+$$
+
+For stationary transitions, the expected number of transitions from $i$ to $j$ is
+
+$$
+N_{ij}
+=
+\sum_{t=0}^{T-2}
+\xi_t(i,j).
+$$
+
+Normalizing each row gives
+
+$$
+P^{\mathrm{new}}(i,j)
+=
+\frac{
+N_{ij}
+}{
+\sum_{j'}N_{ij'}
+}.
+$$
+
+For Gaussian emissions, the state probabilities act as weights in the Gaussian moment formulas from Section 1.3. For each state $k$,
+
+$$
+\mu_k^{\mathrm{new}}
+=
+\frac{
+\sum_t\gamma_t(k)y_t
+}{
+\sum_t\gamma_t(k)
+},
+$$
+
+with the corresponding weighted covariance
+
+$$
+\Sigma_k^{\mathrm{new}}
+=
+\frac{
+\sum_t
+\gamma_t(k)
+(y_t-\mu_k^{\mathrm{new}})
+(y_t-\mu_k^{\mathrm{new}})^\top
+}{
+\sum_t\gamma_t(k)
+}.
+$$
+
+For Poisson emissions, the fitted rate is the state-weighted observation mean,
+
+$$
+\lambda_k^{\mathrm{new}}
+=
+\frac{
+\sum_t\gamma_t(k)y_t
+}{
+\sum_t\gamma_t(k)
+},
+$$
+
+applied independently across observation dimensions.
+
+The general pattern is
+
+$$
+\boxed{
+\text{exact posterior marginals}
+\longrightarrow
+\text{soft state assignments}
+\longrightarrow
+\text{weighted parameter fitting}.
+}
+$$
+
+## 2.2 Autoregressive hidden Markov models
+
+An autoregressive HMM retains the discrete latent chain of an ordinary HMM but changes the observation model.
+
+There is no separate continuous latent variable. Instead, each observation depends directly on previous observations.
+
+For $L$ autoregressive lags, the Gaussian model can be written as
+
+$$
+y_t
+\mid
+z_t=k,
+y_{t-1},\ldots,y_{t-L}
+\sim
+\mathcal N
+\left(
+b_k
++
+\sum_{\ell=1}^{L}
+A_{k,\ell}y_{t-\ell},
+R_k
+\right).
+$$
+
+For Poisson autoregressive emissions,
+
+$$
+y_t
+\mid
+z_t=k,
+y_{t-1},\ldots,y_{t-L}
+\sim
+\operatorname{Poisson}(\lambda_t),
+$$
+
+with
+
+$$
+\log\lambda_t
+=
+b_k
++
+\sum_{\ell=1}^{L}
+A_{k,\ell}y_{t-\ell}.
+$$
+
+Here $A_{k,\ell}$ is an autoregressive coefficient for state $k$ and lag $\ell$. It is unrelated to the discrete transition matrix $P$.
+
+![Graphical model for an autoregressive hidden Markov model with one displayed observation lag.](img/arhmm_graphical_model.png)
+
+The diagram shows the first-order case for clarity. For $L>1$, each modeled observation also depends on the additional preceding observations included in its lagged predictor.
+
+### Fixed observation history
+
+A finite observed sequence requires an explicit boundary convention because the first modeled autoregressive observation needs $L$ preceding observations.
+
+In `xxm`, the first $L$ observations are treated as fixed conditioning history.
+
+Only
+
+$$
+T-L
+$$
+
+observations are modeled by the AR-HMM latent chain.
+
+It is useful to distinguish the original observation index from the compact latent-chain index. Let
+
+$$
+s=0,\ldots,T-L-1.
+$$
+
+Then latent state $z_s$ selects the distribution generating observation
+
+$$
+y_{L+s}.
+$$
+
+For the Gaussian model,
+
+$$
+y_{L+s}
+\mid
+z_s=k
+\sim
+\mathcal N
+\left(
+b_k+
+\sum_{\ell=1}^{L}
+A_{k,\ell}
+y_{L+s-\ell},
+R_k
+\right).
+$$
+
+The predictor is ordered from most recent to oldest:
+
+$$
+y_{L+s-1},
+y_{L+s-2},
+\ldots,
+y_{L+s-L}.
+$$
+
+This compact indexing matters when relating posterior state probabilities to observations:
+
+$$
+\gamma_s(k)
+=
+p(z_s=k\mid y)
+$$
+
+describes the state associated with $y_{L+s}$, not $y_s$.
+
+### Posterior inference
+
+Once the observation history is fixed, each state still defines one scalar local likelihood,
+
+$$
+\phi_s(k)
+=
+p\left(
+y_{L+s}
+\mid
+z_s=k,
+y_{L+s-1},\ldots,y_{L+s-L}
+\right).
+$$
+
+Therefore
+
+$$
+p(z\mid y)
+\propto
+\pi_{z_0}
+\prod_{s=0}^{T-L-2}
+P(z_s,z_{s+1})
+\prod_{s=0}^{T-L-1}
+\phi_s(z_s).
+$$
+
+This is again an ordinary discrete chain.
+
+The important point is that autoregression changes the construction of the local emission potential, not the structure of latent inference:
+
+$$
+\boxed{
+\text{fixed observation history}
+\longrightarrow
+\text{state-conditioned AR likelihoods}
+\longrightarrow
+\text{ordinary discrete-chain inference}.
+}
+$$
+
+The chain normalizer is the likelihood of the modeled suffix conditional on the fixed initial history.
+
+### Gaussian AR emissions
+
+For each state, the emission model is a Gaussian linear regression from the stacked observation history to the current observation.
+
+Posterior state probabilities provide soft weights for that regression.
+
+Thus Gaussian AR-HMM learning uses the same paired-moment and linear-Gaussian fitting machinery developed in Section 1.3, with
+
+$$
+u_s
+=
+(y_{L+s-1},\ldots,y_{L+s-L})
+$$
+
+as the predictor and
+
+$$
+v_s=y_{L+s}
+$$
+
+as the output.
+
+### Poisson AR emissions
+
+For Poisson AR emissions, the same predictor is passed through a linear-Poisson conditional,
+
+$$
+\log\lambda_s
+=
+W_ku_s+b_k.
+$$
+
+There is no closed-form weighted regression update. The state probabilities therefore weight the linear-Poisson objective, which is optimized with the Newton machinery of Section 1.6.
+
+The latent-state inference remains exact even though the emission fitting problem requires numerical optimization.
+
+This is an important distinction:
+
+$$
+\boxed{
+\text{non-Gaussian parameter fitting}
+\not\Rightarrow
+\text{approximate latent-state inference}.
+}
+$$
+
+Conditioned on the observed history, every state likelihood is still available exactly.
+
+Gaussian AR emissions have a closed-form M-step. Poisson AR emissions instead use a numerical Newton M-step while retaining the exact discrete E-step.
+
+### Sampling and continuation
+
+Autoregressive generation also requires a boundary convention.
+
+A supplied continuation history is ordered chronologically, from oldest to newest. Once enough previous observations are available, generation proceeds recursively by constructing the lagged predictor and sampling from the state-selected conditional distribution.
+
+When generating autonomously without supplied history, the initial autoregressive history is taken to be zero.
+
+## 2.3 Linear dynamical systems
+
+A linear dynamical system replaces the discrete latent chain with a continuous latent trajectory
+
+$$
+x_0,\ldots,x_{T-1},
+\qquad
+x_t\in\mathbb R^{D_x}.
+$$
+
+The initial state is Gaussian,
+
+$$
+x_0
+\sim
+\mathcal N(m_0,S_0),
+$$
+
+and the dynamics are linear Gaussian:
+
+$$
+x_t
+\mid
+x_{t-1}
+\sim
+\mathcal N
+\left(
+Ax_{t-1}+b,
+Q
+\right),
+\qquad
+t>0.
+$$
+
+The symbols are fixed throughout the model-family discussion:
+
+* $A$ is the continuous dynamics matrix;
+* $b$ is the dynamics bias;
+* $Q$ is the dynamics covariance.
+
+The latent process therefore defines a Gaussian chain before observations are taken into account.
+
+![Graphical model for a linear dynamical system.](img/lds_graphical_model.png)
+
+The posterior is
+
+$$
+p(x\mid y)
+=
+\frac{p(x,y)}{p(y)},
+$$
+
+where
+
+$$
+p(y)
+=
+\int
+p(x,y)\,dx.
+$$
+
+The integral is over the complete $TD_x$-dimensional latent trajectory. Whether it remains analytically tractable depends on the emission distribution.
+
+### 2.3.1 Gaussian LDS
+
+For Gaussian observations,
+
+$$
+y_t\mid x_t
+\sim
+\mathcal N
+\left(
+Cx_t+d,
+R
+\right),
+$$
+
+where
+
+* $C$ is the emission matrix;
+* $d$ is the emission bias;
+* $R$ is the emission covariance.
+
+The joint distribution factorizes as
+
+$$
+p(x,y)
+=
+p(x_0)
+\prod_{t=1}^{T-1}
+p(x_t\mid x_{t-1})
+\prod_{t=0}^{T-1}
+p(y_t\mid x_t).
+$$
+
+Each latent prior or transition term is Gaussian. For a fixed observation $y_t$, the emission likelihood
+
+$$
+p(y_t\mid x_t)
+$$
+
+is also a Gaussian potential over $x_t$.
+
+Consequently every contribution to
+
+$$
+\log p(x,y)
+$$
+
+is quadratic in the continuous trajectory.
+
+The posterior therefore has exactly the Gaussian-chain form from Section 1.5:
+
+$$
+\boxed{
+\text{Gaussian initial state}
++
+\text{linear-Gaussian dynamics}
++
+\text{Gaussian emission potentials}
+=
+\text{Gaussian chain}.
+}
+$$
+
+No approximation is required.
+
+Gaussian-chain inference gives
+
+$$
+\mu_t
+=
+\mathbb E[x_t\mid y],
+$$
+
+$$
+\Sigma_t
+=
+\operatorname{Cov}(x_t\mid y),
+$$
+
+and
+
+$$
+\Sigma_{t,t+1}
+=
+\operatorname{Cov}(x_t,x_{t+1}\mid y).
+$$
+
+It also gives the exact chain normalizer.
+
+Since
+
+$$
+f(x)=p(x,y),
+$$
+
+this normalizer is
+
+$$
+Z
+=
+\int p(x,y)\,dx
+=
+p(y).
+$$
+
+Hence
+
+$$
+\boxed{
+\log Z=\log p(y).
+}
+$$
+
+### Gaussian LDS learning
+
+Because the posterior is exact, the Gaussian LDS supports ordinary EM.
+
+The E-step computes the Gaussian-chain posterior moments.
+
+The M-step then fits each Gaussian or linear-Gaussian component from those moments.
+
+The initial state is updated from the posterior marginal of $x_0$.
+
+The dynamics depend on adjacent latent variables,
+
+$$
+x_{t-1}
+\longrightarrow
+x_t.
+$$
+
+Their expected sufficient statistics are constructed from
+
+$$
+\mathbb E[x_{t-1}],
+\qquad
+\mathbb E[x_t],
+$$
+
+$$
+\mathbb E[x_{t-1}x_{t-1}^\top],
+$$
+
+$$
+\mathbb E[x_tx_t^\top],
+$$
+
+and
+
+$$
+\mathbb E[x_{t-1}x_t^\top].
+$$
+
+These define the paired moments required to fit
+
+$$
+x_t\mid x_{t-1}
+\sim
+\mathcal N(Ax_{t-1}+b,Q).
+$$
+
+Similarly, the emission update uses the posterior marginal moments of $x_t$ paired with the observed $y_t$ to fit
+
+$$
+y_t\mid x_t
+\sim
+\mathcal N(Cx_t+d,R).
+$$
+
+Thus exact LDS EM is largely an application of two pieces of Chapter 1:
+
+$$
+\boxed{
+\text{Gaussian-chain inference}
+\longrightarrow
+\text{posterior moments}
+\longrightarrow
+\text{Gaussian moment fitting}.
+}
+$$
+
+### 2.3.2 Poisson LDS
+
+The latent process remains exactly the same Gaussian chain,
+
+$$
+x_0
+\sim
+\mathcal N(m_0,S_0),
+$$
+
+$$
+x_t\mid x_{t-1}
+\sim
+\mathcal N(Ax_{t-1}+b,Q).
+$$
+
+Only the observations change.
+
+For Poisson emissions,
+
+$$
+y_t\mid x_t
+\sim
+\operatorname{Poisson}(\lambda_t),
+$$
+
+with
+
+$$
+\log\lambda_t
+=
+Cx_t+d.
+$$
+
+Ignoring terms independent of $x_t$, the log likelihood is
+
+$$
+\log p(y_t\mid x_t)
+=
+y_t^\top(Cx_t+d)
+-
+\mathbf 1^\top
+\exp(Cx_t+d)
++
+\text{const}.
+$$
+
+The first term is linear in $x_t$. The second contains
+
+$$
+\exp(Cx_t+d)
+$$
+
+and is not quadratic.
+
+Therefore the posterior
+
+$$
+p(x\mid y)
+$$
+
+is not Gaussian.
+
+The exact Gaussian-chain algorithm cannot simply absorb the observation likelihood as it did for Gaussian emissions:
+
+$$
+\boxed{
+\text{Gaussian latent chain}
++
+\text{Poisson likelihood}
+\neq
+\text{Gaussian posterior}.
+}
+$$
+
+This is the model-level obstruction that motivates the Laplace machinery developed in Section 1.7.
+
+### Laplace inference
+
+At a current latent trajectory $x^{(r)}$, each Poisson log likelihood is approximated locally by a quadratic function of $x_t$.
+
+Because observations are conditionally local in time, each approximation becomes a unary Gaussian potential over the corresponding $x_t$.
+
+Combining those local potentials with the Gaussian latent dynamics gives a Gaussian chain.
+
+Its mean is the Newton candidate for the complete trajectory.
+
+The procedure therefore alternates
+
+$$
+x^{(r)}
+\longrightarrow
+\text{local Poisson quadratic potentials}
+\longrightarrow
+\text{Gaussian-chain solve}
+\longrightarrow
+\text{damped Newton update}.
+$$
+
+At convergence to a mode
+
+$$
+x^\star,
+$$
+
+the final quadratic expansion defines the Laplace posterior approximation
+
+$$
+q_{\mathrm{Laplace}}(x)
+\approx
+p(x\mid y).
+$$
+
+Its local marginals again have the familiar form
+
+$$
+\mathbb E_q[x_t],
+$$
+
+$$
+\operatorname{Cov}_q(x_t),
+$$
+
+and
+
+$$
+\operatorname{Cov}_q(x_t,x_{t+1}).
+$$
+
+The same final Gaussian approximation also provides a Laplace approximation to
+
+$$
+\log p(y).
+$$
+
+The chain computations themselves remain exact for each quadratic surrogate. The approximation enters only through the replacement of the Poisson likelihood by its local second-order form.
+
+### Poisson LDS learning
+
+The approximate Gaussian posterior supplies the same first and second latent moments used in Gaussian LDS learning.
+
+The dynamics can therefore still be fitted through paired Gaussian moments.
+
+For the Poisson emission update, however, the input $x_t$ is uncertain under the approximate posterior.
+
+If
+
+$$
+x_t
+\sim
+\mathcal N(\mu_t,\Sigma_t)
+$$
+
+under the approximation, then
+
+$$
+Cx_t+d
+$$
+
+is Gaussian and the expected rate remains analytic:
+
+$$
+\mathbb E_q[\lambda_{t,i}]
+=
+\exp
+\left(
+c_i^\top\mu_t+d_i
++
+\frac12
+c_i^\top\Sigma_tc_i
+\right),
+$$
+
+where $c_i^\top$ is row $i$ of $C$.
+
+Thus the expected Poisson log likelihood can be evaluated from Gaussian latent marginals, but maximizing it with respect to $C$ and $d$ requires the linear-Poisson Newton fit from Chapter 1.
+
+The resulting learning algorithm has the structure
+
+$$
+\boxed{
+\text{Laplace posterior approximation}
+\longrightarrow
+\text{Gaussian latent moments}
+\longrightarrow
+\begin{cases}
+\text{closed-form Gaussian dynamics fit},\\
+\text{Newton Poisson emission fit}.
+\end{cases}
+}
+$$
+
+Because the latent posterior is approximated rather than computed exactly, this is an approximate EM procedure rather than exact EM for the original model.
+
+## 2.4 Switching linear dynamical systems
+
+A switching linear dynamical system combines the two latent structures developed above.
+
+There is a discrete state sequence
+
+$$
+z_0,\ldots,z_{T-1}
+$$
+
+and a continuous latent trajectory
+
+$$
+x_0,\ldots,x_{T-1}.
+$$
+
+The discrete chain is
+
+$$
+z_0
+\sim
+\operatorname{Categorical}(\pi),
+$$
+
+$$
+p(z_t=j\mid z_{t-1}=i)
+=
+P(i,j),
+\qquad
+t>0.
+$$
+
+The initial continuous state depends on the initial discrete state:
+
+$$
+x_0\mid z_0=k
+\sim
+\mathcal N(m_k,S_k).
+$$
+
+The continuous dynamics depend on the current discrete state:
+
+$$
+x_t
+\mid
+x_{t-1},z_t=k
+\sim
+\mathcal N
+\left(
+A_kx_{t-1}+b_k,
+Q_k
+\right),
+\qquad
+t>0.
+$$
+
+The indexing convention is important:
+
+> $z_t$ selects the dynamics that generate $x_t$ from $x_{t-1}$.
+
+Therefore the first continuous transition
+
+$$
+x_0\longrightarrow x_1
+$$
+
+is selected by $z_1$.
+
+The role of $z_0$ is instead to select the initial continuous-state distribution
+
+$$
+p(x_0\mid z_0).
+$$
+
+This incoming-state convention is used throughout the SLDS discussion.
+
+Observations depend on $x_t$ but, in the currently supported models, not directly on $z_t$.
+
+The joint distribution is
+
+$$
+\begin{aligned}
+p(z,x,y)
+={}&
+p(z_0)
+p(x_0\mid z_0)
+p(y_0\mid x_0)
+\\
+&\times
+\prod_{t=1}^{T-1}
+p(z_t\mid z_{t-1})
+p(x_t\mid x_{t-1},z_t)
+p(y_t\mid x_t).
+\end{aligned}
+$$
+
+![Graphical model for a switching linear dynamical system.](img/slds_graphical_model.png)
+
+### Why exact joint inference is difficult
+
+The two latent structures are individually familiar.
+
+If the full discrete trajectory $z$ were known, then the continuous model would have a particular sequence of linear-Gaussian dynamics. With Gaussian emissions, inference over $x$ would be Gaussian.
+
+If the full continuous trajectory $x$ were known, then the state-conditioned dynamics would provide local likelihoods over the discrete states, and inference over $z$ would be a discrete-chain problem.
+
+Jointly, however, the two trajectories are coupled.
+
+Marginalizing one discrete state creates alternatives for the associated continuous dynamics. As these alternatives propagate through time, exact marginalization over the discrete trajectory produces a growing mixture of continuous Gaussian components.
+
+The number of switching trajectories again scales as
+
+$$
+K^T,
+$$
+
+but unlike an ordinary HMM, the contribution of each trajectory is now an entire continuous Gaussian model rather than a single scalar product of local likelihoods.
+
+Neither the discrete-chain algorithm nor the Gaussian-chain algorithm alone solves the joint posterior
+
+$$
+p(z,x\mid y).
+$$
+
+`xxm` therefore uses a structured variational approximation.
+
+### 2.4.1 Structured mean-field inference
+
+The approximate posterior factorizes the discrete and continuous trajectories:
+
+$$
+\boxed{
+q(z,x)=q(z)q(x).
+}
+$$
+
+This removes direct posterior dependence between $z$ and $x$, but it does **not** factor either sequence across time.
+
+The discrete factor $q(z)$ remains a complete Markov chain, and the continuous factor $q(x)$ remains a complete Gaussian chain or Gaussian approximation.
+
+The corresponding coordinate updates are
+
+$$
+\log q(x)
+=
+\mathbb E_{q(z)}
+[
+\log p(z,x,y)
+]
++
+\text{const},
+$$
+
+and
+
+$$
+\log q(z)
+=
+\mathbb E_{q(x)}
+[
+\log p(z,x,y)
+]
++
+\text{const}.
+$$
+
+The central fact is that each expectation converts the coupled switching model back into one of the chain problems from Chapter 1.
+
+![Alternating structured variational updates between the discrete and continuous posterior factors.](img/slds_structured_variational_inference.png)
+
+### Continuous coordinate update
+
+Consider first
+
+$$
+q(x).
+$$
+
+The terms involving the discrete transition probabilities do not depend on $x$ and therefore disappear into the normalization constant.
+
+The initial continuous factor contributes
+
+$$
+\mathbb E_{q(z_0)}
+[
+\log p(x_0\mid z_0)
+]
+=
+\sum_k
+\gamma_0(k)
+\log p(x_0\mid z_0=k).
+$$
+
+Each term is a Gaussian log potential in $x_0$. Their weighted sum is therefore another Gaussian potential.
+
+For $t>0$,
+
+$$
+\mathbb E_{q(z_t)}
+[
+\log p(x_t\mid x_{t-1},z_t)
+]
+=
+\sum_k
+\gamma_t(k)
+\log
+p(x_t\mid x_{t-1},z_t=k).
+$$
+
+Each state-conditioned dynamics term is a Gaussian pair potential over
+
+$$
+(x_{t-1},x_t).
+$$
+
+Again, a weighted sum of their canonical parameters is a Gaussian pair potential.
+
+Thus the switching dynamics become an ordinary Gaussian chain under the expectation over $q(z)$:
+
+$$
+\boxed{
+q(z)
+\longrightarrow
+\text{expected switching Gaussian potentials}
+\longrightarrow
+q(x).
+}
+$$
+
+What remains depends on the observation model.
+
+### Discrete coordinate update
+
+Now consider
+
+$$
+q(z).
+$$
+
+The continuous posterior enters through expectations of the switching Gaussian factors.
+
+For the initial state,
+
+$$
+r_0(k)
+=
+\mathbb E_{q(x_0)}
+[
+\log p(x_0\mid z_0=k)
+].
+$$
+
+For $t>0$,
+
+$$
+r_t(k)
+=
+\mathbb E_{q(x_{t-1},x_t)}
+[
+\log
+p(x_t\mid x_{t-1},z_t=k)
+].
+$$
+
+Because Gaussian log potentials are quadratic, these expectations depend only on the continuous posterior means, covariances, and adjacent cross moments developed in Chapter 1.
+
+For fixed $q(x)$, each $r_t(k)$ is simply a scalar log potential associated with state $k$ at time $t$.
+
+The discrete update therefore becomes
+
+$$
+q(z)
+\propto
+\pi_{z_0}
+\prod_{t=1}^{T-1}
+P(z_{t-1},z_t)
+\exp
+\left(
+\sum_{t=0}^{T-1}
+r_t(z_t)
+\right).
+$$
+
+This is an ordinary discrete chain.
+
+Hence the opposite direction is
+
+$$
+\boxed{
+q(x)
+\longrightarrow
+\text{expected switching log potentials}
+\longrightarrow
+q(z).
+}
+$$
+
+The two coordinate updates alternate:
+
+$$
+q(z)
+\longrightarrow
+q(x)
+\longrightarrow
+q(z)
+\longrightarrow
+\cdots
+$$
+
+Each update uses exact chain machinery for the factor being updated, subject to any additional approximation required by the emission model.
+
+### 2.4.2 Evidence lower bound
+
+The quality of a structured posterior $q(z)q(x)$ can be evaluated through the evidence lower bound
+
+$$
+\mathcal L(q)
+=
+\mathbb E_q
+[
+\log p(z,x,y)
+]
+-
+\mathbb E_q
+[
+\log q(z,x)
+].
+$$
+
+Since
+
+$$
+q(z,x)=q(z)q(x),
+$$
+
+the entropy separates:
+
+$$
+-\mathbb E_q[\log q(z,x)]
+=
+H[q(z)]
++
+H[q(x)].
+$$
+
+Expanding the model factors gives
+
+$$
+\begin{aligned}
+\mathcal L(q)
+={}&
+\mathbb E_q[\log p(z_0)]
++
+\sum_{t=1}^{T-1}
+\mathbb E_q[
+\log p(z_t\mid z_{t-1})
+]
+\\
+&+
+\mathbb E_q[
+\log p(x_0\mid z_0)
+]
+\\
+&+
+\sum_{t=1}^{T-1}
+\mathbb E_q[
+\log p(x_t\mid x_{t-1},z_t)
+]
+\\
+&+
+\sum_{t=0}^{T-1}
+\mathbb E_q[
+\log p(y_t\mid x_t)
+]
+\\
+&+
+H[q(z)]
++
+H[q(x)].
+\end{aligned}
+$$
+
+Each term is available from local marginals:
+
+* $q(z)$ supplies state and adjacent-state probabilities;
+* $q(x)$ supplies means, covariances, and cross-covariances;
+* the discrete and Gaussian chain entropies are those developed in Section 1.5.
+
+For Gaussian emissions, the structured coordinate updates are exact coordinate optima within the factorized family and therefore perform coordinate ascent on this ELBO. For Poisson emissions, the Laplace update of $q(x)$ is an additional approximation rather than the exact variational coordinate optimum, so an individual Laplace or alternating update is not guaranteed to increase the ELBO.
+
+The ELBO should not be confused with either chain's own log normalizer.
+
+### 2.4.3 Gaussian-emission SLDS
+
+For Gaussian observations,
+
+$$
+y_t\mid x_t
+\sim
+\mathcal N(Cx_t+d,R).
+$$
+
+The observation likelihood is already a Gaussian unary potential over $x_t$.
+
+Therefore the continuous coordinate update consists entirely of Gaussian factors:
+
+$$
+\begin{aligned}
+\log q(x)
+={}&
+\text{expected switching Gaussian factors}
+\\
+&+
+\text{Gaussian observation factors}
++
+\text{const}.
+\end{aligned}
+$$
+
+The resulting $q(x)$ is exactly Gaussian for the current $q(z)$.
+
+Likewise, the discrete coordinate update is exactly a discrete-chain inference problem for the current $q(x)$.
+
+The approximation in the Gaussian SLDS therefore comes from the structured factorization
+
+$$
+q(z,x)=q(z)q(x),
+$$
+
+not from either chain solver.
+
+This distinction is useful:
+
+$$
+\boxed{
+\text{Gaussian SLDS}
+=
+\text{structured posterior approximation}
++
+\text{exact coordinate-chain updates}.
+}
+$$
+
+### 2.4.4 Poisson-emission SLDS
+
+For Poisson observations,
+
+$$
+y_t\mid x_t
+\sim
+\operatorname{Poisson}(\lambda_t),
+$$
+
+with
+
+$$
+\log\lambda_t=Cx_t+d.
+$$
+
+The discrete coordinate update is unchanged. Given $q(x)$, expected switching dynamics still produce scalar unary state potentials, so $q(z)$ remains an exact discrete-chain update.
+
+The continuous coordinate is different.
+
+The expected switching factors are Gaussian, but the observation log likelihood contains
+
+$$
+-\exp(Cx_t+d)
+$$
+
+and is nonquadratic.
+
+Therefore the exact coordinate optimum for $q(x)$ is not Gaussian.
+
+`xxm` keeps the Gaussian-chain representation of $q(x)$ and uses Laplace inference for this coordinate update.
+
+For a fixed $q(z)$:
+
+1. expected switching dynamics define a Gaussian latent chain;
+2. Poisson emission log likelihoods are locally quadratized;
+3. Gaussian-chain inference gives a Newton candidate;
+4. damping searches for the latent mode;
+5. the final quadratic approximation defines the Gaussian $q(x)$ used by the structured algorithm.
+
+Thus
+
+$$
+\boxed{
+\text{Poisson SLDS}
+=
+\text{structured mean-field}
++
+\text{Laplace continuous coordinate}.
+}
+$$
+
+There are therefore two distinct approximations:
+
+1. the posterior factorization
+
+   $$
+   q(z,x)=q(z)q(x);
+   $$
+
+2. the Gaussian Laplace approximation used for the nonconjugate continuous coordinate.
+
+These should not be conflated.
+
+The resulting Gaussian $q(x)$ is a valid member of the structured variational family, so its ELBO can still be evaluated. The Laplace construction, however, targets a local mode and curvature rather than directly maximizing that ELBO over all Gaussian $q(x)$. Monotonic ELBO improvement is therefore not implied by the continuous update.
+
+The expected Poisson log likelihood under the Gaussian $q(x)$ remains analytically available because the log rate is Gaussian. This allows the emission contribution to the variational objective and emission parameter fitting to use the Gaussian moment identities from Section 1.2.
+
+### 2.4.5 SLDS learning
+
+Learning alternates variational inference with parameter updates based on the resulting approximate posterior quantities.
+
+The discrete posterior provides
+
+$$
+\gamma_t(k)=q(z_t=k)
+$$
+
+and
+
+$$
+\xi_t(i,j)
+=
+q(z_t=i,z_{t+1}=j).
+$$
+
+The continuous posterior provides
+
+$$
+\mu_t
+=
+\mathbb E_q[x_t],
+$$
+
+$$
+\Sigma_t
+=
+\operatorname{Cov}_q(x_t),
+$$
+
+and
+
+$$
+\Sigma_{t-1,t}
+=
+\operatorname{Cov}_q(x_{t-1},x_t).
+$$
+
+The initial discrete distribution and discrete transition matrix are updated in the same way as in an HMM.
+
+For the switching dynamics, state $z_t$ selects the transition generating $x_t$. Therefore the relevant weight for transition
+
+$$
+x_{t-1}\longrightarrow x_t
+$$
+
+under state $k$ is
+
+$$
+\gamma_t(k),
+\qquad
+t>0.
+$$
+
+These state probabilities weight the paired Gaussian moments of
+
+$$
+(x_{t-1},x_t),
+$$
+
+yielding one fitted linear-Gaussian dynamics model
+
+$$
+\mathcal N(A_kx_{t-1}+b_k,Q_k)
+$$
+
+for each discrete state.
+
+This is another place where the incoming-state convention matters: the weighting uses the posterior probability of $z_t$, not $z_{t-1}$.
+
+The current ordinary single-sequence M-step keeps the state-conditioned continuous initial distributions
+
+$$
+p(x_0\mid z_0=k)
+$$
+
+fixed rather than re-estimating them from a single sequence boundary.
+
+The emissions are not switching, so their update uses all continuous posterior marginals without discrete-state weighting.
+
+For Gaussian emissions, the update is a linear-Gaussian moment fit.
+
+For Poisson emissions, the expected log likelihood is optimized as a linear-Poisson regression with uncertain Gaussian inputs.
+
+The overall learning pattern is therefore
+
+$$
+\boxed{
+\begin{array}{c}
+\text{structured posterior inference}
+\\
+\downarrow
+\\
+\gamma,\xi,\mu,\Sigma,\Sigma_{\text{cross}}
+\\
+\downarrow
+\\
+\text{weighted categorical and Gaussian fits}
+\\
++
+\\
+\text{Gaussian or Poisson emission fit}.
+\end{array}
+}
+$$
+
+For Gaussian emissions this is structured variational EM. For Poisson emissions, the variational inference itself contains a Laplace approximation in the continuous coordinate.
+
+## 2.5 Learning across model families
+
+The preceding models use closely related learning loops, but the meaning of the inference step differs.
+
+### Exact EM
+
+In exact EM, the E-step computes the true posterior under the current parameters.
+
+This applies to models such as:
+
+* HMMs with Gaussian or Poisson emissions;
+* Gaussian LDSs.
+
+The M-step then maximizes the expected complete-data log probability under that exact posterior.
+
+With an exact E-step and exact M-step, the usual EM monotonicity result applies to the marginal likelihood.
+
+### Structured variational EM
+
+When the true posterior is intractable, a variational family can replace it.
+
+For the Gaussian SLDS,
+
+$$
+q(z,x)=q(z)q(x)
+$$
+
+defines the approximate posterior family.
+
+The Gaussian structured coordinate updates optimize the ELBO rather than directly computing the exact marginal likelihood.
+
+Model parameters are then fitted using expectations under this approximate posterior.
+
+The relevant objective is therefore the ELBO,
+
+$$
+\mathcal L(q),
+$$
+
+not the exact log marginal likelihood.
+
+### Laplace-based learning
+
+The Poisson LDS does not have an exact Gaussian posterior, so its continuous posterior is replaced by a Laplace approximation.
+
+The Poisson SLDS combines this local Gaussian approximation with the structured factorization between discrete and continuous trajectories. Its ELBO remains a useful evaluation criterion for the resulting structured posterior, but the Laplace continuous update is not itself an exact ELBO coordinate maximization.
+
+These algorithms still follow the practical pattern
+
+$$
+\text{infer posterior moments}
+\longrightarrow
+\text{fit parameters},
+$$
+
+but the inferred moments are approximate.
+
+Consequently, exact EM or coordinate-ascent guarantees should not be transferred automatically to these approximate procedures.
+
+The distinction can be summarized as
+
+| Model | Latent inference | Learning interpretation |
+| --- | --- | --- |
+| HMM | exact discrete chain | exact EM |
+| Gaussian AR-HMM | exact discrete chain conditional on history | exact EM for the modeled suffix |
+| Poisson AR-HMM | exact discrete chain conditional on history | EM with numerical Poisson M-step |
+| Gaussian LDS | exact Gaussian chain | exact EM |
+| Poisson LDS | Laplace Gaussian approximation | approximate EM |
+| Gaussian SLDS | structured variational posterior | variational EM |
+| Poisson SLDS | structured variational posterior with Laplace continuous update | Laplace variational EM |
+
+Despite these differences, the M-steps reuse a remarkably small vocabulary of fitting operations:
+
+* categorical normalization;
+* Gaussian moment matching;
+* paired Gaussian moment matching;
+* linear-Gaussian regression from moments;
+* Poisson rate fitting;
+* linear-Poisson Newton optimization.
+
+This reuse is one of the main compositional ideas behind `xxm`.
+
+## 2.6 Identifiability and alignment
+
+Latent-variable models are generally not uniquely parameterized.
+
+Two fitted models can describe the same observations while representing their latent variables differently.
+
+This matters when comparing an inferred model with a known generating model or when comparing independent fits.
+
+### Discrete state permutations
+
+The labels of discrete latent states are arbitrary.
+
+If a permutation $\sigma$ is applied consistently to
+
+* the initial probabilities;
+* the rows and columns of the transition matrix;
+* all state-conditioned model parameters,
+
+the probability distribution over observations is unchanged.
+
+Thus state $0$ in one fit need not correspond to state $0$ in another.
+
+To compare two models, one may define a pairwise state cost
+
+$$
+D(i,j)
+$$
+
+and choose the permutation minimizing the total matching cost,
+
+$$
+\sigma^\star
+=
+\operatorname*{arg\,min}_{\sigma}
+\sum_i
+D(i,\sigma(i)).
+$$
+
+The cost can depend on whichever state-conditioned quantity is meaningful for the comparison, such as emission means or conditional predictions.
+
+Alignment changes labels for comparison; it does not change the statistical model represented by the fit.
+
+### Continuous latent coordinates
+
+Continuous latent variables have a related coordinate ambiguity.
+
+Suppose the latent coordinate is transformed affinely,
+
+$$
+x'=Wx+b.
+$$
+
+When the corresponding dynamics and emission maps are transformed consistently, different latent coordinates can represent the same observable behavior.
+
+Comparing latent trajectories therefore often requires alignment.
+
+#### Affine alignment
+
+Given source points $u_n$ and target points $v_n$, an unconstrained affine alignment minimizes
+
+$$
+\sum_n
+\left\|
+Wu_n+b-v_n
+\right\|^2.
+$$
+
+This allows rotation, reflection, scale, shear, translation, and other linear deformations.
+
+It is appropriate when the goal is simply to find the best affine correspondence between two coordinate systems.
+
+#### Procrustes alignment
+
+When the comparison should preserve geometry up to translation, a global scale, rotation, and reflection, use a Procrustes transformation
+
+$$
+v
+\approx
+sRu+b,
+$$
+
+where
+
+$$
+R^\top R=I.
+$$
+
+Let
+
+$$
+\bar u
+=
+\frac1N\sum_nu_n,
+\qquad
+\bar v
+=
+\frac1N\sum_nv_n,
+$$
+
+and center the points:
+
+$$
+\widetilde u_n=u_n-\bar u,
+\qquad
+\widetilde v_n=v_n-\bar v.
+$$
+
+Collect the centered points as columns of matrices $U$ and $V$, and compute
+
+$$
+VU^\top
+=
+L\Sigma M^\top.
+$$
+
+The orthogonal transformation is
+
+$$
+R=LM^\top.
+$$
+
+The least-squares scale is
+
+$$
+s
+=
+\frac{
+\operatorname{tr}(\Sigma)
+}{
+\|U\|_F^2
+},
+$$
+
+and the translation is
+
+$$
+b
+=
+\bar v-sR\bar u.
+$$
+
+The resulting affine map sends the source coordinates toward the target coordinates.
+
+Unlike an unconstrained affine fit, Procrustes alignment does not introduce shear or anisotropic scaling. It therefore preserves the latent geometry up to a global similarity transformation.
+
+Alignment is an interpretation and comparison tool. It is not part of posterior inference or parameter learning.
+
+## 2.7 Initialization
+
+The inference and learning algorithms above generally require an initial model.
+
+Initialization is not part of the probabilistic model itself. It is a practical procedure for placing optimization in a useful region of parameter space.
+
+`xxm` uses model-specific initializations that exploit simpler representations of the data.
+
+### HMM initialization
+
+For discrete-state models, K-means clustering provides an initial partition of the observations or their predictors.
+
+The resulting assignments can initialize
+
+* state-conditioned emission parameters;
+* state frequencies;
+* transition counts.
+
+A preference for self-transitions may be introduced when constructing an initial transition matrix, reflecting the expectation that regimes often persist for several time steps.
+
+### LDS initialization
+
+For continuous latent models, principal component analysis provides a low-dimensional representation of the observations.
+
+The projected sequence gives an initial continuous latent trajectory.
+
+Gaussian moment fitting can then initialize
+
+* the latent initial distribution;
+* lag-one linear dynamics;
+* emission mappings.
+
+For Poisson observations, PCA remains an initialization device rather than an assumption that the observation distribution is Gaussian.
+
+### SLDS initialization
+
+An SLDS needs both a continuous latent representation and discrete switching regimes.
+
+A useful initialization therefore composes simpler procedures:
+
+1. obtain an initial continuous trajectory through PCA;
+2. fit a lag-one Gaussian autoregressive HMM to that trajectory;
+3. use its inferred regimes and state-specific regressions to initialize the switching dynamics.
+
+This reflects the compositional structure of the final model itself: a continuous latent trajectory together with discrete state-dependent dynamics.
+
+Initialization routines may also use explicit covariance floors or related regularization to avoid singular initial estimates.
+
+These are numerical and statistical choices for starting optimization. They should remain distinct from the model definition and from the inference algorithms that follow.
+
+With these model families in place, the mathematical structure of `xxm` can be read in both directions:
+
+$$
+\boxed{
+\begin{array}{c}
+\text{distributions, potentials, moments}
+\\
+\downarrow
+\\
+\text{discrete and Gaussian chains}
+\\
+\downarrow
+\\
+\text{Newton and Laplace approximations}
+\\
+\downarrow
+\\
+\text{HMM, AR-HMM, LDS, SLDS}.
+\end{array}
+}
+$$
+
+Conversely, each complete model can be reduced back to this same small collection of mathematical operations.
+
+That shared structure is what allows the model families to differ statistically while reusing the same inference and fitting machinery.
+
