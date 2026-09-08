@@ -83,6 +83,24 @@ class _NewtonSearchModel(
         )
 
 
+def local_gaussian_approximation(
+    chain: GaussianChain,
+    emissions: LaplaceEmissions,
+    observations: jax.Array,
+    latents: jax.Array,
+) -> tuple[GaussianChainMarginals, jax.Array]:
+    """Construct a local Gaussian posterior approximation around `latents`."""
+
+    observation_potential = emissions.compute_local_potential(
+        observations,
+        latents,
+    )
+
+    posterior_chain = chain.add_local_potential(observation_potential)
+
+    return posterior_chain.forward_backward()
+
+
 def laplace_inference(
     chain: GaussianChain,
     emissions: LaplaceEmissions,
@@ -104,8 +122,6 @@ def laplace_inference(
     expected switching factors in SLDS inference need not satisfy this condition.
     """
 
-    latents = initial_latents
-
     search_params.validate()
 
     newton_model = _NewtonSearchModel(
@@ -115,7 +131,7 @@ def laplace_inference(
     )
 
     initial_params = _NewtonSearchParams(
-        latents=latents,
+        latents=initial_latents,
     )
 
     search = NewtonSearch[_NewtonSearchParams](
@@ -125,17 +141,9 @@ def laplace_inference(
 
     final = search.optimize(params=initial_params)
 
-    latents = final.params.latents
-
-    # Rebuild the approximation at the final mode: the covariance of the
-    # Laplace approximation must use the Hessian evaluated there.
-    observation_potential = emissions.compute_local_potential(
-        observations,
-        latents,
+    return local_gaussian_approximation(
+        chain=chain,
+        emissions=emissions,
+        observations=observations,
+        latents=final.params.latents,
     )
-
-    posterior_chain = newton_model.latent_chain.add_local_potential(
-        observation_potential,
-    )
-
-    return posterior_chain.forward_backward()

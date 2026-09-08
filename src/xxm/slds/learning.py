@@ -122,8 +122,8 @@ def laplace_em_step(
         model,
         observations,
         num_iters=num_inference_iters,
-        initial_latents=(inferred.posterior.continuous.means),
-        initial_discrete_posterior=(inferred.posterior.discrete),
+        initial_latents=inferred.posterior.continuous.means,
+        initial_discrete_posterior=inferred.posterior.discrete,
         params=params,
     )
 
