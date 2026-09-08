@@ -23,6 +23,7 @@ import jax.numpy as jnp
 from xxm.core.chains.discrete import DiscretePotential
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
+from xxm.core.optim import categorical as categorical_fit
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import poisson as poisson_fit
 from xxm.core.posteriors import DiscretePosterior
@@ -195,21 +196,28 @@ class AREmissions(
         posterior: DiscretePosterior,
     ) -> typing.Self:
         """Fit AR parameters conditional on the initial observation history."""
+
         predictors = self.predictors(
             observations,
         )  # (T-L, L, N)
 
         current = observations[self.num_lags :]  # (T-L, N)
 
-        model = _fit_ar_model(
+        weights = posterior.state_probs  # (T-L, K)
+
+        fitted = _fit_ar_model(
             dist=self.dist,
             inputs=predictors,
             outputs=current,
-            weights=posterior.state_probs,  # (T-L, K)
+            weights=weights,
         )
 
         return self._replace(
-            dist=model,
+            dist=categorical_fit.filter_valid_states(
+                fitted,
+                self.dist,
+                weights,
+            ),
         )
 
     def permute(

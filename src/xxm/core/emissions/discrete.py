@@ -7,6 +7,7 @@ import jax
 from xxm.core.chains.discrete import DiscretePotential
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
+from xxm.core.optim import categorical as categorical_fit
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import poisson as poisson_fit
 from xxm.core.posteriors import DiscretePosterior
@@ -94,14 +95,21 @@ class GaussianEmissions(typing.NamedTuple):
         observations: jax.Array,
         posterior: DiscretePosterior,
     ) -> typing.Self:
-        """Fit Gaussian means and covariances from posterior state weights."""
-        gaussian = gaussian_fit.from_samples_weighted(
+        """Fit Gaussian parameters from posterior state weights."""
+
+        weights = posterior.state_probs
+
+        fitted = gaussian_fit.from_samples_weighted(
             observations,
-            posterior.state_probs,
+            weights,
         )
 
         return self._replace(
-            dist=gaussian,
+            dist=categorical_fit.filter_valid_states(
+                fitted,
+                self.dist,
+                weights,
+            ),
         )
 
     def sample(self, key: jax.Array, states: jax.Array) -> jax.Array:
@@ -141,13 +149,24 @@ class PoissonEmissions(typing.NamedTuple):
         )
 
     def fit_params(
-        self, observations: jax.Array, posterior: DiscretePosterior
-    ) -> 'PoissonEmissions':
+        self,
+        observations: jax.Array,
+        posterior: DiscretePosterior,
+    ) -> typing.Self:
         """Fit state-specific Poisson log rates from posterior state weights."""
+
+        weights = posterior.state_probs
+
+        fitted = poisson_fit.from_samples_weighted(
+            values=observations,
+            weights=weights,
+        )
+
         return self._replace(
-            dist=poisson_fit.from_samples_weighted(
-                values=observations,
-                weights=posterior.state_probs,
+            dist=categorical_fit.filter_valid_states(
+                fitted,
+                self.dist,
+                weights,
             ),
         )
 

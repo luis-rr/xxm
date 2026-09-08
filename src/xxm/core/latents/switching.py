@@ -10,6 +10,7 @@ from xxm.core.chains.gaussian import (
     GaussianPairPotential,
 )
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian, PairedGaussian
+from xxm.core.optim import categorical as categorical_fit
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.posteriors import ContinuousPosterior, DiscretePosterior
 
@@ -39,11 +40,14 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         discrete: DiscretePosterior,
         continuous: ContinuousPosterior,
     ) -> typing.Self:
-        r"""Fit dynamics from continuous pair moments weighted by incoming state marginals.
+        r"""
+        Fit dynamics from continuous pair moments weighted by incoming state marginals.
 
         The pair $(x_{t-1},x_t)$ receives weight $q(z_t=k)$, taken from
-        `discrete.state_probs[1:]`. Exactly empty states retain their parameters.
+        `discrete.state_probs[1:]`. States with insufficient posterior mass retain
+        their current parameters.
         """
+
         weights = discrete.state_probs[1:]  # (T-1, K)
 
         paired = PairedGaussian(
@@ -67,26 +71,17 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
             weights=weights,
         )  # K-batched
 
-        fitted_model = gaussian_fit.linear_from_paired(
+        fitted = gaussian_fit.linear_from_paired(
             paired,
             ridge=1e-6,
         )
 
-        # Preserve the current parameters for exactly empty states.
-        active = jnp.sum(weights, axis=0) > 0.0  # (K,)
-
-        model = jax.tree.map(
-            lambda fitted, current: jnp.where(
-                active.reshape((active.shape[0],) + (1,) * (fitted.ndim - 1)),
-                fitted,
-                current,
-            ),
-            fitted_model,
-            self.dist,
-        )
-
         return self._replace(
-            dist=model,
+            dist=categorical_fit.filter_valid_states(
+                fitted,
+                self.dist,
+                weights,
+            ),
         )
 
     def sample_next(
