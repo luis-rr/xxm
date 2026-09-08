@@ -216,9 +216,15 @@ class GaussianLDS:
 
     def infer(self, observations: jax.Array) -> Inferred[typing.Self, Posterior]:
         """Compute the exact Gaussian posterior and observation log likelihood."""
-        return _infer_exact_jit(
+        inferred = _infer_exact_jit(
             self._model,
             observations,
+        )
+
+        return Inferred(
+            model=self.__class__(inferred.model),
+            posterior=inferred.posterior,
+            objective=inferred.objective,
         )
 
     def fit(
@@ -399,11 +405,17 @@ class PoissonLDS:
         """
         Compute the Laplace posterior and approximate observation log likelihood.
         """
-        return _infer_laplace_jit(
+        inferred = _infer_laplace_jit(
             self._model,
             observations,
             initial_latents=initial_latents,
             params=laplace_params,
+        )
+
+        return Inferred(
+            model=self.__class__(inferred.model),
+            posterior=inferred.posterior,
+            objective=inferred.objective,
         )
 
     def fit(

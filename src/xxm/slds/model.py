@@ -287,10 +287,16 @@ class GaussianSLDS:
         Compute a structured mean-field posterior with conjugate updates for $q(x)$,
         returning its ELBO.
         """
-        return _infer_variational_jit(
+        inferred = _infer_variational_jit(
             self._model,
             observations,
             num_iters=num_iters,
+        )
+
+        return Inferred(
+            model=self.__class__(inferred.model),
+            posterior=inferred.posterior,
+            objective=inferred.objective,
         )
 
     def fit(
@@ -542,12 +548,18 @@ class PoissonSLDS:
         Compute a structured mean-field posterior with Laplace updates for $q(x)$,
         returning its ELBO.
         """
-        return _infer_laplace_jit(
+        inferred = _infer_laplace_jit(
             self._model,
             observations,
             num_iters=num_iters,
             initial_latents=initial_latents,
             params=params,
+        )
+
+        return Inferred(
+            model=self.__class__(inferred.model),
+            posterior=inferred.posterior,
+            objective=inferred.objective,
         )
 
     def fit(

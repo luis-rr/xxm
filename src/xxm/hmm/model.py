@@ -174,9 +174,15 @@ class GaussianHMM:
         observations: jax.Array,
     ) -> Inferred[typing.Self, Posterior]:
         """Compute the exact posterior over states and the observation log likelihood."""
-        return _infer_exact_jit(
+        inferred = _infer_exact_jit(
             self._model,
             observations,
+        )
+
+        return Inferred(
+            model=self.__class__(inferred.model),
+            posterior=inferred.posterior,
+            objective=inferred.objective,
         )
 
     def fit(
@@ -325,11 +331,17 @@ class PoissonHMM:
     def infer(
         self,
         observations: jax.Array,
-    ) -> Inferred[Model[PoissonEmissions], Posterior]:
+    ) -> Inferred[typing.Self, Posterior]:
         """Compute the exact posterior over states and the observation log likelihood."""
-        return infer_exact(
+        inferred = infer_exact(
             self._model,
             observations,
+        )
+
+        return Inferred(
+            model=self.__class__(inferred.model),
+            posterior=inferred.posterior,
+            objective=inferred.objective,
         )
 
     def fit(
@@ -408,22 +420,22 @@ class GaussianARHMM:
     observed values.
     """
 
-    model: Model[AREmissions[LinearGaussian]]
+    _model: Model[AREmissions[LinearGaussian]]
 
     @property
     def num_states(self) -> int:
         """Number of discrete states $K$."""
-        return self.model.num_states
+        return self._model.num_states
 
     @property
     def output_dim(self) -> int:
         """Observation dimension $D_y$."""
-        return self.model.emissions.output_dim
+        return self._model.emissions.output_dim
 
     @property
     def num_lags(self) -> int:
         """Number of autoregressive lags $L$."""
-        return self.model.emissions.num_lags
+        return self._model.emissions.num_lags
 
     def permute(
         self,
@@ -431,13 +443,13 @@ class GaussianARHMM:
     ) -> GaussianARHMM:
         """Relabel discrete states by permutation."""
         return GaussianARHMM(
-            model=self.model.permute(permutation),
+            _model=self._model.permute(permutation),
         )
 
     @property
     def states(self) -> LinearGaussian:
         """State-conditional autoregressive Gaussian distributions."""
-        return self.model.emissions.dist
+        return self._model.emissions.dist
 
     def states_conditional(
         self,
@@ -449,7 +461,7 @@ class GaussianARHMM:
         For an input sequence of length ``T``, the returned distributions have
         ``T - num_lags`` time steps.
         """
-        return self.model.emissions.conditional(
+        return self._model.emissions.conditional(
             observations,
         )
 
@@ -493,7 +505,7 @@ class GaussianARHMM:
         )
 
         return cls(
-            model=Model(
+            _model=Model(
                 initial=initial,
                 transitions=transitions,
                 emissions=AREmissions(
@@ -550,12 +562,12 @@ class GaussianARHMM:
         returned.
         """
         if initial_history is None:
-            return self.model.sample(
+            return self._model.sample(
                 key,
                 num_steps,
             )
 
-        return self.model.sample_continuation(
+        return self._model.sample_continuation(
             key,
             num_steps,
             initial_history,
@@ -564,16 +576,22 @@ class GaussianARHMM:
     def infer(
         self,
         observations: jax.Array,
-    ) -> Inferred[Model[AREmissions[LinearGaussian]], Posterior]:
+    ) -> Inferred[typing.Self, Posterior]:
         """
         Infer states conditional on the first ``num_lags`` observations.
 
         For an input sequence of length ``T``, the posterior has
         ``T - num_lags`` latent steps.
         """
-        return infer_exact(
-            self.model,
+        inferred = infer_exact(
+            self._model,
             observations,
+        )
+
+        return Inferred(
+            model=self.__class__(inferred.model),
+            posterior=inferred.posterior,
+            objective=inferred.objective,
         )
 
     def fit(
@@ -585,7 +603,7 @@ class GaussianARHMM:
     ) -> Fitted[typing.Self, Posterior]:
         """Fit the conditional AR-HMM with expectation maximization."""
         fit = fit_em(
-            self.model,
+            self._model,
             observations,
             num_iters=num_iters,
             progress=progress,
@@ -608,7 +626,7 @@ class GaussianARHMM:
     ) -> FittedCollection[typing.Self, Posterior]:
         """Fit multiple AR-HMM initializations to the same sequence."""
         fit = fit_em_many(
-            tuple(model.model for model in models),
+            tuple(model._model for model in models),
             observations,
             num_iters=num_iters,
             progress=progress,
@@ -652,22 +670,22 @@ class PoissonARHMM:
     observed values.
     """
 
-    model: Model[AREmissions[LinearPoisson]]
+    _model: Model[AREmissions[LinearPoisson]]
 
     @property
     def num_states(self) -> int:
         """Number of discrete states $K$."""
-        return self.model.num_states
+        return self._model.num_states
 
     @property
     def output_dim(self) -> int:
         """Observation dimension $D_y$."""
-        return self.model.emissions.output_dim
+        return self._model.emissions.output_dim
 
     @property
     def num_lags(self) -> int:
         """Number of autoregressive lags $L$."""
-        return self.model.emissions.num_lags
+        return self._model.emissions.num_lags
 
     def permute(
         self,
@@ -675,13 +693,13 @@ class PoissonARHMM:
     ) -> PoissonARHMM:
         """Relabel discrete states by permutation."""
         return PoissonARHMM(
-            model=self.model.permute(permutation),
+            _model=self._model.permute(permutation),
         )
 
     @property
     def states(self) -> LinearPoisson:
         """State-conditional autoregressive Poisson distributions."""
-        return self.model.emissions.dist
+        return self._model.emissions.dist
 
     def states_conditional(
         self,
@@ -693,7 +711,7 @@ class PoissonARHMM:
         For an input sequence of length ``T``, the returned distributions have
         ``T - num_lags`` time steps.
         """
-        return self.model.emissions.conditional(
+        return self._model.emissions.conditional(
             observations,
         )
 
@@ -736,7 +754,7 @@ class PoissonARHMM:
         )
 
         return cls(
-            model=Model(
+            _model=Model(
                 initial=initial,
                 transitions=transitions,
                 emissions=AREmissions(
@@ -792,12 +810,12 @@ class PoissonARHMM:
         returned.
         """
         if initial_history is None:
-            return self.model.sample(
+            return self._model.sample(
                 key,
                 num_steps,
             )
 
-        return self.model.sample_continuation(
+        return self._model.sample_continuation(
             key,
             num_steps,
             initial_history,
@@ -810,9 +828,15 @@ class PoissonARHMM:
         For an input sequence of length ``T``, the posterior has
         ``T - num_lags`` latent steps.
         """
-        return _infer_exact_jit(
-            self.model,
+        inferred = _infer_exact_jit(
+            self._model,
             observations,
+        )
+
+        return Inferred(
+            model=self.__class__(inferred.model),
+            posterior=inferred.posterior,
+            objective=inferred.objective,
         )
 
     def fit(
@@ -824,7 +848,7 @@ class PoissonARHMM:
     ) -> Fitted[typing.Self, Posterior]:
         """Fit the conditional AR-HMM with expectation maximization."""
         fit = _fit_em_jit(
-            self.model,
+            self._model,
             observations,
             num_iters=num_iters,
             progress=progress,
@@ -847,7 +871,7 @@ class PoissonARHMM:
     ) -> FittedCollection[typing.Self, Posterior]:
         """Fit multiple AR-HMM initializations to the same sequence."""
         fit = _fit_em_many_jit(
-            tuple(model.model for model in models),
+            tuple(model._model for model in models),
             observations,
             num_iters=num_iters,
             progress=progress,
