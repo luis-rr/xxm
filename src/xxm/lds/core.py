@@ -161,10 +161,8 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
     def align(self, alignment: Affine) -> typing.Self:
         """Express the LDS in aligned continuous latent coordinates."""
-        inverse = alignment.inverse()
-
         return self._replace(
             initial=self.initial.align(alignment),
             dynamics=self.dynamics.align(alignment),
-            emissions=self.emissions.compose_input(inverse),
+            emissions=self.emissions.compose_input(alignment),
         )
