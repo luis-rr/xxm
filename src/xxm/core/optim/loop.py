@@ -39,12 +39,12 @@ class FitCollection(typing.NamedTuple, typing.Generic[StateT]):
     objective_traces: jax.Array  # (M, num_iters + 1)
 
     def best_index(self) -> int:
-        """Index of the best fit among those with NaN-free objective traces."""
+        """Index of the best fit among those with finite objective traces."""
 
         valid = self.is_valid()
 
         if not jnp.any(valid):
-            raise ValueError('No fit has a NaN-free objective trace')
+            raise ValueError('No fit has a finite objective trace')
 
         valid_indices = jnp.where(valid)[0]
         valid_final_objectives = self.objective_traces[valid, -1]
@@ -54,9 +54,9 @@ class FitCollection(typing.NamedTuple, typing.Generic[StateT]):
         return int(valid_indices[best_valid_index])
 
     def is_valid(self) -> jax.Array:
-        """Boolean array indicating which fits have NaN-free objective traces."""
+        """Boolean array indicating which fits have finite objective traces."""
 
-        return ~jnp.isnan(self.objective_traces).any(axis=1)
+        return jnp.isfinite(self.objective_traces).all(axis=1)
 
     def best(self) -> Fit[StateT]:
         """Return the fit with the highest final objective."""
