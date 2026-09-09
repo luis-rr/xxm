@@ -17,7 +17,7 @@ import jax.numpy as jnp
 import jax.scipy.linalg as jsp_linalg
 
 from xxm.core.affine import Affine
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.dists.gaussian import Gaussian, LinearGaussian, PairedGaussian
 
 
 def _precision_and_log_det(
@@ -1051,6 +1051,24 @@ class GaussianChainMarginals(typing.NamedTuple):
         joint_dim = num_steps * variable_dim
 
         return 0.5 * (joint_dim * (1.0 + jnp.log(2.0 * jnp.pi)) + joint_log_det)
+
+    def paired_marginals(self) -> PairedGaussian:
+        """Return adjacent marginals $(x_t, x_{t+1})$."""
+        return PairedGaussian(
+            left=Gaussian(
+                mean=self.means[:-1],
+                covariance=self.covariances[:-1],
+            ),
+            right=Gaussian(
+                mean=self.means[1:],
+                covariance=self.covariances[1:],
+            ),
+            cross_covariance=jnp.swapaxes(
+                self.cross_covariances,
+                -2,
+                -1,
+            ),
+        )
 
 
 def _solve_from_cholesky(

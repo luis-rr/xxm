@@ -4,6 +4,8 @@ import typing
 
 import jax
 
+from xxm.core.dists.gaussian import PairedGaussian
+
 
 class DiscretePosterior(typing.Protocol):
     r"""Protocol for discrete posterior marginals.
@@ -53,4 +55,8 @@ class ContinuousPosterior(typing.Protocol):
 
     def raw_cross_moments(self) -> jax.Array:  # (T-1, D, D)
         r"""Raw cross-moments $\mathbb{E}_q[x_t x_{t+1}^\top]$."""
+        ...
+
+    def paired_marginals(self) -> PairedGaussian:
+        r"""Return adjacent Gaussian marginals $q(x_t, x_{t+1})$."""
         ...

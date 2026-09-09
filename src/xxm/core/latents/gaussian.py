@@ -7,7 +7,7 @@ from jax import numpy as jnp
 
 from xxm.core.affine import Affine
 from xxm.core.chains.gaussian import GaussianPotential
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian, PairedGaussian
+from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.posteriors import ContinuousPosterior
 
@@ -87,25 +87,9 @@ class GaussianLinearDynamics(typing.NamedTuple):
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
     ) -> typing.Self:
         r"""Fit dynamics from posterior pair marginals via moment matching."""
-        paired = PairedGaussian(
-            left=Gaussian(
-                mean=posterior.means[:-1],
-                covariance=posterior.covariances[:-1],
-            ),
-            right=Gaussian(
-                mean=posterior.means[1:],
-                covariance=posterior.covariances[1:],
-            ),
-            # posterior stores Cov(x_t, x_{t+1});
-            # PairedGaussian stores Cov(right, left).
-            cross_covariance=jnp.swapaxes(
-                posterior.cross_covariances,
-                -2,
-                -1,
-            ),
+        paired = gaussian_fit.paired_from_moment_match(
+            posterior.paired_marginals(),
         )
-
-        paired = gaussian_fit.paired_from_moment_match(paired)
 
         return self._replace(
             dist=gaussian_fit.linear_from_paired(

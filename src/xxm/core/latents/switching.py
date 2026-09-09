@@ -9,7 +9,7 @@ from xxm.core.affine import Affine
 from xxm.core.chains.gaussian import (
     GaussianPairPotential,
 )
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian, PairedGaussian
+from xxm.core.dists.gaussian import LinearGaussian
 from xxm.core.optim import categorical as categorical_fit
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.posteriors import ContinuousPosterior, DiscretePosterior
@@ -50,26 +50,10 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         their current parameters.
         """
 
-        weights = discrete.state_probs[1:]  # (T-1, K)
-
-        paired = PairedGaussian(
-            left=Gaussian(
-                mean=continuous.means[:-1],
-                covariance=continuous.covariances[:-1],
-            ),
-            right=Gaussian(
-                mean=continuous.means[1:],
-                covariance=continuous.covariances[1:],
-            ),
-            cross_covariance=jnp.swapaxes(
-                continuous.cross_covariances,
-                -2,
-                -1,
-            ),
-        )  # (T-1)-batched
+        weights = discrete.state_probs[1:]  # (T - 1, K)
 
         paired = gaussian_fit.paired_from_moment_match(
-            paired,
+            continuous.paired_marginals(),
             weights=weights,
         )  # K-batched
 
