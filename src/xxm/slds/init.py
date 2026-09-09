@@ -16,9 +16,16 @@ from xxm.core.optim import categorical as categorical_fit
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.hmm.core import Model as HMMModel
 from xxm.hmm.inference import infer_exact as infer_hmm
-from xxm.hmm.init import init_gaussian_ar
+from xxm.hmm.init import (
+    DEFAULT_SELF_TRANSITION_PROB,
+    init_gaussian_ar,
+)
 from xxm.hmm.learning import fit_em as fit_hmm
-from xxm.lds.init import pca_latents
+from xxm.lds.init import (
+    DEFAULT_POISSON_COUNT_FLOOR,
+    pca_latents,
+    pca_latents_poisson,
+)
 
 from .core import GaussianLinearSwitchingDynamics, Model
 
@@ -117,40 +124,13 @@ def _from_arhmm(
     )
 
 
-def _initialize_pca_arhmm(
-    key: jax.Array,
-    observations: jax.Array,
-    num_states: int,
-    latent_dim: int,
-    self_transition_prob: float,
-) -> tuple[jax.Array, HMMModel[AREmissions[LinearGaussian]]]:
-    """Initialize PCA latents and a lag-1 AR-HMM."""
-    _validate_initialization(
-        observations,
-        num_states,
-        latent_dim,
-    )
-
-    latents = pca_latents(observations, latent_dim)
-
-    arhmm = init_gaussian_ar(
-        key=key,
-        observations=latents,
-        num_states=num_states,
-        num_lags=1,
-        self_transition_prob=self_transition_prob,
-    )
-
-    return latents, arhmm
-
-
 def init_pca_gaussian(
     key: jax.Array,
     observations: jax.Array,
     num_states: int,
     latent_dim: int,
     *,
-    self_transition_prob: float = 0.9,
+    self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
     covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     pseudocount=categorical_fit.DEFAULT_PSEUDOCOUNT,
 ) -> Model[GaussianEmissions]:
@@ -162,11 +142,22 @@ def init_pca_gaussian(
     initializer to obtain state-specific linear dynamics, without running
     AR-HMM EM.
     """
-    latents, arhmm = _initialize_pca_arhmm(
+    _validate_initialization(
+        observations,
+        num_states,
+        latent_dim,
+    )
+
+    latents = pca_latents(
+        observations,
+        latent_dim,
+    )
+
+    arhmm = init_gaussian_ar(
         key=key,
-        observations=observations,
+        observations=latents,
         num_states=num_states,
-        latent_dim=latent_dim,
+        num_lags=1,
         self_transition_prob=self_transition_prob,
     )
 
@@ -192,7 +183,7 @@ def init_arhmm_gaussian(
     latent_dim: int,
     *,
     num_arhmm_iters: int = 10,
-    self_transition_prob: float = 0.9,
+    self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
     covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     pseudocount=categorical_fit.DEFAULT_PSEUDOCOUNT,
     progress: bool | str = 'AR-HMM',
@@ -206,11 +197,20 @@ def init_arhmm_gaussian(
     SLDS. State occupancies across the fitted latent trajectory initialize the
     boundary distributions of ``z[0]`` and ``x[0] | z[0]``.
     """
-    latents, arhmm = _initialize_pca_arhmm(
+
+    _validate_initialization(
+        observations,
+        num_states,
+        latent_dim,
+    )
+
+    latents = pca_latents(observations, latent_dim)
+
+    arhmm = init_gaussian_ar(
         key=key,
-        observations=observations,
+        observations=latents,
         num_states=num_states,
-        latent_dim=latent_dim,
+        num_lags=1,
         self_transition_prob=self_transition_prob,
     )
 
@@ -242,18 +242,29 @@ def init_pca_poisson(
     num_states: int,
     latent_dim: int,
     *,
-    self_transition_prob: float = 0.9,
+    self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
     covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     pseudocount=categorical_fit.DEFAULT_PSEUDOCOUNT,
+    count_floor: float = DEFAULT_POISSON_COUNT_FLOOR,
 ) -> Model[PoissonEmissions]:
-    """
-    Initialize a Poisson SLDS from a PCA latent representation.
-    """
-    latents, arhmm = _initialize_pca_arhmm(
+    """Initialize a Poisson SLDS from inverse-link PCA latents."""
+    _validate_initialization(
+        observations,
+        num_states,
+        latent_dim,
+    )
+
+    latents = pca_latents_poisson(
+        observations,
+        latent_dim,
+        count_floor,
+    )
+
+    arhmm = init_gaussian_ar(
         key=key,
-        observations=observations,
+        observations=latents,
         num_states=num_states,
-        latent_dim=latent_dim,
+        num_lags=1,
         self_transition_prob=self_transition_prob,
     )
 
@@ -278,19 +289,30 @@ def init_arhmm_poisson(
     latent_dim: int,
     *,
     num_arhmm_iters: int = 10,
-    self_transition_prob: float = 0.9,
+    self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
     covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     pseudocount=categorical_fit.DEFAULT_PSEUDOCOUNT,
+    count_floor: float = DEFAULT_POISSON_COUNT_FLOOR,
     progress: bool | str = 'AR-HMM',
 ) -> Model[PoissonEmissions]:
-    """
-    Initialize a Poisson SLDS by fitting an AR-HMM to PCA latents.
-    """
-    latents, arhmm = _initialize_pca_arhmm(
+    """Initialize a Poisson SLDS by fitting an AR-HMM to inverse-link PCA latents."""
+    _validate_initialization(
+        observations,
+        num_states,
+        latent_dim,
+    )
+
+    latents = pca_latents_poisson(
+        observations,
+        latent_dim,
+        count_floor,
+    )
+
+    arhmm = init_gaussian_ar(
         key=key,
-        observations=observations,
+        observations=latents,
         num_states=num_states,
-        latent_dim=latent_dim,
+        num_lags=1,
         self_transition_prob=self_transition_prob,
     )
 

@@ -20,6 +20,8 @@ from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import poisson as poisson_fit
 from xxm.hmm.core import Model
 
+DEFAULT_SELF_TRANSITION_PROB = 0.9
+
 
 def _kmeans(
     key: jax.Array,
@@ -78,7 +80,7 @@ def _init(
     emissions: Emissions,
     num_states: int,
     dtype: jnp.dtype,
-    self_transition_prob: float = 0.9,
+    self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
 ) -> Model:
     if num_states == 1:
         transition_probs = jnp.array(
@@ -151,7 +153,7 @@ def init_gaussian(
     key: jax.Array,
     observations: jax.Array,
     num_states: int,
-    self_transition_prob: float = 0.9,
+    self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
     covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
 ) -> Model:
     """Initialize Gaussian-emission HMM via K-means clustering."""
@@ -235,7 +237,7 @@ def init_gaussian_ar(
     observations: jax.Array,
     num_states: int,
     num_lags: int,
-    self_transition_prob: float = 0.9,
+    self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
 ) -> Model:
     r"""Initialize Gaussian AR-HMM with first $L$ observations as fixed history."""
     emissions = _init_ar_gaussian_emissions(
@@ -279,7 +281,7 @@ def init_poisson(
     key: jax.Array,
     observations: jax.Array,
     num_states: int,
-    self_transition_prob: float = 0.9,
+    self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
 ) -> Model:
     """Initialize a Poisson-emission HMM via K-means clustering."""
     emissions = _init_poisson_emissions(
@@ -332,7 +334,7 @@ def init_poisson_ar(
     observations: jax.Array,
     num_states: int,
     num_lags: int,
-    self_transition_prob: float = 0.9,
+    self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
 ) -> Model:
     """
     Initialize a Poisson AR-HMM conditional on the first ``num_lags`` values.

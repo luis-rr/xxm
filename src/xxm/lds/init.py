@@ -10,6 +10,8 @@ from xxm.core.optim.loop import unstack_states
 
 from .core import Model
 
+DEFAULT_POISSON_COUNT_FLOOR = 0.1
+
 
 def _validate_initialization(
     observations: jax.Array,
@@ -42,6 +44,30 @@ def pca_latents(
     )
 
     return centered @ vt[:latent_dim].T
+
+
+def pca_latents_poisson(
+    observations: jax.Array,
+    latent_dim: int,
+    count_floor: float,
+) -> jax.Array:
+    """
+    Project inverse-log-link-transformed Poisson observations onto PCA latents.
+
+    Counts are floored before taking logs so zero observations remain finite.
+    The transformation is used only to initialize the latent trajectory.
+    """
+    transformed = jnp.log(
+        jnp.maximum(
+            observations,
+            count_floor,
+        )
+    )
+
+    return pca_latents(
+        transformed,
+        latent_dim,
+    )
 
 
 def init_pca_gaussian(
@@ -90,13 +116,18 @@ def init_pca_poisson(
     observations: jax.Array,
     latent_dim: int,
     covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
+    count_floor: float = DEFAULT_POISSON_COUNT_FLOOR,
 ) -> Model[PoissonEmissions]:
-    """Initialize a Poisson LDS from PCA latents and Gaussian latent dynamics."""
-    _validate_initialization(observations, latent_dim)
-
-    latents = pca_latents(
+    """Initialize a Poisson LDS from inverse-link PCA latents."""
+    _validate_initialization(
         observations,
         latent_dim,
+    )
+
+    latents = pca_latents_poisson(
+        observations,
+        latent_dim,
+        count_floor=count_floor,
     )
 
     return Model(
@@ -119,6 +150,7 @@ def init_pca_poisson_many(
     observations: jax.Array,
     latent_dim: int,
     covariance_floors: jax.Array | None = None,
+    count_floor: float = DEFAULT_POISSON_COUNT_FLOOR,
 ) -> tuple[Model[PoissonEmissions], ...]:
     """Initialize multiple LDS models from PCA latent projections."""
 
@@ -127,6 +159,7 @@ def init_pca_poisson_many(
             observations,
             latent_dim,
             covariance_floor,
+            count_floor=count_floor,
         )
     )(covariance_floors)
 

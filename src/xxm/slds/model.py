@@ -29,6 +29,7 @@ from .core import (
 )
 from .inference import infer_laplace, infer_variational
 from .init import (
+    DEFAULT_SELF_TRANSITION_PROB,
     init_arhmm_gaussian,
     init_arhmm_poisson,
     init_pca_gaussian,
@@ -225,7 +226,7 @@ class GaussianSLDS:
         num_states: int,
         latent_dim: int,
         *,
-        self_transition_prob: float = 0.9,
+        self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     ) -> typing.Self:
         """Initialize a Gaussian SLDS from a principal-component decomposition."""
@@ -249,7 +250,7 @@ class GaussianSLDS:
         latent_dim: int,
         *,
         num_arhmm_iters: int = 10,
-        self_transition_prob: float = 0.9,
+        self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
         progress: bool | str = 'AR-HMM',
     ) -> typing.Self:
@@ -484,7 +485,7 @@ class PoissonSLDS:
         num_states: int,
         latent_dim: int,
         *,
-        self_transition_prob: float = 0.9,
+        self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     ) -> typing.Self:
         """Initialize a Poisson SLDS from a principal-component decomposition."""
@@ -508,7 +509,7 @@ class PoissonSLDS:
         latent_dim: int,
         *,
         num_arhmm_iters: int = 10,
-        self_transition_prob: float = 0.9,
+        self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
         progress: bool | str = 'AR-HMM',
     ) -> typing.Self:

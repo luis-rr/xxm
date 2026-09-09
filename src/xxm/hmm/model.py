@@ -26,6 +26,7 @@ from xxm.core.latents.discrete import (
 from .core import Model, Posterior
 from .inference import infer_exact
 from .init import (
+    DEFAULT_SELF_TRANSITION_PROB,
     init_gaussian,
     init_gaussian_ar,
     init_poisson,
@@ -150,7 +151,7 @@ class GaussianHMM:
         observations: jax.Array,
         num_states: int,
         *,
-        self_transition_prob: float = 0.9,
+        self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
     ) -> typing.Self:
         """Initialize a Gaussian HMM by clustering the observations with K-means."""
         model = init_gaussian(
@@ -309,7 +310,7 @@ class PoissonHMM:
         observations: jax.Array,
         num_states: int,
         *,
-        self_transition_prob: float = 0.9,
+        self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
     ) -> typing.Self:
         """Initialize a Poisson HMM by clustering the observations with K-means."""
         model = init_poisson(
@@ -528,7 +529,7 @@ class GaussianARHMM:
         num_states: int,
         num_lags: int,
         *,
-        self_transition_prob: float = 0.9,
+        self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
     ) -> typing.Self:
         """
         Initialize from autoregressive regression pairs.
@@ -776,7 +777,7 @@ class PoissonARHMM:
         num_states: int,
         num_lags: int,
         *,
-        self_transition_prob: float = 0.9,
+        self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
     ) -> typing.Self:
         """
         Initialize from autoregressive regression pairs.
