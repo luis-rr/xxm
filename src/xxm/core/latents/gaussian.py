@@ -17,12 +17,32 @@ class GaussianInitial(typing.NamedTuple):
 
     dist: Gaussian  # no batch
 
-    def fit_params(self, posterior: ContinuousPosterior) -> typing.Self:
+    def fit_params(
+        self,
+        posterior: ContinuousPosterior,
+        covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
+    ) -> typing.Self:
         r"""Fit the initial Gaussian from the posterior moments of $x_0$."""
-        mean = posterior.means[0]
-        covariance = posterior.covariances[0]
 
-        return self._replace(dist=Gaussian(mean=mean, covariance=covariance))
+        reference = gaussian_fit.from_moment_match(
+            Gaussian(
+                mean=posterior.means,
+                covariance=posterior.covariances,
+            )
+        )
+
+        covariance = gaussian_fit.add_covariance_floor(
+            posterior.covariances[0],
+            reference_covariance=reference.covariance,
+            covariance_floor=covariance_floor,
+        )
+
+        return self._replace(
+            dist=Gaussian(
+                mean=posterior.means[0],
+                covariance=covariance,
+            )
+        )
 
     def sample(self, key: jax.Array) -> jax.Array:
         """Sample initial latent state."""
@@ -42,35 +62,15 @@ class GaussianInitial(typing.NamedTuple):
     ) -> typing.Self:
         """Estimate an initial Gaussian from a known latent trajectory."""
 
-        def _covariance(
-            values: jax.Array,
-        ) -> jax.Array:
-            centered = values - jnp.mean(values, axis=0)
-            return centered.T @ centered / values.shape[0]
+        reference = gaussian_fit.from_samples(
+            latents,
+            covariance_floor=covariance_floor,
+        )
 
-        def _add_covariance_floor(
-            covariance: jax.Array,
-            covariance_floor: float,
-            reference: jax.Array,
-        ) -> jax.Array:
-            """Add an isotropic floor relative to the typical variance of a reference."""
-            scale = jnp.mean(jnp.var(reference, axis=0))
-
-            return covariance + covariance_floor * scale * jnp.eye(
-                covariance.shape[0],
-                dtype=covariance.dtype,
-            )
-
-        # There is only one initial latent estimate, so use the overall
-        # latent covariance as a reasonable scale for its uncertainty.
         return cls(
             Gaussian(
                 mean=latents[0],
-                covariance=_add_covariance_floor(
-                    _covariance(latents),
-                    covariance_floor,
-                    reference=latents,
-                ),
+                covariance=reference.covariance,
             )
         )
 
