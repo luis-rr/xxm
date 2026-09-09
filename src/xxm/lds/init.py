@@ -5,6 +5,7 @@ from jax import numpy as jnp
 
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
+from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim.loop import unstack_states
 
 from .core import Model
@@ -46,7 +47,7 @@ def pca_latents(
 def init_pca_gaussian(
     observations: jax.Array,
     latent_dim: int,
-    covariance_floor: float = 1e-2,
+    covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
 ) -> Model[GaussianEmissions]:
     """Initialize a Gaussian LDS from PCA latents and a covariance floor."""
     _validate_initialization(observations, latent_dim)
@@ -88,7 +89,7 @@ def init_pca_gaussian_many(
 def init_pca_poisson(
     observations: jax.Array,
     latent_dim: int,
-    covariance_floor: float = 1e-2,
+    covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
 ) -> Model[PoissonEmissions]:
     """Initialize a Poisson LDS from PCA latents and Gaussian latent dynamics."""
     _validate_initialization(observations, latent_dim)

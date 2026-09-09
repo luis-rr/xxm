@@ -19,6 +19,7 @@ from xxm.core.latents.discrete import (
     CategoricalTransitions,
 )
 from xxm.core.latents.gaussian import StateConditionedGaussian
+from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
 
 from .core import (
@@ -225,7 +226,7 @@ class GaussianSLDS:
         latent_dim: int,
         *,
         self_transition_prob: float = 0.9,
-        covariance_floor: float = 1e-2,
+        covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     ) -> typing.Self:
         """Initialize a Gaussian SLDS from a principal-component decomposition."""
         model = init_pca_gaussian(
@@ -249,7 +250,7 @@ class GaussianSLDS:
         *,
         num_arhmm_iters: int = 10,
         self_transition_prob: float = 0.9,
-        covariance_floor: float = 1e-2,
+        covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
         progress: bool | str = 'AR-HMM',
     ) -> typing.Self:
         """Initialize a Gaussian SLDS using an autoregressive HMM fit."""
@@ -484,7 +485,7 @@ class PoissonSLDS:
         latent_dim: int,
         *,
         self_transition_prob: float = 0.9,
-        covariance_floor: float = 1e-2,
+        covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     ) -> typing.Self:
         """Initialize a Poisson SLDS from a principal-component decomposition."""
         model = init_pca_poisson(
@@ -508,7 +509,7 @@ class PoissonSLDS:
         *,
         num_arhmm_iters: int = 10,
         self_transition_prob: float = 0.9,
-        covariance_floor: float = 1e-2,
+        covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
         progress: bool | str = 'AR-HMM',
     ) -> typing.Self:
         """Initialize a Poisson SLDS using an autoregressive HMM fit."""

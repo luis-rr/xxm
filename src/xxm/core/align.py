@@ -7,8 +7,7 @@ import jax.numpy as jnp
 
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian
-from xxm.core.optim.gaussian import from_moment_match as _from_moment_match
-from xxm.core.optim.gaussian import from_samples as _from_samples
+from xxm.core.optim import gaussian as _gaussian_fit
 
 
 def match_states(costs: jax.Array) -> jax.Array:
@@ -146,7 +145,7 @@ def zscore_gaussian(gaussian: Gaussian) -> Affine:
         )
 
     if gaussian.batch_shape:
-        gaussian = _from_moment_match(gaussian)
+        gaussian = _gaussian_fit.from_moment_match(gaussian)
 
     scale = jnp.sqrt(gaussian.variance)
 
@@ -159,6 +158,11 @@ def zscore_gaussian(gaussian: Gaussian) -> Affine:
     )
 
 
-def zscore_samples(data: jax.Array) -> Affine:
+def zscore_samples(data: jax.Array, covariance_floor: float = 0.0) -> Affine:
     """Return an affine map that z-scores samples along the first axis."""
-    return zscore_gaussian(_from_samples(data))
+    return zscore_gaussian(
+        _gaussian_fit.from_samples(
+            data,
+            covariance_floor=covariance_floor,
+        )
+    )

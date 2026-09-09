@@ -116,6 +116,7 @@ def _init_gaussian_emissions(
     key: jax.Array,
     observations: jax.Array,  # (T, N)
     num_states: int,
+    covariance_floor,
 ) -> GaussianEmissions:
     assignments = _kmeans(
         key=key,
@@ -127,6 +128,7 @@ def _init_gaussian_emissions(
         values=observations,
         assignments=assignments,
         num_groups=num_states,
+        covariance_floor=covariance_floor,
     )
 
     covariance = (
@@ -150,12 +152,14 @@ def init_gaussian(
     observations: jax.Array,
     num_states: int,
     self_transition_prob: float = 0.9,
+    covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
 ) -> Model:
     """Initialize Gaussian-emission HMM via K-means clustering."""
     emissions = _init_gaussian_emissions(
         observations=observations,
         num_states=num_states,
         key=key,
+        covariance_floor=covariance_floor,
     )
     return _init(
         emissions=emissions,
@@ -198,6 +202,7 @@ def _init_ar_gaussian_emissions(
     num_states: int,
     num_lags: int,
     ridge=gaussian_fit.DEFAULT_RIDGE,
+    covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
 ) -> AREmissions[LinearGaussian]:
     predictors = lagged_observations(
         observations,
@@ -219,9 +224,8 @@ def _init_ar_gaussian_emissions(
         assignments=assignments,
         num_groups=num_states,
         ridge=ridge,
+        covariance_floor=covariance_floor,
     )
-
-    model = model.add_covariance_jitter(1e-6)
 
     return AREmissions(model)
 

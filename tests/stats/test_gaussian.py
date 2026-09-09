@@ -49,7 +49,11 @@ def test_fit_weighted_matches_hard_assignments():
         ]
     )
 
-    fit = gaussian_fit.from_samples_weighted(observations, weights)
+    fit = gaussian_fit.from_samples_weighted(
+        observations,
+        weights,
+        covariance_floor=0.0,
+    )
 
     np.testing.assert_allclose(fit.mean, [[1.0], [12.0]], atol=ATOL)
     np.testing.assert_allclose(fit.covariance, [[[1.0]], [[4.0]]], atol=ATOL)
@@ -69,11 +73,13 @@ def test_fit_linear_recovers_exact_affine_map():
         inputs,
         outputs,
         ridge=0.0,
+        covariance_floor=0.0,
     )
     jitted = jax.jit(gaussian_fit.linear_from_samples)(
         inputs,
         outputs,
         ridge=0.0,
+        covariance_floor=0.0,
     )
 
     for fit in (eager, jitted):
@@ -111,6 +117,7 @@ def test_fit_weighted_linear_recovers_state_specific_affine_maps():
         outputs,
         weights,
         ridge=0.0,
+        covariance_floor=0.0,
     )
 
     np.testing.assert_allclose(
@@ -145,17 +152,20 @@ def test_public_routines_are_jittable():
         weighted_fit = gaussian_fit.from_samples_weighted(
             observations,
             weights,
+            covariance_floor=0.0,
         )
         linear_fit = gaussian_fit.linear_from_samples(
             inputs,
             outputs,
             ridge=0.0,
+            covariance_floor=0.0,
         )
         weighted_linear_fit = gaussian_fit.linear_from_samples_weighted(
             inputs,
             outputs,
             weights,
             ridge=0.0,
+            covariance_floor=0.0,
         )
 
         return (
@@ -232,6 +242,7 @@ def test_fit_linear_preserves_structured_input_shape():
         inputs,
         outputs,
         ridge=0.0,
+        covariance_floor=0.0,
     )
 
     np.testing.assert_allclose(
@@ -328,6 +339,7 @@ def test_linear_from_marginals_accounts_for_input_uncertainty():
         inputs,
         outputs,
         ridge=0.0,
+        covariance_floor=0.0,
     )
 
     np.testing.assert_allclose(

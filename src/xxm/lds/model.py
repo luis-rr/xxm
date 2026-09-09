@@ -20,6 +20,7 @@ from xxm.core.latents.gaussian import (
     GaussianInitial,
     GaussianLinearDynamics,
 )
+from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
 
 from .core import Model
@@ -179,7 +180,7 @@ class GaussianLDS:
         observations: jax.Array,
         latent_dim: int,
         *,
-        covariance_floor: float = 1e-2,
+        covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     ) -> typing.Self:
         """Initialize a Gaussian LDS from a principal-component decomposition."""
         model = init_pca_gaussian(
@@ -360,7 +361,7 @@ class PoissonLDS:
         observations: jax.Array,
         latent_dim: int,
         *,
-        covariance_floor: float = 1e-2,
+        covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     ) -> typing.Self:
         """Initialize a Poisson LDS from a principal-component decomposition."""
         model = init_pca_poisson(

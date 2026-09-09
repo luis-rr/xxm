@@ -94,6 +94,7 @@ class GaussianEmissions(typing.NamedTuple):
         self,
         observations: jax.Array,
         posterior: DiscretePosterior,
+        covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
     ) -> typing.Self:
         """Fit Gaussian parameters from posterior state weights."""
 
@@ -102,6 +103,7 @@ class GaussianEmissions(typing.NamedTuple):
         fitted = gaussian_fit.from_samples_weighted(
             observations,
             weights,
+            covariance_floor=covariance_floor,
         )
 
         return self._replace(

@@ -372,20 +372,6 @@ class LinearGaussian(typing.NamedTuple):
         """Sample from conditional distribution at deterministic input."""
         return self.conditional(values).sample(key)
 
-    def add_covariance_jitter(
-        self,
-        jitter: float,
-    ) -> typing.Self:
-        """Add isotropic jitter to output covariance for numerical stability."""
-        identity = jnp.eye(
-            self.output_dim,
-            dtype=self.covariance.dtype,
-        )
-
-        return self._replace(
-            covariance=self.covariance + jitter * identity,
-        )
-
     def compose_input(
         self,
         affine: Affine,

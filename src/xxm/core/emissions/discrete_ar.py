@@ -55,7 +55,8 @@ def _fit_ar_model(
     inputs: jax.Array,
     outputs: jax.Array,
     weights: jax.Array,
-    ridge: float | None = None,
+    ridge: float | None,
+    covariance_floor,
 ) -> ConditionalDistT:
 
     if isinstance(dist, LinearGaussian):
@@ -67,6 +68,7 @@ def _fit_ar_model(
             outputs=outputs,
             weights=weights,
             ridge=ridge,
+            covariance_floor=covariance_floor,
         )
 
     if isinstance(dist, LinearPoisson):
@@ -204,6 +206,7 @@ class AREmissions(
         observations: jax.Array,
         posterior: DiscretePosterior,
         ridge: float | None = None,
+        covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
     ) -> typing.Self:
         """Fit AR parameters conditional on the initial observation history."""
 
@@ -221,6 +224,7 @@ class AREmissions(
             outputs=current,
             weights=weights,
             ridge=ridge,
+            covariance_floor=covariance_floor,
         )
 
         return self._replace(

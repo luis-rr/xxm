@@ -51,27 +51,6 @@ def _validate_initialization(
         )
 
 
-def _add_covariance_floor(
-    covariance: jax.Array,
-    covariance_floor: float,
-    reference: jax.Array,
-) -> jax.Array:
-    """Add an isotropic floor relative to the typical latent variance."""
-    scale = jnp.mean(
-        jnp.var(
-            reference,
-            axis=0,
-        )
-    )
-
-    identity = jnp.eye(
-        covariance.shape[-1],
-        dtype=covariance.dtype,
-    )
-
-    return covariance + covariance_floor * scale * identity
-
-
 def _state_conditioned_initial_from_latents(
     latents: jax.Array,  # (T, D)
     state_probs: jax.Array,  # (T, K)
@@ -81,19 +60,10 @@ def _state_conditioned_initial_from_latents(
     gaussian = gaussian_fit.from_samples_weighted(
         values=latents,
         weights=state_probs,
+        covariance_floor=covariance_floor,
     )
 
-    covariance = _add_covariance_floor(
-        gaussian.covariance,
-        covariance_floor,
-        reference=latents,
-    )
-
-    return StateConditionedGaussian(
-        dist=gaussian._replace(
-            covariance=covariance,
-        )
-    )
+    return StateConditionedGaussian(dist=gaussian)
 
 
 def _from_arhmm(
@@ -179,7 +149,7 @@ def init_pca_gaussian(
     latent_dim: int,
     *,
     self_transition_prob: float = 0.9,
-    covariance_floor: float = 1e-2,
+    covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
 ) -> Model[GaussianEmissions]:
     """
     Initialize a Gaussian SLDS from a PCA latent representation.
@@ -219,7 +189,7 @@ def init_arhmm_gaussian(
     *,
     num_arhmm_iters: int = 10,
     self_transition_prob: float = 0.9,
-    covariance_floor: float = 1e-2,
+    covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     progress: bool | str = 'AR-HMM',
 ) -> Model[GaussianEmissions]:
     """
@@ -267,7 +237,7 @@ def init_pca_poisson(
     latent_dim: int,
     *,
     self_transition_prob: float = 0.9,
-    covariance_floor: float = 1e-2,
+    covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
 ) -> Model[PoissonEmissions]:
     """
     Initialize a Poisson SLDS from a PCA latent representation.
@@ -301,7 +271,7 @@ def init_arhmm_poisson(
     *,
     num_arhmm_iters: int = 10,
     self_transition_prob: float = 0.9,
-    covariance_floor: float = 1e-2,
+    covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     progress: bool | str = 'AR-HMM',
 ) -> Model[PoissonEmissions]:
     """

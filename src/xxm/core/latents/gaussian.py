@@ -38,7 +38,7 @@ class GaussianInitial(typing.NamedTuple):
     def from_latents(
         cls,
         latents: jax.Array,
-        covariance_floor: float = 1e-2,
+        covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     ) -> typing.Self:
         """Estimate an initial Gaussian from a known latent trajectory."""
 
@@ -84,6 +84,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
         self,
         posterior: ContinuousPosterior,
         ridge=gaussian_fit.DEFAULT_RIDGE,
+        covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
     ) -> typing.Self:
         r"""Fit dynamics from posterior pair marginals via moment matching."""
         paired = PairedGaussian(
@@ -110,6 +111,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
             dist=gaussian_fit.linear_from_paired(
                 paired,
                 ridge=ridge,
+                covariance_floor=covariance_floor,
             ),
         )
 
@@ -172,13 +174,16 @@ class GaussianLinearDynamics(typing.NamedTuple):
     def from_latents(
         cls,
         latents: jax.Array,
-        covariance_floor: float,
         ridge=gaussian_fit.DEFAULT_RIDGE,
+        covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     ) -> typing.Self:
         """Fit linear dynamics to a known latent trajectory."""
-        model = gaussian_fit.linear_from_samples(latents[:-1], latents[1:], ridge=ridge)
-
-        model = model.add_covariance_jitter(covariance_floor)
+        model = gaussian_fit.linear_from_samples(
+            latents[:-1],
+            latents[1:],
+            ridge=ridge,
+            covariance_floor=covariance_floor,
+        )
 
         return cls(model)
 

@@ -153,6 +153,7 @@ class GaussianEmissions(typing.NamedTuple):
         observations: jax.Array,
         posterior: ContinuousPosterior,
         ridge=gaussian_fit.DEFAULT_RIDGE,
+        covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
     ) -> typing.Self:
         """Fit emission parameters from Gaussian latent marginals."""
 
@@ -164,6 +165,7 @@ class GaussianEmissions(typing.NamedTuple):
                 ),
                 outputs=observations,
                 ridge=ridge,
+                covariance_floor=covariance_floor,
             ),
         )
 
@@ -189,17 +191,16 @@ class GaussianEmissions(typing.NamedTuple):
         cls,
         latents: jax.Array,
         observations: jax.Array,
-        covariance_floor: float,
         ridge=gaussian_fit.DEFAULT_RIDGE,
+        covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     ) -> typing.Self:
         """Fit Gaussian emissions to a known latent trajectory."""
         model = gaussian_fit.linear_from_samples(
             latents,
             observations,
             ridge=ridge,
+            covariance_floor=covariance_floor,
         )
-
-        model = model.add_covariance_jitter(covariance_floor)
 
         return cls(model)
 

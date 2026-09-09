@@ -12,6 +12,56 @@ from xxm.core.dists.gaussian import (
 
 DEFAULT_RIDGE = 1e-6  # package-wide default for relative ridge regularization
 
+# package-wide default for relative covariance floor regularization at fitting
+DEFAULT_COV_FLOOR = 1e-6
+
+# package-wide default for relative covariance floor regularization at
+#  initialization, which is more conservative than the default for fitting
+DEFAULT_COV_FLOOR_INIT = 1e-2
+
+
+def add_covariance_floor(
+    covariance: jax.Array,
+    *,
+    reference_covariance: jax.Array,  # might be batched
+    covariance_floor: float,
+) -> jax.Array:
+    """
+    Add an isotropic covariance floor relative to a reference variance scale.
+
+    `covariance_floor` is a dimensionless fraction of the average marginal
+    variance of `reference_covariance`.
+    """
+    covariance = 0.5 * (
+        covariance
+        + jnp.swapaxes(
+            covariance,
+            -2,
+            -1,
+        )
+    )
+
+    scale = jnp.mean(
+        jnp.diagonal(
+            reference_covariance,
+            axis1=-2,
+            axis2=-1,
+        ),
+        axis=-1,
+    )
+    scale = jnp.where(
+        scale > 0.0,
+        scale,
+        1.0,
+    )
+
+    identity = jnp.eye(
+        covariance.shape[-1],
+        dtype=covariance.dtype,
+    )
+
+    return covariance + (covariance_floor * scale[..., None, None] * identity)
+
 
 def _normalize_weights(
     num_samples: int,
@@ -98,6 +148,8 @@ def _from_samples_normalized(
 
 def from_samples(
     values: jax.Array,  # (T, N)
+    *,
+    covariance_floor: float,
 ) -> Gaussian:
     """Fit a Gaussian from samples along the first axis."""
     dtype = jnp.result_type(
@@ -106,22 +158,31 @@ def from_samples(
     )
 
     values = values.astype(dtype)
-
     weights = _normalize_weights(
         num_samples=values.shape[0],
         weights=None,
         dtype=dtype,
     )
 
-    return _from_samples_normalized(
+    fitted = _from_samples_normalized(
         values=values,
         weights=weights,
+    )
+
+    return fitted._replace(
+        covariance=add_covariance_floor(
+            fitted.covariance,
+            reference_covariance=fitted.covariance,
+            covariance_floor=covariance_floor,
+        ),
     )
 
 
 def from_samples_weighted(
     values: jax.Array,  # (T, N)
     weights: jax.Array,  # (T, ...)
+    *,
+    covariance_floor: float,
 ) -> Gaussian:
     """Fit one weighted Gaussian for each batch entry of ``weights``."""
     dtype = jnp.result_type(
@@ -129,7 +190,6 @@ def from_samples_weighted(
         weights,
         jnp.float32,
     )
-
     values = values.astype(dtype)
 
     weights = _normalize_weights(
@@ -138,9 +198,17 @@ def from_samples_weighted(
         dtype=dtype,
     )
 
-    return _from_samples_normalized(
+    fitted = _from_samples_normalized(
         values=values,
         weights=weights,
+    )
+
+    return fitted._replace(
+        covariance=add_covariance_floor(
+            fitted.covariance,
+            reference_covariance=fitted.covariance,
+            covariance_floor=covariance_floor,
+        ),
     )
 
 
@@ -148,7 +216,9 @@ def from_samples_grouped(
     values: jax.Array,  # (T, N)
     assignments: jax.Array,  # (T,)
     num_groups: int,
-) -> Gaussian:  # K-batched
+    *,
+    covariance_floor: float,
+) -> Gaussian:
     """Fit one Gaussian to each group of assigned values."""
     weights = jax.nn.one_hot(
         assignments,
@@ -157,11 +227,12 @@ def from_samples_grouped(
             values,
             jnp.float32,
         ),
-    )  # (T, K)
+    )
 
     return from_samples_weighted(
         values=values,
         weights=weights,
+        covariance_floor=covariance_floor,
     )
 
 
@@ -482,6 +553,7 @@ def linear_from_paired(
     paired: PairedGaussian,
     *,
     ridge: float,
+    covariance_floor: float,
 ) -> LinearGaussian:
     r"""
     Return the linear-Gaussian distribution of ``right | left``.
@@ -535,6 +607,12 @@ def linear_from_paired(
         + coefficients @ paired.left.covariance @ coefficients_t
     )
 
+    covariance = add_covariance_floor(
+        covariance,
+        reference_covariance=paired.right.covariance,
+        covariance_floor=covariance_floor,
+    )
+
     covariance = 0.5 * (
         covariance
         + jnp.swapaxes(
@@ -556,12 +634,11 @@ def linear_from_paired(
 def linear_from_marginals(
     inputs: Gaussian,
     outputs: jax.Array,
-    weights: jax.Array | None = None,
     *,
+    weights: jax.Array | None = None,
     ridge: float,
+    covariance_floor: float,
 ) -> LinearGaussian:
-    """Fit a linear Gaussian from Gaussian input marginals."""
-
     paired = paired_from_left_marginals(
         left=inputs,
         right=outputs,
@@ -571,6 +648,7 @@ def linear_from_marginals(
     return linear_from_paired(
         paired,
         ridge=ridge,
+        covariance_floor=covariance_floor,
     )
 
 
@@ -579,6 +657,7 @@ def linear_from_samples(
     outputs: jax.Array,  # (T, O)
     *,
     ridge: float,
+    covariance_floor: float,
 ) -> LinearGaussian:
     """Fit a linear Gaussian model from samples."""
 
@@ -598,6 +677,7 @@ def linear_from_samples(
     return linear_from_paired(
         paired,
         ridge=ridge,
+        covariance_floor=covariance_floor,
     ).reshape_input(input_shape)
 
 
@@ -607,6 +687,7 @@ def linear_from_samples_weighted(
     weights: jax.Array,  # (T, ...)
     *,
     ridge: float,
+    covariance_floor: float,
 ) -> LinearGaussian:
     """Fit one weighted model for each batch entry of ``weights``."""
 
@@ -627,6 +708,7 @@ def linear_from_samples_weighted(
     return linear_from_paired(
         paired,
         ridge=ridge,
+        covariance_floor=covariance_floor,
     ).reshape_input(input_shape)
 
 
@@ -637,6 +719,7 @@ def linear_from_samples_grouped(
     num_groups: int,
     *,
     ridge: float,
+    covariance_floor: float,
 ) -> LinearGaussian:
     """Fit one linear Gaussian to each assigned group."""
 
@@ -655,4 +738,5 @@ def linear_from_samples_grouped(
         outputs=outputs,
         weights=weights,
         ridge=ridge,
+        covariance_floor=covariance_floor,
     )

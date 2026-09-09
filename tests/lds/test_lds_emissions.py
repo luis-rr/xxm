@@ -142,10 +142,14 @@ def test_gaussian_fit_recovers_known_parameters():
     )
 
     np.testing.assert_allclose(fitted.dist.affine.bias, [1.0], atol=1e-6)
+
+    output_variance = jnp.var(observations, axis=0)
+
+    expected_covariance = 0.25 + gaussian_fit.DEFAULT_COV_FLOOR * output_variance
+
     np.testing.assert_allclose(
         fitted.dist.covariance,
-        [[0.25]],
-        atol=1e-6,
+        expected_covariance.reshape(1, 1),
     )
 
 

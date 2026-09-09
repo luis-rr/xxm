@@ -113,6 +113,7 @@ def test_switching_dynamics_fit_recovers_known_linear_gaussian_model():
     fitted = _dynamics().fit_params(
         discrete=post.discrete,
         continuous=post.continuous,
+        covariance_floor=0.0,
     )
 
     np.testing.assert_allclose(
@@ -125,6 +126,7 @@ def test_switching_dynamics_fit_recovers_known_linear_gaussian_model():
         [[1.0]],
         atol=ATOL,
     )
+
     np.testing.assert_allclose(
         fitted.dist.covariance,
         [[[0.5]]],
