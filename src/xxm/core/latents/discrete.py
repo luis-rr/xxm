@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core.dists.categorical import Categorical
+from xxm.core.optim import categorical as categorical_fit
 from xxm.core.posteriors import DiscretePosterior
 
 
@@ -29,9 +30,18 @@ class CategoricalInitial(typing.NamedTuple):
             dist=self.dist.permute(permutation),
         )
 
-    def fit_params(self, posterior: DiscretePosterior) -> typing.Self:
+    def fit_params(
+        self,
+        posterior: DiscretePosterior,
+        pseudocount=categorical_fit.DEFAULT_PSEUDOCOUNT,
+    ) -> typing.Self:
         r"""Fit initial distribution from posterior marginals $\gamma_0(k)$."""
-        return self._replace(dist=Categorical.from_counts(posterior.state_probs[0]))
+        return self._replace(
+            dist=categorical_fit.from_counts(
+                posterior.state_probs[0],
+                pseudocount=pseudocount,
+            )
+        )
 
 
 class CategoricalTransitions(typing.NamedTuple):
@@ -90,8 +100,17 @@ class CategoricalTransitions(typing.NamedTuple):
         """Relabel states by permutation."""
         return self._replace(dist=self.dist.select(permutation).permute(permutation))
 
-    def fit_params(self, posterior: DiscretePosterior) -> typing.Self:
+    def fit_params(
+        self,
+        posterior: DiscretePosterior,
+        pseudocount=categorical_fit.DEFAULT_PSEUDOCOUNT,
+    ) -> typing.Self:
         r"""Fit transition probabilities from posterior pair marginals $\xi_t(i,j)$."""
         expected_transitions = posterior.pair_probs.sum(axis=0)  # (K, K)
 
-        return self._replace(dist=Categorical.from_counts(expected_transitions))
+        return self._replace(
+            dist=categorical_fit.from_counts(
+                expected_transitions,
+                pseudocount=pseudocount,
+            )
+        )

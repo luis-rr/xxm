@@ -3,7 +3,6 @@
 import jax
 import jax.numpy as jnp
 
-from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import LinearGaussian
 from xxm.core.emissions.continuous import (
     EmissionsT,
@@ -13,6 +12,7 @@ from xxm.core.emissions.continuous import (
 from xxm.core.emissions.discrete_ar import AREmissions
 from xxm.core.latents.discrete import CategoricalInitial
 from xxm.core.latents.gaussian import StateConditionedGaussian
+from xxm.core.optim import categorical as categorical_fit
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.hmm.core import Model as HMMModel
 from xxm.hmm.inference import infer_exact as infer_hmm
@@ -71,6 +71,7 @@ def _from_arhmm(
     emissions: EmissionsT,
     arhmm: HMMModel[AREmissions[LinearGaussian]],
     covariance_floor: float,
+    pseudocount: float,
 ) -> Model[EmissionsT]:
     """
     Construct an SLDS from a lag-1 Gaussian AR-HMM over latent values.
@@ -88,11 +89,12 @@ def _from_arhmm(
     state_probs = inferred.posterior.state_probs  # (T-1, K), aligned with latents[1:]
 
     state_initial = CategoricalInitial(
-        dist=Categorical.from_counts(
+        dist=categorical_fit.from_counts(
             jnp.sum(
                 state_probs,
                 axis=0,
-            )
+            ),
+            pseudocount=pseudocount,
         )
     )
 
@@ -150,6 +152,7 @@ def init_pca_gaussian(
     *,
     self_transition_prob: float = 0.9,
     covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
+    pseudocount=categorical_fit.DEFAULT_PSEUDOCOUNT,
 ) -> Model[GaussianEmissions]:
     """
     Initialize a Gaussian SLDS from a PCA latent representation.
@@ -178,6 +181,7 @@ def init_pca_gaussian(
         emissions=emissions,
         arhmm=arhmm,
         covariance_floor=covariance_floor,
+        pseudocount=pseudocount,
     )
 
 
@@ -190,6 +194,7 @@ def init_arhmm_gaussian(
     num_arhmm_iters: int = 10,
     self_transition_prob: float = 0.9,
     covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
+    pseudocount=categorical_fit.DEFAULT_PSEUDOCOUNT,
     progress: bool | str = 'AR-HMM',
 ) -> Model[GaussianEmissions]:
     """
@@ -227,6 +232,7 @@ def init_arhmm_gaussian(
         emissions=emissions,
         arhmm=arhmm,
         covariance_floor=covariance_floor,
+        pseudocount=pseudocount,
     )
 
 
@@ -238,6 +244,7 @@ def init_pca_poisson(
     *,
     self_transition_prob: float = 0.9,
     covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
+    pseudocount=categorical_fit.DEFAULT_PSEUDOCOUNT,
 ) -> Model[PoissonEmissions]:
     """
     Initialize a Poisson SLDS from a PCA latent representation.
@@ -260,6 +267,7 @@ def init_pca_poisson(
         emissions=emissions,
         arhmm=arhmm,
         covariance_floor=covariance_floor,
+        pseudocount=pseudocount,
     )
 
 
@@ -272,6 +280,7 @@ def init_arhmm_poisson(
     num_arhmm_iters: int = 10,
     self_transition_prob: float = 0.9,
     covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
+    pseudocount=categorical_fit.DEFAULT_PSEUDOCOUNT,
     progress: bool | str = 'AR-HMM',
 ) -> Model[PoissonEmissions]:
     """
@@ -302,4 +311,5 @@ def init_arhmm_poisson(
         emissions=emissions,
         arhmm=arhmm,
         covariance_floor=covariance_floor,
+        pseudocount=pseudocount,
     )

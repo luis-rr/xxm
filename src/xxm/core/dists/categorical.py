@@ -85,20 +85,3 @@ class Categorical(typing.NamedTuple):
             values[..., None],
             axis=-1,
         )[..., 0]
-
-    @classmethod
-    def from_counts(
-        cls,
-        counts: jax.Array,  # (..., K)
-    ) -> 'Categorical':
-        """Construct from category counts, handling zero-count cases with uniform."""
-        total = counts.sum(axis=-1, keepdims=True)
-        valid = total > 0
-
-        # Handle zero counts with the uniform distribution.
-        valid_total = jnp.where(valid, total, counts.shape[-1])
-        valid_counts = jnp.where(valid, counts, 1)
-
-        probs = valid_counts / valid_total
-
-        return cls(probs=probs)
