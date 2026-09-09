@@ -133,19 +133,8 @@ def _init_gaussian_emissions(
         covariance_floor=covariance_floor,
     )
 
-    covariance = (
-        gaussian.covariance
-        + 1e-6
-        * jnp.eye(
-            observations.shape[-1],
-            dtype=gaussian.covariance.dtype,
-        )[None]
-    )  # (K, N, N)
-
     return GaussianEmissions(
-        dist=gaussian._replace(
-            covariance=covariance,
-        )
+        dist=gaussian,
     )
 
 
