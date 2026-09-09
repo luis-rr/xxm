@@ -197,6 +197,7 @@ def _init_ar_gaussian_emissions(
     observations: jax.Array,  # (T, N)
     num_states: int,
     num_lags: int,
+    ridge=gaussian_fit.DEFAULT_RIDGE,
 ) -> AREmissions[LinearGaussian]:
     predictors = lagged_observations(
         observations,
@@ -217,7 +218,7 @@ def _init_ar_gaussian_emissions(
         outputs=current,
         assignments=assignments,
         num_groups=num_states,
-        ridge=1e-6,
+        ridge=ridge,
     )
 
     model = model.add_covariance_jitter(1e-6)
@@ -295,6 +296,7 @@ def _init_ar_poisson_emissions(
     observations: jax.Array,  # (T, N)
     num_states: int,
     num_lags: int,
+    ridge=poisson_fit.DEFAULT_RIDGE,
 ) -> AREmissions[LinearPoisson]:
     predictors = lagged_observations(
         observations,
@@ -315,6 +317,7 @@ def _init_ar_poisson_emissions(
         outputs=current,
         assignments=assignments,
         num_groups=num_states,
+        ridge=ridge,
     )
 
     return AREmissions(model)

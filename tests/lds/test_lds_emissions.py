@@ -8,6 +8,7 @@ from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
+from xxm.core.optim import gaussian as gaussian_fit
 
 
 class MockPosterior(typing.NamedTuple):
@@ -132,7 +133,14 @@ def test_gaussian_fit_recovers_known_parameters():
 
     fitted = emissions.fit_params(observations, posterior)  # type: ignore
 
-    np.testing.assert_allclose(fitted.dist.affine.coefficients, [[2.0]], atol=1e-6)
+    expected_coefficient = 2.0 / (1.0 + gaussian_fit.DEFAULT_RIDGE)
+
+    np.testing.assert_allclose(
+        fitted.dist.affine.coefficients,
+        [[expected_coefficient]],
+        atol=1e-6,
+    )
+
     np.testing.assert_allclose(fitted.dist.affine.bias, [1.0], atol=1e-6)
     np.testing.assert_allclose(
         fitted.dist.covariance,

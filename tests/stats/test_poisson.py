@@ -125,6 +125,7 @@ def test_fit_linear_recovers_two_point_poisson_mle():
         inputs=jnp.array([[0.0], [1.0]]),
         outputs=jnp.array([[1.0], [2.0]]),
         initial_affine=Affine(coefficients=jnp.zeros((1, 1)), bias=jnp.zeros(1)),
+        ridge=0.0,
     )
 
     np.testing.assert_allclose(fit.affine.coefficients, [[np.log(2.0)]], atol=FIT_ATOL)
@@ -175,6 +176,7 @@ def test_fit_weighted_linear_recovers_state_specific_two_point_mles():
         initial_affine=Affine(
             coefficients=jnp.zeros((2, 1, 1)), bias=jnp.zeros((2, 1))
         ),
+        ridge=0.0,
     )
 
     expected_coefficients = np.array([[[np.log(2.0)]], [[-np.log(2.0)]]])
@@ -316,6 +318,7 @@ def test_fit_linear_preserves_structured_input_shape():
             coefficients=jnp.zeros((1, 1, 1)),
             bias=jnp.zeros(1),
         ),
+        ridge=0.0,
     )
 
     np.testing.assert_allclose(

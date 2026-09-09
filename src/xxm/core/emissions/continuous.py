@@ -152,6 +152,7 @@ class GaussianEmissions(typing.NamedTuple):
         self,
         observations: jax.Array,
         posterior: ContinuousPosterior,
+        ridge=gaussian_fit.DEFAULT_RIDGE,
     ) -> typing.Self:
         """Fit emission parameters from Gaussian latent marginals."""
 
@@ -162,6 +163,7 @@ class GaussianEmissions(typing.NamedTuple):
                     covariance=posterior.covariances,
                 ),
                 outputs=observations,
+                ridge=ridge,
             ),
         )
 
@@ -188,11 +190,13 @@ class GaussianEmissions(typing.NamedTuple):
         latents: jax.Array,
         observations: jax.Array,
         covariance_floor: float,
+        ridge=gaussian_fit.DEFAULT_RIDGE,
     ) -> typing.Self:
         """Fit Gaussian emissions to a known latent trajectory."""
         model = gaussian_fit.linear_from_samples(
             latents,
             observations,
+            ridge=ridge,
         )
 
         model = model.add_covariance_jitter(covariance_floor)
@@ -287,6 +291,7 @@ class PoissonEmissions(typing.NamedTuple):
         self,
         observations: jax.Array,  # (T, N)
         posterior: ContinuousPosterior,  # (T, D)
+        ridge=poisson_fit.DEFAULT_RIDGE,
     ) -> typing.Self:
         """Fit the emission parameters from Gaussian latent marginals."""
         model = poisson_fit.linear_from_marginals(
@@ -296,6 +301,7 @@ class PoissonEmissions(typing.NamedTuple):
                 covariance=posterior.covariances,
             ),
             initial_affine=self.dist.affine,
+            ridge=ridge,
         )
 
         return self._replace(
@@ -327,6 +333,7 @@ class PoissonEmissions(typing.NamedTuple):
         cls,
         latents: jax.Array,
         observations: jax.Array,
+        ridge=poisson_fit.DEFAULT_RIDGE,
     ) -> typing.Self:
         """Fit Poisson emissions to a known latent trajectory."""
 
@@ -351,6 +358,7 @@ class PoissonEmissions(typing.NamedTuple):
             outputs=observations,
             inputs=latents,
             initial_affine=initial_affine,
+            ridge=ridge,
         )
 
         return cls(model)

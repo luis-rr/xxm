@@ -39,6 +39,7 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         self,
         discrete: DiscretePosterior,
         continuous: ContinuousPosterior,
+        ridge=gaussian_fit.DEFAULT_RIDGE,
     ) -> typing.Self:
         r"""
         Fit dynamics from continuous pair moments weighted by incoming state marginals.
@@ -73,7 +74,7 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
 
         fitted = gaussian_fit.linear_from_paired(
             paired,
-            ridge=1e-6,
+            ridge=ridge,
         )
 
         return self._replace(

@@ -10,6 +10,8 @@ from xxm.core.dists.gaussian import (
     PairedGaussian,
 )
 
+DEFAULT_RIDGE = 1e-6  # package-wide default for relative ridge regularization
+
 
 def _normalize_weights(
     num_samples: int,
@@ -442,24 +444,60 @@ def paired_from_left_marginals(
     )
 
 
+def _add_relative_ridge(
+    covariance: jax.Array,
+    ridge: float,
+) -> jax.Array:
+    """
+    Add isotropic ridge relative to the average marginal variance.
+
+    If the covariance has no positive variance scale, a unit reference scale
+    is used so that degenerate regression systems remain well defined.
+    """
+
+    scale = jnp.mean(
+        jnp.diagonal(
+            covariance,
+            axis1=-2,
+            axis2=-1,
+        ),
+        axis=-1,
+    )
+
+    scale = jnp.where(
+        scale > 0.0,
+        scale,
+        1.0,
+    )
+
+    identity = jnp.eye(
+        covariance.shape[-1],
+        dtype=covariance.dtype,
+    )
+
+    return covariance + ridge * scale[..., None, None] * identity
+
+
 def linear_from_paired(
     paired: PairedGaussian,
-    ridge: float = 0.0,
+    *,
+    ridge: float,
 ) -> LinearGaussian:
     r"""
     Return the linear-Gaussian distribution of ``right | left``.
 
-    ``ridge`` adds isotropic regularization to the left covariance when
-    solving for the linear coefficients. With nonzero ridge, the result
-    is a regularized approximation to the exact Gaussian conditional.
+    ``ridge`` adds isotropic regularization to the left covariance relative
+    to its average marginal variance. With nonzero ridge, the result is a
+    regularized approximation to the exact Gaussian conditional.
     """
-    identity = jnp.eye(
-        paired.left_dim,
-        dtype=paired.dtype,
+
+    input_covariance = _add_relative_ridge(
+        paired.left.covariance,
+        ridge,
     )
 
     coefficients = jnp.linalg.solve(
-        paired.left.covariance + ridge * identity,
+        input_covariance,
         jnp.swapaxes(
             paired.cross_covariance,
             -2,
@@ -484,7 +522,6 @@ def linear_from_paired(
         -2,
         -1,
     )
-
     cross_covariance_t = jnp.swapaxes(
         paired.cross_covariance,
         -2,
@@ -520,9 +557,11 @@ def linear_from_marginals(
     inputs: Gaussian,
     outputs: jax.Array,
     weights: jax.Array | None = None,
-    ridge: float = 0.0,
+    *,
+    ridge: float,
 ) -> LinearGaussian:
     """Fit a linear Gaussian from Gaussian input marginals."""
+
     paired = paired_from_left_marginals(
         left=inputs,
         right=outputs,
@@ -538,9 +577,11 @@ def linear_from_marginals(
 def linear_from_samples(
     inputs: jax.Array,  # (T, *input_shape)
     outputs: jax.Array,  # (T, O)
-    ridge: float = 0.0,
+    *,
+    ridge: float,
 ) -> LinearGaussian:
     """Fit a linear Gaussian model from samples."""
+
     if inputs.ndim < 2:
         raise ValueError('inputs must have shape (T, *input_shape)')
 
@@ -564,9 +605,11 @@ def linear_from_samples_weighted(
     inputs: jax.Array,  # (T, *input_shape)
     outputs: jax.Array,  # (T, O)
     weights: jax.Array,  # (T, ...)
-    ridge: float = 0.0,
+    *,
+    ridge: float,
 ) -> LinearGaussian:
     """Fit one weighted model for each batch entry of ``weights``."""
+
     if inputs.ndim < 2:
         raise ValueError('inputs must have shape (T, *input_shape)')
 
@@ -592,9 +635,11 @@ def linear_from_samples_grouped(
     outputs: jax.Array,  # (T, O)
     assignments: jax.Array,  # (T,)
     num_groups: int,
-    ridge: float = 0.0,
+    *,
+    ridge: float,
 ) -> LinearGaussian:
     """Fit one linear Gaussian to each assigned group."""
+
     weights = jax.nn.one_hot(
         assignments,
         num_groups,

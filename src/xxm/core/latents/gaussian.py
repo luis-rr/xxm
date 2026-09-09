@@ -80,7 +80,11 @@ class GaussianLinearDynamics(typing.NamedTuple):
 
     dist: LinearGaussian  # no batch
 
-    def fit_params(self, posterior: ContinuousPosterior) -> typing.Self:
+    def fit_params(
+        self,
+        posterior: ContinuousPosterior,
+        ridge=gaussian_fit.DEFAULT_RIDGE,
+    ) -> typing.Self:
         r"""Fit dynamics from posterior pair marginals via moment matching."""
         paired = PairedGaussian(
             left=Gaussian(
@@ -103,7 +107,10 @@ class GaussianLinearDynamics(typing.NamedTuple):
         paired = gaussian_fit.paired_from_moment_match(paired)
 
         return self._replace(
-            dist=gaussian_fit.linear_from_paired(paired),
+            dist=gaussian_fit.linear_from_paired(
+                paired,
+                ridge=ridge,
+            ),
         )
 
     def sample_next(
@@ -166,12 +173,10 @@ class GaussianLinearDynamics(typing.NamedTuple):
         cls,
         latents: jax.Array,
         covariance_floor: float,
+        ridge=gaussian_fit.DEFAULT_RIDGE,
     ) -> typing.Self:
         """Fit linear dynamics to a known latent trajectory."""
-        model = gaussian_fit.linear_from_samples(
-            latents[:-1],
-            latents[1:],
-        )
+        model = gaussian_fit.linear_from_samples(latents[:-1], latents[1:], ridge=ridge)
 
         model = model.add_covariance_jitter(covariance_floor)
 

@@ -55,21 +55,30 @@ def _fit_ar_model(
     inputs: jax.Array,
     outputs: jax.Array,
     weights: jax.Array,
+    ridge: float | None = None,
 ) -> ConditionalDistT:
+
     if isinstance(dist, LinearGaussian):
+        if ridge is None:
+            ridge = gaussian_fit.DEFAULT_RIDGE
+
         return gaussian_fit.linear_from_samples_weighted(
             inputs=inputs,
             outputs=outputs,
             weights=weights,
-            ridge=1e-6,
+            ridge=ridge,
         )
 
     if isinstance(dist, LinearPoisson):
+        if ridge is None:
+            ridge = poisson_fit.DEFAULT_RIDGE
+
         return poisson_fit.linear_from_samples_weighted(
             inputs=inputs,
             outputs=outputs,
             weights=weights,
             initial_affine=dist.affine,
+            ridge=ridge,
         )
 
     typing.assert_never(dist)
@@ -194,6 +203,7 @@ class AREmissions(
         self,
         observations: jax.Array,
         posterior: DiscretePosterior,
+        ridge: float | None = None,
     ) -> typing.Self:
         """Fit AR parameters conditional on the initial observation history."""
 
@@ -210,6 +220,7 @@ class AREmissions(
             inputs=predictors,
             outputs=current,
             weights=weights,
+            ridge=ridge,
         )
 
         return self._replace(

@@ -11,6 +11,7 @@ from xxm.core.dists.poisson import LinearPoisson, Poisson
 from xxm.core.optim.newton import NewtonSearch, OptimParams
 
 EPS: float = 1e-8
+DEFAULT_RIDGE: float = 1e-6
 
 
 class _NewtonSearchParams(typing.NamedTuple):
@@ -71,7 +72,7 @@ class _NewtonSearchModel(typing.NamedTuple):
     input_means: jax.Array  # (T, I)
     input_covariances: jax.Array | None  # (T, I, I)
     weights: jax.Array  # (T,)
-    ridge: float
+    ridge: jax.Array  # scalar
 
     def _expected_rates(self, params: _NewtonSearchParams) -> jax.Array:
         linear_model = params.to_linear_model()
@@ -326,6 +327,48 @@ def _initial_affine(
     )
 
 
+def _input_variance_scale(
+    input_means: jax.Array,
+    input_covariances: jax.Array | None,
+    weights: jax.Array,
+    center: jax.Array,
+) -> jax.Array:
+    """Return the weighted average predictor variance."""
+
+    centered_means = input_means - center
+
+    variances = centered_means**2
+
+    if input_covariances is not None:
+        variances = variances + jnp.diagonal(
+            input_covariances,
+            axis1=-2,
+            axis2=-1,
+        )
+
+    weight_sum = jnp.sum(
+        weights,
+    )
+
+    variances = jnp.sum(
+        weights[:, None] * variances,
+        axis=0,
+    ) / jnp.maximum(
+        weight_sum,
+        EPS,
+    )
+
+    scale = jnp.mean(
+        variances,
+    )
+
+    return jnp.where(
+        scale > 0.0,
+        scale,
+        1.0,
+    )
+
+
 def _linear_from_marginals(
     outputs: jax.Array,
     input_means: jax.Array,
@@ -337,28 +380,35 @@ def _linear_from_marginals(
     max_line_search_iters: int,
     ridge: float,
 ) -> LinearPoisson:
-    """
-    Fit from Gaussian input moments.
-    """
+    """Fit from Gaussian input moments."""
+
     dtype = jnp.result_type(
         outputs,
         input_means,
         jnp.float32,
     )
 
-    outputs = outputs.astype(dtype)
-    input_means = input_means.astype(dtype)
+    outputs = outputs.astype(
+        dtype,
+    )
+    input_means = input_means.astype(
+        dtype,
+    )
 
     if input_covariances is not None:
-        input_covariances = input_covariances.astype(dtype)
+        input_covariances = input_covariances.astype(
+            dtype,
+        )
 
     if weights is None:
         weights = jnp.ones(
             outputs.shape[0],
             dtype=dtype,
-        )  # (T,)
+        )
     else:
-        weights = weights.astype(dtype)
+        weights = weights.astype(
+            dtype,
+        )
 
     if initial_affine is None:
         initial_affine = _initial_affine(
@@ -367,25 +417,50 @@ def _linear_from_marginals(
             weights=weights,
         )
 
-    initial_affine = initial_affine.astype(dtype)
+    initial_affine = initial_affine.astype(
+        dtype,
+    )
 
-    weight_sum = jnp.sum(weights)
+    weight_sum = jnp.sum(
+        weights,
+    )
 
-    center = jnp.sum(weights[:, None] * input_means, axis=0) / jnp.maximum(
-        weight_sum, 1e-8
-    )  # (I,)
+    center = jnp.sum(
+        weights[:, None] * input_means,
+        axis=0,
+    ) / jnp.maximum(
+        weight_sum,
+        EPS,
+    )
 
-    centered_means = input_means - center  # (T, I)
+    input_scale = _input_variance_scale(
+        input_means=input_means,
+        input_covariances=input_covariances,
+        weights=weights,
+        center=center,
+    )
+
+    centered_means = input_means - center
 
     # b + A x = (b + A center) + A (x - center)
-    centered_affine = initial_affine.shift(center)
+    centered_affine = initial_affine.shift(
+        center,
+    )
+
+    effective_ridge = (
+        jnp.asarray(
+            ridge,
+            dtype=dtype,
+        )
+        * input_scale
+    )
 
     model = _NewtonSearchModel(
         values=outputs,
         input_means=centered_means,
         input_covariances=input_covariances,
         weights=weights,
-        ridge=ridge,
+        ridge=effective_ridge,
     )
 
     search = NewtonSearch[_NewtonSearchParams](
@@ -397,10 +472,16 @@ def _linear_from_marginals(
         ),
     )
 
-    final = search.optimize(params=_NewtonSearchParams(centered_affine))
+    final = search.optimize(
+        params=_NewtonSearchParams(
+            centered_affine,
+        ),
+    )
 
     return LinearPoisson(
-        affine=final.params.affine.shift(-center),
+        affine=final.params.affine.shift(
+            -center,
+        ),
     )
 
 
@@ -412,9 +493,15 @@ def linear_from_marginals(
     max_iter: int = 20,
     tol: float = 1e-6,
     max_line_search_iters: int = 20,
-    ridge: float = 0.0,
+    *,
+    ridge: float,
 ) -> LinearPoisson:
-    """Fit from Gaussian input marginals."""
+    """
+    Fit from Gaussian input marginals.
+
+    `ridge` is relative to the weighted average predictor variance.
+    """
+
     if initial_affine is not None and initial_affine.input_shape != (
         inputs.variable_dim,
     ):
@@ -471,10 +558,20 @@ def linear_from_samples(
     max_iter: int = 20,
     tol: float = 1e-6,
     max_line_search_iters: int = 20,
-    ridge: float = 0.0,
+    *,
+    ridge: float,
 ) -> LinearPoisson:
-    """Fit from paired deterministic input-output samples."""
-    flat_inputs, input_shape, initial_affine = _prepare_pair_inputs(
+    """
+    Fit from paired deterministic input-output samples.
+
+    `ridge` is relative to the average predictor variance.
+    """
+
+    (
+        flat_inputs,
+        input_shape,
+        initial_affine,
+    ) = _prepare_pair_inputs(
         inputs,
         initial_affine,
     )
@@ -491,7 +588,9 @@ def linear_from_samples(
         ridge=ridge,
     )
 
-    return model.reshape_input(input_shape)
+    return model.reshape_input(
+        input_shape,
+    )
 
 
 def linear_from_samples_weighted(
@@ -502,18 +601,29 @@ def linear_from_samples_weighted(
     max_iter: int = 20,
     tol: float = 1e-6,
     max_line_search_iters: int = 20,
-    ridge: float = 0.0,
+    *,
+    ridge: float,
 ) -> LinearPoisson:
-    """Fit one weighted model for each weight column."""
-    flat_inputs, input_shape, initial_affine = _prepare_pair_inputs(
+    """
+    Fit one weighted model for each weight column.
+
+    `ridge` is relative to each model's weighted average predictor variance.
+    """
+
+    (
+        flat_inputs,
+        input_shape,
+        initial_affine,
+    ) = _prepare_pair_inputs(
         inputs,
         initial_affine,
     )
 
     def fit_state(
-        state_weights: jax.Array,  # (T,)
+        state_weights: jax.Array,
         state_affine: Affine | None,
     ) -> LinearPoisson:
+
         return _linear_from_marginals(
             outputs=outputs,
             input_means=flat_inputs,
@@ -533,7 +643,9 @@ def linear_from_samples_weighted(
                 None,
             ),
             in_axes=1,
-        )(weights)
+        )(
+            weights,
+        )
 
     else:
         model = jax.vmap(
@@ -544,7 +656,9 @@ def linear_from_samples_weighted(
             initial_affine,
         )
 
-    return model.reshape_input(input_shape)
+    return model.reshape_input(
+        input_shape,
+    )
 
 
 def linear_from_samples_grouped(
@@ -556,13 +670,19 @@ def linear_from_samples_grouped(
     max_iter: int = 20,
     tol: float = 1e-6,
     max_line_search_iters: int = 20,
-    ridge: float = 0.0,
+    *,
+    ridge: float,
 ) -> LinearPoisson:
     """Fit one model to each assigned group."""
+
     weights = jax.nn.one_hot(
         assignments,
         num_groups,
-        dtype=jnp.result_type(inputs, outputs, jnp.float32),
+        dtype=jnp.result_type(
+            inputs,
+            outputs,
+            jnp.float32,
+        ),
     )
 
     return linear_from_samples_weighted(
