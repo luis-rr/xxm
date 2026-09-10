@@ -132,6 +132,56 @@ def align_affine(
     )
 
 
+def align_orthogonal(
+    source: jax.Array,
+    target: jax.Array,
+) -> Affine:
+    """Fit a source-to-target orthogonal map with no scaling or translation."""
+    u, _, vt = jnp.linalg.svd(
+        source.T @ target,
+        full_matrices=False,
+    )
+
+    orthogonal = u @ vt
+
+    return Affine(
+        coefficients=orthogonal.T,
+        bias=jnp.zeros(
+            target.shape[-1],
+            dtype=target.dtype,
+        ),
+    )
+
+
+def sign_match(
+    source: jax.Array,
+    target: jax.Array,
+) -> jax.Array:
+    """Return signs that best align batched source arrays to target arrays."""
+    if source.shape != target.shape:
+        raise ValueError(
+            'source and target must have the same shape, '
+            f'got {source.shape} and {target.shape}'
+        )
+
+    if source.ndim < 2:
+        raise ValueError(
+            'expected a leading batch dimension and at least one value dimension'
+        )
+
+    value_axes = tuple(range(1, source.ndim))
+    inner_product = jnp.sum(
+        source * target,
+        axis=value_axes,
+    )
+
+    return jnp.where(
+        inner_product >= 0,
+        jnp.ones_like(inner_product),
+        -jnp.ones_like(inner_product),
+    )
+
+
 def zscore_gaussian(gaussian: Gaussian) -> Affine:
     """Return an affine map that z-scores a Gaussian distribution.
 
