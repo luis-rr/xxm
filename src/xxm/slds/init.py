@@ -159,6 +159,7 @@ def init_pca_gaussian(
         num_states=num_states,
         num_lags=1,
         self_transition_prob=self_transition_prob,
+        covariance_floor=covariance_floor,
     )
 
     emissions = GaussianEmissions.from_latents(
@@ -212,6 +213,7 @@ def init_arhmm_gaussian(
         num_states=num_states,
         num_lags=1,
         self_transition_prob=self_transition_prob,
+        covariance_floor=covariance_floor,
     )
 
     emissions = GaussianEmissions.from_latents(
@@ -266,6 +268,7 @@ def init_pca_poisson(
         num_states=num_states,
         num_lags=1,
         self_transition_prob=self_transition_prob,
+        covariance_floor=covariance_floor,
     )
 
     emissions = PoissonEmissions.from_latents(
@@ -314,6 +317,7 @@ def init_arhmm_poisson(
         num_states=num_states,
         num_lags=1,
         self_transition_prob=self_transition_prob,
+        covariance_floor=covariance_floor,
     )
 
     emissions = PoissonEmissions.from_latents(

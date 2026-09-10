@@ -227,6 +227,8 @@ def init_gaussian_ar(
     num_states: int,
     num_lags: int,
     self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
+    *,
+    covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
 ) -> Model:
     r"""Initialize Gaussian AR-HMM with first $L$ observations as fixed history."""
     emissions = _init_ar_gaussian_emissions(
@@ -234,6 +236,7 @@ def init_gaussian_ar(
         observations=observations,
         num_states=num_states,
         num_lags=num_lags,
+        covariance_floor=covariance_floor,
     )
 
     return _init(
