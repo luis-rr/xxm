@@ -1,5 +1,6 @@
 import itertools
 
+import jax.numpy as jnp
 import matplotlib.colors
 import matplotlib.patches
 import numpy as np
@@ -295,6 +296,122 @@ def plot_seq_2d_comparison(
         axs[1],
         states=states1,
         traces=traces1,
+    )
+
+
+def plot_dyn_linear_stream(
+    ax,
+    affine: Affine,
+    xlim=(-3, 3),
+    ylim=(-3, 3),
+    num_points=15,
+    color='speed',
+    cmap=None,
+    norm=None,
+    density=1.5,
+    linewidth=0.5,
+    arrowsize=0.75,
+    **kwargs,
+):
+    """Plot streamlines of a 2D affine discrete-time dynamical system.
+
+    The affine map is interpreted as
+
+        x[t + 1] = affine(x[t]),
+
+    and the streamlines are computed from the corresponding displacement field
+
+        affine(x) - x.
+
+    Parameters
+    ----------
+    ax
+        Matplotlib axes on which to draw.
+    affine
+        Affine map from R^2 to R^2.
+    xlim
+        Limits of the first state dimension.
+    ylim
+        Limits of the second state dimension.
+    num_points
+        Number of grid points along each dimension.
+    color
+        Streamline coloring. Can be:
+
+        - 'speed': color by displacement magnitude.
+        - 'log_speed': color by log displacement magnitude.
+        - 'angle': color by displacement direction in radians.
+        - Any other string is interpreted as a Matplotlib solid color.
+    cmap
+        Colormap used when `color` is 'speed', 'log_speed', or 'angle'.
+    norm
+        Optional Matplotlib normalization. If None, an appropriate
+        normalization is chosen automatically.
+    density
+        Streamline density passed to ``ax.streamplot``.
+    **kwargs
+        Additional keyword arguments passed to ``ax.streamplot``.
+    """
+
+    if cmap is None:
+        cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
+            'mb',
+            [
+                'xkcd:magenta',
+                'black',
+            ],
+        )
+
+    x = np.linspace(*xlim, num_points)  # type: ignore
+    y = np.linspace(*ylim, num_points)  # type: ignore
+    xx, yy = np.meshgrid(x, y)
+
+    points = np.stack([xx, yy], axis=-1)
+    next_points = np.asarray(affine.apply(jnp.asarray(points)))
+    displacement = next_points - points
+
+    dx = displacement[..., 0]
+    dy = displacement[..., 1]
+
+    if color == 'speed':
+        stream_color = np.hypot(dx, dy)
+
+    elif color == 'log_speed':
+        speed = np.hypot(dx, dy)
+        stream_color = np.log(speed)
+
+    elif color == 'angle':
+        stream_color = np.arctan2(dy, dx)
+
+        if norm is None:
+            norm = matplotlib.colors.Normalize(
+                vmin=-np.pi,
+                vmax=np.pi,
+            )
+
+    else:
+        stream_color = color
+
+    ax.streamplot(
+        xx,
+        yy,
+        dx,
+        dy,
+        color=stream_color,
+        cmap=cmap,
+        norm=norm,
+        density=density,
+        linewidth=linewidth,
+        arrowsize=arrowsize,
+        **kwargs,
+    )
+
+    ax.set(
+        xlim=xlim,
+        ylim=ylim,
+        aspect='equal',
+        xlabel=r'$x_1$',
+        ylabel=r'$x_2$',
     )
 
 
