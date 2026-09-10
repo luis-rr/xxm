@@ -141,8 +141,6 @@ def fit_laplace_em(
 ]:
     """Fit a nonconjugate LDS with Laplace-approximated EM."""
 
-    laplace_params = laplace_params or OptimParams()
-
     inferred = infer_laplace(
         model,
         observations,
@@ -178,8 +176,6 @@ def fit_laplace_em_many(
     ]
 ]:
     """Fit multiple nonconjugate LDS initializations with Laplace EM."""
-
-    laplace_params = laplace_params or OptimParams()
 
     inferred = tuple(
         infer_laplace(

@@ -143,7 +143,10 @@ MODEL_CASES = [
         name='slds-gaussian',
         initialize=initialize_slds_gaussian,
         infer=infer_slds,
-        infer_kwargs={'num_iters': 2},
+        infer_kwargs={
+            'num_iters': 2,
+            'initial_latents': jnp.zeros((GAUSSIAN_OBSERVATIONS.shape[0], 1)),
+        },
         em_step=partial(
             slds_variational_em_step,
             num_inference_iters=2,
@@ -161,6 +164,7 @@ MODEL_CASES = [
         infer=infer_slds_laplace,
         infer_kwargs={
             'num_iters': 2,
+            'initial_latents': jnp.zeros((POISSON_OBSERVATIONS.shape[0], 1)),
             'params': DEFAULT_OPTIM_PARAMS,
         },
         em_step=partial(

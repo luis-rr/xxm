@@ -13,7 +13,7 @@ from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
-from xxm.core.inference import Fitted, FittedCollection, Inferred
+from xxm.core.inference import Fitted, Inferred
 from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
@@ -37,9 +37,7 @@ from .init import (
 )
 from .learning import (
     fit_laplace_em,
-    fit_laplace_em_many,
     fit_variational_em,
-    fit_variational_em_many,
 )
 
 _infer_variational_jit = jax.jit(
@@ -61,26 +59,9 @@ _fit_variational_em_jit = jax.jit(
     ),
 )
 
-_fit_variational_em_many_jit = jax.jit(
-    fit_variational_em_many,
-    static_argnames=(
-        'num_iters',
-        'num_inference_iters',
-        'progress',
-    ),
-)
 
 _fit_laplace_em_jit = jax.jit(
     fit_laplace_em,
-    static_argnames=(
-        'num_iters',
-        'num_inference_iters',
-        'progress',
-    ),
-)
-
-_fit_laplace_em_many_jit = jax.jit(
-    fit_laplace_em_many,
     static_argnames=(
         'num_iters',
         'num_inference_iters',
@@ -289,10 +270,13 @@ class GaussianSLDS:
         Compute a structured mean-field posterior with conjugate updates for $q(x)$,
         returning its ELBO.
         """
+        initial_latents = self._model.emissions.invert(observations)
+
         inferred = _infer_variational_jit(
             self._model,
             observations,
             num_iters=num_iters,
+            initial_latents=initial_latents,
         )
 
         return Inferred(
@@ -310,11 +294,14 @@ class GaussianSLDS:
         progress: bool | str = 'Variational EM',
     ) -> Fitted[typing.Self, Posterior]:
         """Fit model parameters with variational expectation-maximization."""
+        initial_latents = self._model.emissions.invert(observations)
+
         fit = _fit_variational_em_jit(
             self._model,
             observations,
             num_iters=num_iters,
             num_inference_iters=num_inference_iters,
+            initial_latents=initial_latents,
             progress=progress,
         )
 
@@ -322,31 +309,6 @@ class GaussianSLDS:
             model=self.__class__(fit.state.model),
             posterior=fit.state.posterior,
             objective_trace=fit.objective_trace,
-        )
-
-    @classmethod
-    def fit_many(
-        cls,
-        models: tuple[typing.Self, ...],
-        observations: jax.Array,
-        *,
-        num_iters: int,
-        num_inference_iters: int,
-        progress: bool | str = 'Multi-Variational EM',
-    ) -> FittedCollection[typing.Self, Posterior]:
-        """Fit multiple Gaussian SLDS initializations with variational EM."""
-        fit = _fit_variational_em_many_jit(
-            tuple(model._model for model in models),
-            observations,
-            num_iters=num_iters,
-            num_inference_iters=num_inference_iters,
-            progress=progress,
-        )
-
-        return FittedCollection(
-            models=tuple(cls(state.model) for state in fit.states),
-            posteriors=tuple(state.posterior for state in fit.states),
-            objective_traces=fit.objective_traces,
         )
 
 
@@ -543,13 +505,14 @@ class PoissonSLDS:
         observations: jax.Array,
         *,
         num_iters: int,
-        initial_latents: jax.Array | None = None,
         params: OptimParams = DEFAULT_OPTIM_PARAMS,
     ) -> Inferred[typing.Self, Posterior]:
         """
         Compute a structured mean-field posterior with Laplace updates for $q(x)$,
         returning its ELBO.
         """
+        initial_latents = self._model.emissions.invert(observations)
+
         inferred = _infer_laplace_jit(
             self._model,
             observations,
@@ -575,12 +538,15 @@ class PoissonSLDS:
     ) -> Fitted[typing.Self, Posterior]:
         """Fit model parameters with Laplace EM."""
 
+        initial_latents = self._model.emissions.invert(observations)
+
         fit = _fit_laplace_em_jit(
             self._model,
             observations,
             num_iters=num_iters,
             num_inference_iters=num_inference_iters,
             laplace_params=laplace_params,
+            initial_latents=initial_latents,
             progress=progress,
         )
 
@@ -588,35 +554,4 @@ class PoissonSLDS:
             model=self.__class__(fit.state.model),
             posterior=fit.state.posterior,
             objective_trace=fit.objective_trace,
-        )
-
-    @classmethod
-    def fit_many(
-        cls,
-        models: tuple[typing.Self, ...],
-        observations: jax.Array,
-        *,
-        num_iters: int,
-        num_inference_iters: int,
-        laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
-        progress: bool | str = 'Multi-Laplace EM',
-    ) -> FittedCollection[
-        typing.Self,
-        Posterior,
-    ]:
-        """Fit multiple model initializations with Laplace EM."""
-
-        fit = _fit_laplace_em_many_jit(
-            tuple(model._model for model in models),
-            observations,
-            num_iters=num_iters,
-            num_inference_iters=num_inference_iters,
-            laplace_params=laplace_params,
-            progress=progress,
-        )
-
-        return FittedCollection(
-            models=tuple(cls(state.model) for state in fit.states),
-            posteriors=tuple(state.posterior for state in fit.states),
-            objective_traces=fit.objective_traces,
         )

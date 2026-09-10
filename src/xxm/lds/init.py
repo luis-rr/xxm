@@ -57,15 +57,9 @@ def pca_latents_poisson(
     The transformation is used only to initialize the latent trajectory.
     """
 
-    poisson_fit.inverse_exp_link(
+    transformed = poisson_fit.inverse_exp_link(
         observations,
         count_floor=count_floor,
-    )
-    transformed = jnp.log(
-        jnp.maximum(
-            observations,
-            count_floor,
-        )
     )
 
     return pca_latents(

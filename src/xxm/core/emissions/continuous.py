@@ -204,6 +204,15 @@ class GaussianEmissions(typing.NamedTuple):
 
         return cls(model)
 
+    def invert(
+        self,
+        observations: jax.Array,
+    ) -> jax.Array:
+        """Construct a latent estimate by pseudoinverting the emission mean map."""
+        return self.dist.affine.pseudoinverse().apply(
+            observations,
+        )
+
 
 class PoissonEmissions(typing.NamedTuple):
     r"""Linear Poisson emissions for continuous latent variables.
@@ -363,3 +372,19 @@ class PoissonEmissions(typing.NamedTuple):
         )
 
         return cls(model)
+
+    def invert(
+        self,
+        observations: jax.Array,
+        *,
+        count_floor: float = poisson_fit.DEFAULT_COUNT_FLOOR,
+    ) -> jax.Array:
+        """Construct a latent estimate from stabilized log counts."""
+        log_rates = poisson_fit.inverse_exp_link(
+            observations,
+            count_floor=count_floor,
+        )
+
+        return self.dist.affine.pseudoinverse().apply(
+            log_rates,
+        )

@@ -10,9 +10,7 @@ from .init import (
 )
 from .learning import (
     fit_laplace_em,
-    fit_laplace_em_many,
     fit_variational_em,
-    fit_variational_em_many,
 )
 from .model import GaussianSLDS, PoissonSLDS
 
@@ -21,9 +19,7 @@ __all__ = [
     'PoissonSLDS',
     'Posterior',
     'fit_laplace_em',
-    'fit_laplace_em_many',
     'fit_variational_em',
-    'fit_variational_em_many',
     'infer_variational',
     'init_arhmm_gaussian',
     'init_arhmm_poisson',

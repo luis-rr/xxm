@@ -13,7 +13,7 @@ from xxm.core.latents.discrete import (
 )
 from xxm.core.latents.gaussian import StateConditionedGaussian
 from xxm.slds.core import GaussianLinearSwitchingDynamics, Model
-from xxm.slds.inference import infer_variational
+from xxm.slds.inference import DiscreteFactors, SwitchingFactors, infer_variational
 
 ATOL = 1e-5
 
@@ -136,6 +136,7 @@ def test_single_state_slds_matches_gaussian_chain():
         model,
         observations,
         num_iters=3,
+        initial_latents=jnp.zeros((observations.shape[0], 1)),
     ).posterior
 
     state_probs = jnp.ones((observations.shape[0], 1))
@@ -179,33 +180,36 @@ def test_single_state_slds_matches_gaussian_chain():
     )
 
 
-def test_zero_iterations_uses_discrete_prior():
+def test_zero_iterations_uses_initial_latents():
     model = _two_state_model()
     observations = jnp.zeros((4, 1))
+    initial_latents = jnp.zeros((observations.shape[0], 1))
 
     posterior = infer_variational(
         model,
         observations,
+        initial_latents=initial_latents,
         num_iters=0,
     ).posterior
 
-    # There are T = 4 discrete states and T - 1 = 3 transitions.
-    #
-    # Starting from [0.7, 0.3]:
-    #   p(z1) = [0.69, 0.31]
-    #   p(z2) = [0.683, 0.317]
-    expected = np.array(
-        [
-            [0.7000, 0.3000],
-            [0.6900, 0.3100],
-            [0.6830, 0.3170],
-            [0.6781, 0.3219],
-        ]
+    switching = SwitchingFactors.from_model(model)
+    discrete = DiscreteFactors.from_model(
+        model,
+        num_steps=observations.shape[0],
     )
+
+    expected_potential = switching.discrete_potential_from_latents(initial_latents)
+    expected_posterior = discrete.infer(expected_potential)
 
     np.testing.assert_allclose(
         posterior.discrete.state_probs,
-        expected,
+        expected_posterior.state_probs,
+        atol=ATOL,
+    )
+
+    np.testing.assert_allclose(
+        posterior.discrete.pair_probs,
+        expected_posterior.pair_probs,
         atol=ATOL,
     )
 
@@ -213,6 +217,7 @@ def test_zero_iterations_uses_discrete_prior():
 
 
 def test_infer_variational_is_jittable():
+
     model = _two_state_model()
     observations = jnp.array(
         [
@@ -222,11 +227,13 @@ def test_infer_variational_is_jittable():
             [0.2],
         ]
     )
+    initial_latents = jnp.zeros((observations.shape[0], 1))
 
     eager = infer_variational(
         model,
         observations,
         num_iters=2,
+        initial_latents=initial_latents,
     )
 
     inference_jit = jax.jit(
@@ -238,6 +245,7 @@ def test_infer_variational_is_jittable():
         model,
         observations,
         num_iters=2,
+        initial_latents=initial_latents,
     )
 
     jax.block_until_ready(jitted)

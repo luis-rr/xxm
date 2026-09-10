@@ -168,12 +168,6 @@ class DiscreteFactors(typing.NamedTuple):
 
         return posterior
 
-    def prior(self) -> DiscretePosterior:
-        """Return q(z) under the discrete Markov prior."""
-        posterior, _ = self.chain.forward_backward()
-
-        return posterior
-
 
 class SwitchingFactors(typing.NamedTuple):
     """State-dependent factors coupling discrete and continuous latents."""
@@ -240,6 +234,32 @@ class SwitchingFactors(typing.NamedTuple):
             ),
             input_output_covariance=cross_covariances,
         )  # (T - 1, K)
+
+        return DiscretePotential(
+            log_values=jnp.concatenate(
+                [
+                    initial_log_values[None, :],
+                    dynamics_log_values,
+                ],
+                axis=0,
+            )
+        )
+
+    def discrete_potential_from_latents(
+        self,
+        latents: jax.Array,
+    ) -> DiscretePotential:
+        """Compute state potentials for a deterministic latent trajectory."""
+
+        initial_log_values = self.initial_dist.log_prob_broadcast(
+            latents[0],
+        )
+
+        dynamics_log_values = self.dynamics_dist.conditional(
+            latents[:-1, None, :],
+        ).log_prob(
+            latents[1:, None, :],
+        )
 
         return DiscretePotential(
             log_values=jnp.concatenate(
@@ -321,25 +341,39 @@ def infer_variational(
     model: Model[QuadraticEmissionsT],
     observations: jax.Array,
     num_iters: int,
-    initial_discrete_posterior: DiscretePosterior | None = None,
+    initial_latents: jax.Array,
 ) -> Inferred[Model[QuadraticEmissionsT], Posterior]:
     """
     Run structured mean-field inference with conjugate Gaussian updates for $q(x)$.
+
+    `initial_latents` must be provided to initialize $q(z)$ by scoring that
+    deterministic trajectory under the switching model before the first continuous update.
     """
 
-    inference = QuadraticVI.from_model(model, observations)
+    inference = QuadraticVI.from_model(
+        model,
+        observations,
+    )
 
-    def step(_, discrete_posterior: DiscretePosterior) -> DiscretePosterior:
+    def step(
+        _,
+        discrete_posterior: DiscretePosterior,
+    ) -> DiscretePosterior:
         """Perform one coordinate-ascent update of q(x) and q(z)."""
 
-        continuous_posterior, _ = inference.infer_continuous(discrete_posterior)
+        continuous_posterior, _ = inference.infer_continuous(
+            discrete_posterior,
+        )
 
-        return inference.infer_discrete(continuous_posterior)
+        return inference.infer_discrete(
+            continuous_posterior,
+        )
 
-    if initial_discrete_posterior is None:
-        discrete_posterior = inference.discrete.prior()
-    else:
-        discrete_posterior = initial_discrete_posterior
+    discrete_posterior = inference.discrete.infer(
+        inference.switching.discrete_potential_from_latents(
+            initial_latents,
+        )
+    )
 
     discrete_posterior = jax.lax.fori_loop(
         0,
@@ -348,7 +382,10 @@ def infer_variational(
         discrete_posterior,
     )
 
-    (continuous_posterior, continuous_log_normalizer) = inference.infer_continuous(
+    (
+        continuous_posterior,
+        continuous_log_normalizer,
+    ) = inference.infer_continuous(
         discrete_posterior,
     )
 
@@ -463,43 +500,21 @@ class LaplaceVI(typing.NamedTuple, typing.Generic[LaplaceEmissionsT]):
             )
         )
 
-    def initial_latents(self, discrete_posterior: DiscretePosterior) -> jax.Array:
-        """Construct an initial latent trajectory from expected switching dynamics."""
-        initial_potential, dynamics_potential = self.switching.continuous_potentials(
-            discrete_posterior,
-        )
-
-        prior_chain = GaussianChain.from_pair_potentials(
-            initial_potential,
-            dynamics_potential,
-        )
-
-        prior_posterior, _ = prior_chain.forward_backward()
-
-        return prior_posterior.means
-
     def initial_state(
         self,
-        initial_latents: jax.Array | None = None,
-        initial_discrete_posterior: DiscretePosterior | None = None,
+        initial_latents: jax.Array,
     ) -> LaplaceState:
         """Construct an observation-informed initial variational state."""
 
-        if initial_discrete_posterior is None:
-            discrete_posterior = self.discrete.prior()
-        else:
-            discrete_posterior = initial_discrete_posterior
-
-        if initial_latents is None:
-            latents = self.initial_latents(
-                discrete_posterior,
+        discrete_posterior = self.discrete.infer(
+            self.switching.discrete_potential_from_latents(
+                initial_latents,
             )
-        else:
-            latents = initial_latents
+        )
 
         continuous_posterior = self.approximate_continuous(
             discrete_posterior,
-            latents,
+            initial_latents,
         )
 
         return LaplaceState(
@@ -548,8 +563,7 @@ def infer_laplace(
     model: Model[LaplaceEmissionsT],
     observations: jax.Array,
     num_iters: int,
-    initial_latents: jax.Array | None = None,
-    initial_discrete_posterior: DiscretePosterior | None = None,
+    initial_latents: jax.Array,
     params: OptimParams = DEFAULT_OPTIM_PARAMS,
 ) -> Inferred[Model[LaplaceEmissionsT], Posterior]:
     """
@@ -583,10 +597,7 @@ def infer_laplace(
             continuous=continuous_posterior,
         )
 
-    state = inference.initial_state(
-        initial_latents=initial_latents,
-        initial_discrete_posterior=initial_discrete_posterior,
-    )
+    state = inference.initial_state(initial_latents)
 
     state = jax.lax.fori_loop(
         0,
