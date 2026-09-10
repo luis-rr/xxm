@@ -549,20 +549,16 @@ def _add_relative_ridge(
     return covariance + ridge * scale[..., None, None] * identity
 
 
-def linear_from_paired(
+def affine_from_paired(
     paired: PairedGaussian,
     *,
     ridge: float,
-    covariance_floor: float,
-) -> LinearGaussian:
-    r"""
-    Return the linear-Gaussian distribution of ``right | left``.
+) -> Affine:
+    r"""Return the affine least-squares map from ``left`` to ``right``.
 
     ``ridge`` adds isotropic regularization to the left covariance relative
-    to its average marginal variance. With nonzero ridge, the result is a
-    regularized approximation to the exact Gaussian conditional.
+    to its average marginal variance.
     """
-
     input_covariance = _add_relative_ridge(
         paired.left.covariance,
         ridge,
@@ -589,11 +585,38 @@ def linear_from_paired(
         paired.left.mean,
     )
 
+    return Affine(
+        coefficients=coefficients,
+        bias=bias,
+    )
+
+
+def linear_from_paired(
+    paired: PairedGaussian,
+    *,
+    ridge: float,
+    covariance_floor: float,
+) -> LinearGaussian:
+    r"""
+    Return the linear-Gaussian distribution of ``right | left``.
+
+    ``ridge`` adds isotropic regularization to the left covariance relative
+    to its average marginal variance. With nonzero ridge, the result is a
+    regularized approximation to the exact Gaussian conditional.
+    """
+    affine = affine_from_paired(
+        paired,
+        ridge=ridge,
+    )
+
+    coefficients = affine.coefficients
+
     coefficients_t = jnp.swapaxes(
         coefficients,
         -2,
         -1,
     )
+
     cross_covariance_t = jnp.swapaxes(
         paired.cross_covariance,
         -2,
@@ -623,10 +646,7 @@ def linear_from_paired(
     )
 
     return LinearGaussian(
-        affine=Affine(
-            coefficients=coefficients,
-            bias=bias,
-        ),
+        affine=affine,
         covariance=covariance,
     )
 
