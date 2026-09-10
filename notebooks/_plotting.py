@@ -398,23 +398,38 @@ def plot_dyn_linear_gaussian_comparison(
     )
 
 
-def plot_fit_progress(objective, name='Log Likelihood', ax=None) -> None:
-    if ax is None:
-        _, ax = plt.subplots(figsize=(6, 3))
+def plot_fit_progress(objective, name='Log Likelihood', title='', **kwargs) -> None:
+    objective = np.asarray(objective)
+    _, axs = plt.subplots(figsize=(6, 6), nrows=2, sharex='all')
 
-    ax.plot(np.asarray(objective))
+    ax = axs[0]
+    ax.plot(objective, **kwargs)
 
     ax.set(
         xlabel='iteration',
         ylabel=name,
+        title=title,
+    )
+
+    ax = axs[1]
+
+    ax.plot(np.diff(objective))
+
+    ax.set_yscale('symlog', linthresh=1e-3)
+
+    ax.set(
+        xlabel='iteration',
+        ylabel='change in ' + name,
     )
 
 
-def plot_fit_progress_many(fits, highlight_idx=None, name='Log Likelihood', ax=None):
-    if ax is None:
-        _, ax = plt.subplots()
+def plot_fit_progress_many(fits, highlight_idx=None, name='Log Likelihood', title=''):
+    _, axs = plt.subplots(figsize=(6, 6), nrows=2, sharex='all')
 
-    ax.plot(np.asarray(fits.objective_traces).T)
+    traces = np.asarray(fits.objective_traces).T
+
+    ax = axs[0]
+    ax.plot(traces, linewidth=0.3, alpha=0.5)
 
     if highlight_idx is not None:
         objective = fits.get(highlight_idx).objective_trace
@@ -423,6 +438,22 @@ def plot_fit_progress_many(fits, highlight_idx=None, name='Log Likelihood', ax=N
     ax.set(
         xlabel='iteration',
         ylabel=name,
+        title=title,
+    )
+
+    ax = axs[1]
+
+    traces_diff = np.diff(traces, axis=0)
+    ax.plot(traces_diff, linewidth=0.3, alpha=0.5)
+
+    if highlight_idx is not None:
+        ax.plot(traces_diff[:, highlight_idx], color='k')
+
+    ax.set_yscale('symlog', linthresh=1e-3)
+
+    ax.set(
+        xlabel='iteration',
+        ylabel='change in ' + name,
     )
 
 
