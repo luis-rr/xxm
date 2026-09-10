@@ -6,11 +6,10 @@ from jax import numpy as jnp
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
 from xxm.core.optim import gaussian as gaussian_fit
+from xxm.core.optim import poisson as poisson_fit
 from xxm.core.optim.loop import unstack_states
 
 from .core import Model
-
-DEFAULT_POISSON_COUNT_FLOOR = 0.1
 
 
 def _validate_initialization(
@@ -57,6 +56,11 @@ def pca_latents_poisson(
     Counts are floored before taking logs so zero observations remain finite.
     The transformation is used only to initialize the latent trajectory.
     """
+
+    poisson_fit.inverse_exp_link(
+        observations,
+        count_floor=count_floor,
+    )
     transformed = jnp.log(
         jnp.maximum(
             observations,
@@ -116,7 +120,7 @@ def init_pca_poisson(
     observations: jax.Array,
     latent_dim: int,
     covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
-    count_floor: float = DEFAULT_POISSON_COUNT_FLOOR,
+    count_floor: float = poisson_fit.DEFAULT_COUNT_FLOOR,
 ) -> Model[PoissonEmissions]:
     """Initialize a Poisson LDS from inverse-link PCA latents."""
     _validate_initialization(
@@ -150,7 +154,7 @@ def init_pca_poisson_many(
     observations: jax.Array,
     latent_dim: int,
     covariance_floors: jax.Array | None = None,
-    count_floor: float = DEFAULT_POISSON_COUNT_FLOOR,
+    count_floor: float = poisson_fit.DEFAULT_COUNT_FLOOR,
 ) -> tuple[Model[PoissonEmissions], ...]:
     """Initialize multiple LDS models from PCA latent projections."""
 

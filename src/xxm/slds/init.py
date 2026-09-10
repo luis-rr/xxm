@@ -14,6 +14,7 @@ from xxm.core.latents.discrete import CategoricalInitial
 from xxm.core.latents.gaussian import StateConditionedGaussian
 from xxm.core.optim import categorical as categorical_fit
 from xxm.core.optim import gaussian as gaussian_fit
+from xxm.core.optim import poisson as poisson_fit
 from xxm.hmm.core import Model as HMMModel
 from xxm.hmm.inference import infer_exact as infer_hmm
 from xxm.hmm.init import (
@@ -22,7 +23,6 @@ from xxm.hmm.init import (
 )
 from xxm.hmm.learning import fit_em as fit_hmm
 from xxm.lds.init import (
-    DEFAULT_POISSON_COUNT_FLOOR,
     pca_latents,
     pca_latents_poisson,
 )
@@ -247,7 +247,7 @@ def init_pca_poisson(
     self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
     covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     pseudocount=categorical_fit.DEFAULT_PSEUDOCOUNT,
-    count_floor: float = DEFAULT_POISSON_COUNT_FLOOR,
+    count_floor: float = poisson_fit.DEFAULT_COUNT_FLOOR,
 ) -> Model[PoissonEmissions]:
     """Initialize a Poisson SLDS from inverse-link PCA latents."""
     _validate_initialization(
@@ -295,7 +295,7 @@ def init_arhmm_poisson(
     self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
     covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     pseudocount=categorical_fit.DEFAULT_PSEUDOCOUNT,
-    count_floor: float = DEFAULT_POISSON_COUNT_FLOOR,
+    count_floor: float = poisson_fit.DEFAULT_COUNT_FLOOR,
     progress: bool | str = 'AR-HMM',
 ) -> Model[PoissonEmissions]:
     """Initialize a Poisson SLDS by fitting an AR-HMM to inverse-link PCA latents."""

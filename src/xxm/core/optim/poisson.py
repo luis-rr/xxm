@@ -12,6 +12,21 @@ from xxm.core.optim.newton import NewtonSearch, OptimParams
 
 EPS: float = 1e-8
 DEFAULT_RIDGE: float = 1e-6
+DEFAULT_COUNT_FLOOR: float = 0.1
+
+
+def inverse_exp_link(
+    counts: jax.Array,
+    *,
+    count_floor: float,
+) -> jax.Array:
+    """Map Poisson counts to stabilized log-rate space."""
+    return jnp.log(
+        jnp.maximum(
+            counts,
+            count_floor,
+        )
+    )
 
 
 class _NewtonSearchParams(typing.NamedTuple):
