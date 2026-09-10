@@ -289,6 +289,42 @@ class LinearGaussian(typing.NamedTuple):
         assert covariance_shape == affine_shape
         return affine_shape
 
+    # TODO add this method for other batched distributions and objects
+    def broadcast_batch(
+        self,
+        batch_shape: int | tuple[int, ...],
+    ) -> typing.Self:
+        """Prepend broadcast batch dimensions to the distribution."""
+        if isinstance(batch_shape, int):
+            batch_shape = (batch_shape,)
+
+        target_batch_shape = batch_shape + self.batch_shape
+
+        return self.__class__(
+            affine=Affine(
+                coefficients=jnp.broadcast_to(
+                    self.affine.coefficients,
+                    target_batch_shape
+                    + (
+                        self.output_dim,
+                        *self.input_shape,
+                    ),
+                ),
+                bias=jnp.broadcast_to(
+                    self.affine.bias,
+                    target_batch_shape + (self.output_dim,),
+                ),
+            ),
+            covariance=jnp.broadcast_to(
+                self.covariance,
+                target_batch_shape
+                + (
+                    self.output_dim,
+                    self.output_dim,
+                ),
+            ),
+        )
+
     @property
     def input_shape(self) -> tuple[int, ...]:
         """Input shape of the affine map."""
