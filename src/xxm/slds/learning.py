@@ -105,8 +105,6 @@ def fit_laplace_em(
 ) -> Fit[Inferred[Model[LaplaceEmissionsT], Posterior]]:
     """Fit an SLDS with structured Laplace EM."""
 
-    laplace_params = laplace_params or OptimParams()
-
     inferred = infer_laplace(
         model,
         observations,

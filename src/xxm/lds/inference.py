@@ -74,8 +74,6 @@ def infer_laplace(
     the marginal log likelihood.
     """
 
-    params = params or OptimParams()
-
     num_steps = observations.shape[0]
 
     chain = to_chain(

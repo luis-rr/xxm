@@ -574,8 +574,6 @@ def infer_laplace(
     then alternate q(z) followed by q(x).
     """
 
-    params = params or OptimParams()
-
     inference = LaplaceVI.from_model(
         model,
         observations,
