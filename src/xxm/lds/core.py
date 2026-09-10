@@ -166,3 +166,35 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
             dynamics=self.dynamics.align(alignment),
             emissions=self.emissions.compose_input(alignment),
         )
+
+    def whiten(self) -> typing.Self:
+        r"""Express an LDS in latent coordinates where dynamics noise is identity.
+
+        For $Q = LL^\top$, use $\bar x = L^{-1}x$.
+        """
+        covariance = self.dynamics.dist.covariance
+        latent_dim = self.dynamics.dist.output_dim
+
+        cholesky = jnp.linalg.cholesky(
+            covariance,
+        )
+
+        identity = jnp.eye(
+            latent_dim,
+            dtype=covariance.dtype,
+        )
+
+        whitening = jnp.linalg.solve(
+            cholesky,
+            identity,
+        )
+
+        alignment = Affine(
+            coefficients=whitening,
+            bias=jnp.zeros(
+                latent_dim,
+                dtype=covariance.dtype,
+            ),
+        )
+
+        return self.align(alignment)
