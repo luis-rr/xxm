@@ -12,6 +12,17 @@ from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 TRACE_COLORS = ('k', 'xkcd:magenta') + tuple(matplotlib.colormaps['Dark2'].colors)  # type: ignore
 
 
+def square_axes(ax, aspect='equal') -> None:
+    xlim = ax.get_xlim()
+    ylim = ax.get_ylim()
+    absmax = max(abs(xlim[0]), abs(xlim[1]), abs(ylim[0]), abs(ylim[1]))
+    ax.set(
+        xlim=(-absmax, absmax),
+        ylim=(-absmax, absmax),
+        aspect=aspect,
+    )
+
+
 def state_cmap(num_states: int) -> matplotlib.colors.ListedColormap:
     """Return a discrete colormap with one color per state."""
     base = matplotlib.colormaps['tab10'].colors  # type: ignore
