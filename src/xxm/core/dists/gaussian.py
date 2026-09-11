@@ -29,6 +29,29 @@ class Gaussian(typing.NamedTuple):
         assert mean_shape == covariance_shape
         return mean_shape
 
+    def permute_variables(
+        self,
+        permutation: jax.Array,
+    ) -> typing.Self:
+        """Reorder the Gaussian variable dimensions."""
+        # TODO add equivalent method to other batched distributions and objects
+        permutation = jnp.asarray(permutation)
+
+        if permutation.shape != (self.variable_dim,):
+            raise ValueError(
+                f'permutation must have shape {(self.variable_dim,)}, '
+                f'got {permutation.shape}'
+            )
+
+        return self._replace(
+            mean=self.mean[..., permutation],
+            covariance=self.covariance[
+                ...,
+                permutation[:, None],
+                permutation[None, :],
+            ],
+        )
+
     @property
     def variable_dim(self) -> int:
         """Dimension of the Gaussian variable."""
