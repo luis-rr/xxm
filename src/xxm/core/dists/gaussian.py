@@ -5,6 +5,7 @@ import typing
 import jax
 import jax.numpy as jnp
 import jax.scipy as jsp
+import jax.scipy.linalg as jsp_linalg
 
 from xxm.core.affine import Affine
 
@@ -20,6 +21,21 @@ class Gaussian(typing.NamedTuple):
 
     mean: jax.Array  # (..., N)
     covariance: jax.Array  # (..., N, N)
+
+    @classmethod
+    def from_canonical(
+        cls,
+        precision: jax.Array,
+        information: jax.Array,
+    ) -> typing.Self:
+        """Normalize an unbatched Gaussian canonical potential."""
+        precision = 0.5 * (precision + precision.T)
+        cholesky = jnp.linalg.cholesky(precision)
+        identity = jnp.eye(precision.shape[0], dtype=precision.dtype)
+        mean = jsp_linalg.cho_solve((cholesky, True), information)
+        covariance = jsp_linalg.cho_solve((cholesky, True), identity)
+        covariance = 0.5 * (covariance + covariance.T)
+        return cls(mean=mean, covariance=covariance)
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
@@ -52,6 +68,22 @@ class Gaussian(typing.NamedTuple):
             ],
         )
 
+    def reorient_variables(
+        self,
+        coefficient_signs: jax.Array,
+    ) -> typing.Self:
+        """Flip signs of Gaussian variable dimensions."""
+        coefficient_signs = jnp.asarray(coefficient_signs)
+
+        return self._replace(
+            mean=self.mean * coefficient_signs,
+            covariance=(
+                coefficient_signs[:, None]
+                * self.covariance
+                * coefficient_signs[None, :]
+            ),
+        )
+
     @property
     def variable_dim(self) -> int:
         """Dimension of the Gaussian variable."""
@@ -80,6 +112,15 @@ class Gaussian(typing.NamedTuple):
     def variance(self) -> jax.Array:
         """Marginal variances, diagonal of covariance."""
         return jnp.diagonal(self.covariance, axis1=-2, axis2=-1)
+
+    def entropy(self) -> jax.Array:
+        """Differential entropy of the Gaussian distribution."""
+        cholesky = jnp.linalg.cholesky(self.covariance)
+        log_det = 2.0 * jnp.sum(
+            jnp.log(jnp.diagonal(cholesky, axis1=-2, axis2=-1)),
+            axis=-1,
+        )
+        return 0.5 * (self.variable_dim * (1.0 + jnp.log(2.0 * jnp.pi)) + log_det)
 
     def sample(
         self,
