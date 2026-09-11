@@ -10,17 +10,27 @@ from xxm.core.dists.gaussian import Gaussian
 from xxm.core.optim import gaussian as _gaussian_fit
 
 
-def match_states(costs: jax.Array) -> jax.Array:
-    r"""Permutation minimizing total cost matrix.
+def match_permutation(costs: jax.Array) -> jax.Array:
+    """Permutation minimizing total pairwise matching cost.
 
-    `costs[target, source]` is cost of matching source state to target state.
-    Returns permutation to apply to source to match target ordering.
+    `costs[target, source]` is the cost of matching one source item to one
+    target item. Returns the permutation to apply to source so that its
+    leading dimension follows target ordering.
     """
+    if costs.ndim != 2 or costs.shape[0] != costs.shape[1]:
+        raise ValueError(f'costs must be a square matrix, got shape {costs.shape}')
+
     permutation = min(
         itertools.permutations(range(costs.shape[0])),
         key=lambda p: sum(costs[k, p[k]] for k in range(len(p))),
     )
+
     return jnp.asarray(permutation)
+
+
+def match_states(costs: jax.Array) -> jax.Array:
+    """Permutation minimizing total state-matching cost."""
+    return match_permutation(costs)
 
 
 def match_states_by_mean(
@@ -180,6 +190,48 @@ def sign_match(
         jnp.ones_like(inner_product),
         -jnp.ones_like(inner_product),
     )
+
+
+def match_signed_permutation(
+    source: jax.Array,
+    target: jax.Array,
+) -> tuple[jax.Array, jax.Array]:
+    """Match batched arrays up to permutation and independent signs.
+
+    The leading dimension indexes items to match. The remaining dimensions
+    define each item.
+
+    Returns the permutation to apply to `source`, followed by the signs to
+    apply after permutation.
+    """
+    if source.shape != target.shape:
+        raise ValueError(
+            'source and target must have the same shape, '
+            f'got {source.shape} and {target.shape}'
+        )
+
+    if source.ndim < 2:
+        raise ValueError(
+            'expected a leading batch dimension and at least one value dimension'
+        )
+
+    value_axes = tuple(range(2, source.ndim + 1))
+
+    inner_products = jnp.sum(
+        target[:, None] * source[None, :],
+        axis=value_axes,
+    )
+
+    permutation = match_permutation(
+        -jnp.abs(inner_products),
+    )
+
+    signs = sign_match(
+        source[permutation],
+        target,
+    )
+
+    return permutation, signs
 
 
 def zscore_gaussian(gaussian: Gaussian) -> Affine:
