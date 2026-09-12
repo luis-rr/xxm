@@ -222,82 +222,121 @@ class GaussianPotential(typing.NamedTuple):
         self,
         weights: jax.Array,  # (..., K)
     ) -> typing.Self:
-        r"""Compute the weighted sum of batched log potentials.
+        r"""Compute the weighted sum over the last potential batch axis.
 
         The returned potential satisfies
-        $\log \phi(u)=\sum_k w_k\log\phi_k(u)$, with $w$ stored in `weights`.
-        The input potential has one batch dimension of size $K$; the result
-        has batch shape `weights.shape[:-1]`.
+        $\log \phi(u)=\sum_k w_k\log\phi_k(u)$.
+
+        The last potential batch dimension has size `K` and is reduced.
+        Any preceding potential batch dimensions broadcast against
+        `weights.shape[:-1]`.
         """
-        if self.batch_shape != (weights.shape[-1],):
+        if not self.batch_shape:
             raise ValueError(
-                'last dimension of weights must match the potential batch dimension; '
-                f'expected {self.batch_shape}, got {weights.shape}'
+                'weighted_sum requires at least one potential batch dimension'
             )
+
+        if self.batch_shape[-1] != weights.shape[-1]:
+            raise ValueError(
+                'last dimension of weights must match the last potential '
+                f'batch dimension; expected {self.batch_shape[-1]}, '
+                f'got {weights.shape[-1]}'
+            )
+
+        try:
+            jnp.broadcast_shapes(
+                self.batch_shape[:-1],
+                weights.shape[:-1],
+            )
+        except ValueError as error:
+            raise ValueError(
+                'leading potential and weight batch dimensions must broadcast; '
+                f'got {self.batch_shape[:-1]} and {weights.shape[:-1]}'
+            ) from error
 
         return self.__class__(
             precision_blocks=jnp.einsum(
-                '...k,kij->...ij',
+                '...k,...kij->...ij',
                 weights,
                 self.precision_blocks,
             ),
             information_vectors=jnp.einsum(
-                '...k,ki->...i',
+                '...k,...ki->...i',
                 weights,
                 self.information_vectors,
             ),
             log_constant=jnp.einsum(
-                '...k,k->...',
+                '...k,...k->...',
                 weights,
                 self.log_constant,
             ),
         )
 
-    def expected_log_potentials(
+    def expected_log_potential(
         self,
-        mean: jax.Array,  # (..., N)
-        second_moment: jax.Array,  # (..., N, N)
-    ) -> jax.Array:  # (..., K)
-        r"""Compute each batched log potential's Gaussian expectation.
+        mean: jax.Array,
+        second_moment: jax.Array,
+    ) -> jax.Array:
+        r"""Compute the Gaussian expectation of this log potential.
 
-        Return $\mathbb{E}_q[\log\phi_k(u)]$ for each potential $k$.
-        `mean` stores $\mathbb{E}_q[u]$ and `second_moment` stores the raw
-        second moment $\mathbb{E}_q[uu^\top]$.
+        Batch dimensions of the potential and moments must be broadcast-compatible.
+        `mean` stores $\mathbb{E}[u]$ and `second_moment` stores
+        $\mathbb{E}[uu^\top]$.
         """
-        if len(self.batch_shape) != 1:
-            raise ValueError(
-                'expected_log_potentials requires one potential batch dimension; '
-                f'got {self.batch_shape}'
-            )
-
         if mean.shape[-1] != self.variable_dim:
             raise ValueError(
                 f'mean must have trailing dimension {self.variable_dim}; '
                 f'got {mean.shape}'
             )
 
-        if second_moment.shape != mean.shape[:-1] + (
+        if second_moment.shape[-2:] != (
             self.variable_dim,
             self.variable_dim,
         ):
             raise ValueError(
-                'second_moment must have shape (..., N, N) matching mean; '
+                'second_moment must have trailing shape '
+                f'{(self.variable_dim, self.variable_dim)}; '
                 f'got {second_moment.shape}'
             )
+
+        jnp.broadcast_shapes(
+            self.batch_shape,
+            mean.shape[:-1],
+            second_moment.shape[:-2],
+        )
 
         return (
             -0.5
             * jnp.einsum(
-                'kij,...ij->...k',
+                '...ij,...ij->...',
                 self.precision_blocks,
                 second_moment,
             )
             + jnp.einsum(
-                'ki,...i->...k',
+                '...i,...i->...',
                 self.information_vectors,
                 mean,
             )
             + self.log_constant
+        )
+
+    def expected_log_potential_broadcast(
+        self,
+        mean: jax.Array,
+        second_moment: jax.Array,
+    ) -> jax.Array:
+        """Evaluate every moment tuple against every batched potential."""
+        extra = (1,) * len(self.batch_shape)
+
+        mean = mean.reshape(mean.shape[:-1] + extra + (self.variable_dim,))
+
+        second_moment = second_moment.reshape(
+            second_moment.shape[:-2] + extra + (self.variable_dim, self.variable_dim)
+        )
+
+        return self.expected_log_potential(
+            mean=mean,
+            second_moment=second_moment,
         )
 
 
@@ -450,94 +489,165 @@ class GaussianPairPotential(typing.NamedTuple):
     def weighted_sum(
         self,
         weights: jax.Array,  # (..., K)
-    ) -> GaussianPairPotential:
-        r"""Compute the weighted sum of the batched log potentials.
+    ) -> typing.Self:
+        r"""Compute the weighted sum over the last potential batch axis.
 
         The returned potential satisfies
-        $\log f(x_0,x_1)=\sum_k w_k\log f_k(x_0,x_1)$, with $w$ stored in
-        `weights`. The input has one batch dimension of size $K$; the result
-        has batch shape `weights.shape[:-1]`.
-        """
+        $\log f(x_0,x_1)=\sum_k w_k\log f_k(x_0,x_1)$.
 
-        if self.batch_shape != (weights.shape[-1],):
+        The last potential batch dimension has size `K` and is reduced.
+        Any preceding potential batch dimensions broadcast against
+        `weights.shape[:-1]`.
+        """
+        if not self.batch_shape:
             raise ValueError(
-                'last dimension of weights must match the potential batch dimension; '
-                f'expected {self.batch_shape}, got {weights.shape}'
+                'weighted_sum requires at least one potential batch dimension'
             )
 
-        return GaussianPairPotential(
+        if self.batch_shape[-1] != weights.shape[-1]:
+            raise ValueError(
+                'last dimension of weights must match the last potential '
+                f'batch dimension; expected {self.batch_shape[-1]}, '
+                f'got {weights.shape[-1]}'
+            )
+
+        try:
+            jnp.broadcast_shapes(
+                self.batch_shape[:-1],
+                weights.shape[:-1],
+            )
+        except ValueError as error:
+            raise ValueError(
+                'leading potential and weight batch dimensions must broadcast; '
+                f'got {self.batch_shape[:-1]} and {weights.shape[:-1]}'
+            ) from error
+
+        return self.__class__(
             left_precision=jnp.einsum(
-                '...k,kij->...ij',
+                '...k,...kij->...ij',
                 weights,
                 self.left_precision,
             ),
             right_precision=jnp.einsum(
-                '...k,kij->...ij',
+                '...k,...kij->...ij',
                 weights,
                 self.right_precision,
             ),
             lower_precision=jnp.einsum(
-                '...k,kij->...ij',
+                '...k,...kij->...ij',
                 weights,
                 self.lower_precision,
             ),
             left_information=jnp.einsum(
-                '...k,ki->...i',
+                '...k,...ki->...i',
                 weights,
                 self.left_information,
             ),
             right_information=jnp.einsum(
-                '...k,ki->...i',
+                '...k,...ki->...i',
                 weights,
                 self.right_information,
             ),
             log_constant=jnp.einsum(
-                '...k,k->...',
+                '...k,...k->...',
                 weights,
                 self.log_constant,
             ),
         )
 
-    def expected_log_potentials(
+    def expected_log_potential(
         self,
-        posterior: GaussianChainMarginals,
+        posterior: PairedGaussian,
     ) -> jax.Array:
-        r"""Compute $\mathbb{E}_{q(x_t,x_{t+1})}[\log f_k(x_t,x_{t+1})]$."""
+        r"""Compute the expected pair log potential from aligned joint moments.
 
-        means = posterior.means
-        second = posterior.raw_second_moments()
-        cross = posterior.raw_cross_moments()
+        Batch dimensions of the potential and posterior must be
+        broadcast-compatible.
+        """
+        if posterior.left_dim != self.variable_dim:
+            raise ValueError(
+                f'left variable dimension must be {self.variable_dim}; '
+                f'got {posterior.left_dim}'
+            )
+
+        if posterior.right_dim != self.variable_dim:
+            raise ValueError(
+                f'right variable dimension must be {self.variable_dim}; '
+                f'got {posterior.right_dim}'
+            )
+
+        jnp.broadcast_shapes(
+            self.batch_shape,
+            posterior.batch_shape,
+        )
+
+        left_mean = posterior.left.mean
+        right_mean = posterior.right.mean
+
+        left_second = posterior.left.covariance + jnp.einsum(
+            '...i,...j->...ij',
+            left_mean,
+            left_mean,
+        )
+
+        right_second = posterior.right.covariance + jnp.einsum(
+            '...i,...j->...ij',
+            right_mean,
+            right_mean,
+        )
+
+        # PairedGaussian stores Cov(right, left).
+        left_right_moment = jnp.swapaxes(
+            posterior.cross_covariance,
+            -1,
+            -2,
+        ) + jnp.einsum(
+            '...i,...j->...ij',
+            left_mean,
+            right_mean,
+        )
 
         return (
             -0.5
             * jnp.einsum(
-                'kij,tij->tk',
+                '...ij,...ij->...',
                 self.left_precision,
-                second[:-1],
+                left_second,
             )
             - jnp.einsum(
-                'kij,tji->tk',
+                '...ij,...ji->...',
                 self.lower_precision,
-                cross,
+                left_right_moment,
             )
             - 0.5
             * jnp.einsum(
-                'kij,tij->tk',
+                '...ij,...ij->...',
                 self.right_precision,
-                second[1:],
+                right_second,
             )
             + jnp.einsum(
-                'ki,ti->tk',
+                '...i,...i->...',
                 self.left_information,
-                means[:-1],
+                left_mean,
             )
             + jnp.einsum(
-                'ki,ti->tk',
+                '...i,...i->...',
                 self.right_information,
-                means[1:],
+                right_mean,
             )
-            + self.log_constant[None, :]
+            + self.log_constant
         )
+
+    def expected_log_potential_broadcast(
+        self,
+        posterior: PairedGaussian,
+    ) -> jax.Array:
+        """Evaluate every joint moment tuple against every batched potential."""
+        index = (slice(None),) * len(posterior.batch_shape) + (None,) * len(
+            self.batch_shape
+        )
+
+        return self.expected_log_potential(posterior.select(index))
 
 
 class GaussianChain(typing.NamedTuple):
@@ -1069,6 +1179,40 @@ class GaussianChainMarginals(typing.NamedTuple):
                 -1,
             ),
         )
+
+    def expected_log_potential(
+        self,
+        chain: GaussianChain,
+    ) -> jax.Array:
+        r"""Compute the expected chain log potential $\mathbb{E}_q[\log f(x)]$."""
+        if chain.num_steps != self.means.shape[0]:
+            raise ValueError('chain and posterior must have the same number of steps')
+
+        if chain.variable_dim != self.means.shape[-1]:
+            raise ValueError('chain and posterior variable dimensions must match')
+
+        second_moments = self.raw_second_moments()
+        cross_moments = self.raw_cross_moments()
+
+        unary_quadratic = jnp.einsum(
+            'tij,tij->',
+            chain.diagonal_precision_blocks,
+            second_moments,
+        )
+
+        pair_quadratic = jnp.einsum(
+            'tij,tij->',
+            chain.lower_precision_blocks,
+            cross_moments,
+        )
+
+        linear = jnp.einsum(
+            'ti,ti->',
+            chain.information_vectors,
+            self.means,
+        )
+
+        return -0.5 * unary_quadratic - pair_quadratic + linear + chain.log_constant
 
 
 def _solve_from_cholesky(
