@@ -131,6 +131,12 @@ class DiscreteChainMarginals(typing.NamedTuple):
     state_probs: jax.Array  # (T, K)
     pair_probs: jax.Array  # (T - 1, K, K)
 
+    def incoming_state_probs(
+        self,
+    ) -> jax.Array:
+        """State probabilities associated with incoming transitions."""
+        return self.state_probs[1:]
+
     def entropy(self) -> jax.Array:
         """
         Entropy of the normalized chain distribution.

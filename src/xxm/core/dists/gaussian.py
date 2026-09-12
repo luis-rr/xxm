@@ -45,6 +45,30 @@ class Gaussian(typing.NamedTuple):
         assert mean_shape == covariance_shape
         return mean_shape
 
+    def move_batch_axis(
+        self,
+        source: int,
+        destination: int,
+    ) -> typing.Self:
+        """Move one Gaussian batch axis to another position."""
+        batch_ndim = len(self.batch_shape)
+
+        source = source % batch_ndim
+        destination = destination % batch_ndim
+
+        return self._replace(
+            mean=jnp.moveaxis(
+                self.mean,
+                source,
+                destination,
+            ),
+            covariance=jnp.moveaxis(
+                self.covariance,
+                source,
+                destination,
+            ),
+        )
+
     def permute_variables(
         self,
         permutation: jax.Array,
