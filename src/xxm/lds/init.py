@@ -68,7 +68,7 @@ def pca_latents_poisson(
     )
 
 
-def init_pca_gaussian(
+def init_gaussian_via_pca(
     observations: jax.Array,
     latent_dim: int,
     covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
@@ -92,7 +92,7 @@ def init_pca_gaussian(
     )
 
 
-def init_pca_gaussian_many(
+def init_gaussian_via_pca_many(
     observations: jax.Array,
     latent_dim: int,
     covariance_floors: jax.Array | None = None,
@@ -100,7 +100,7 @@ def init_pca_gaussian_many(
     """Initialize multiple LDS models from PCA latent projections."""
 
     stacked = jax.vmap(
-        lambda covariance_floor: init_pca_gaussian(
+        lambda covariance_floor: init_gaussian_via_pca(
             observations,
             latent_dim,
             covariance_floor,
@@ -110,7 +110,7 @@ def init_pca_gaussian_many(
     return unstack_states(stacked)
 
 
-def init_pca_poisson(
+def init_poisson_via_pca(
     observations: jax.Array,
     latent_dim: int,
     covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
@@ -144,7 +144,7 @@ def init_pca_poisson(
     )
 
 
-def init_pca_poisson_many(
+def init_poisson_via_pca_many(
     observations: jax.Array,
     latent_dim: int,
     covariance_floors: jax.Array | None = None,
@@ -153,7 +153,7 @@ def init_pca_poisson_many(
     """Initialize multiple LDS models from PCA latent projections."""
 
     stacked = jax.vmap(
-        lambda covariance_floor: init_pca_poisson(
+        lambda covariance_floor: init_poisson_via_pca(
             observations,
             latent_dim,
             covariance_floor,

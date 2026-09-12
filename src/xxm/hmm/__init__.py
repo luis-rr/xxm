@@ -2,7 +2,12 @@
 
 from .core import Posterior
 from .inference import infer_exact
-from .init import init_gaussian, init_gaussian_ar, init_poisson, init_poisson_ar
+from .init import (
+    init_gaussian_ar_via_kmeans,
+    init_gaussian_via_kmeans,
+    init_poisson_ar_via_kmeans,
+    init_poisson_via_kmeans,
+)
 from .learning import fit_em, fit_em_many
 from .model import (
     GaussianARHMM,
@@ -20,8 +25,8 @@ __all__ = [
     'fit_em',
     'fit_em_many',
     'infer_exact',
-    'init_gaussian',
-    'init_gaussian_ar',
-    'init_poisson',
-    'init_poisson_ar',
+    'init_gaussian_ar_via_kmeans',
+    'init_gaussian_via_kmeans',
+    'init_poisson_ar_via_kmeans',
+    'init_poisson_via_kmeans',
 ]

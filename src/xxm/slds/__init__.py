@@ -3,10 +3,10 @@
 from .core import Posterior
 from .inference import infer_variational
 from .init import (
-    init_arhmm_gaussian,
-    init_arhmm_poisson,
-    init_pca_gaussian,
-    init_pca_poisson,
+    init_gaussian_via_arhmm,
+    init_gaussian_via_pca,
+    init_poisson_via_arhmm,
+    init_poisson_via_pca,
 )
 from .learning import (
     fit_laplace_em,
@@ -21,8 +21,8 @@ __all__ = [
     'fit_laplace_em',
     'fit_variational_em',
     'infer_variational',
-    'init_arhmm_gaussian',
-    'init_arhmm_poisson',
-    'init_pca_gaussian',
-    'init_pca_poisson',
+    'init_gaussian_via_arhmm',
+    'init_gaussian_via_pca',
+    'init_poisson_via_arhmm',
+    'init_poisson_via_pca',
 ]

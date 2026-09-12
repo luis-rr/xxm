@@ -10,22 +10,22 @@ import pytest
 from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS
 from xxm.hmm.inference import infer_exact as infer_hmm
 from xxm.hmm.init import (
-    init_gaussian,
-    init_gaussian_ar,
-    init_poisson,
-    init_poisson_ar,
+    init_gaussian_ar_via_kmeans,
+    init_gaussian_via_kmeans,
+    init_poisson_ar_via_kmeans,
+    init_poisson_via_kmeans,
 )
 from xxm.hmm.learning import em_step as hmm_em_step
 from xxm.lds.inference import infer_exact as infer_lds
 from xxm.lds.inference import infer_laplace as infer_lds_laplace
-from xxm.lds.init import init_pca_gaussian as initialize_lds_gaussian
-from xxm.lds.init import init_pca_poisson as initialize_lds_poisson
+from xxm.lds.init import init_gaussian_via_pca as initialize_lds_gaussian
+from xxm.lds.init import init_poisson_via_pca as initialize_lds_poisson
 from xxm.lds.learning import em_step as lds_em_step
 from xxm.lds.learning import laplace_em_step as lds_laplace_em_step
 from xxm.slds.inference import infer_laplace as infer_slds_laplace
 from xxm.slds.inference import infer_variational as infer_slds
-from xxm.slds.init import init_pca_gaussian as initialize_slds_gaussian
-from xxm.slds.init import init_pca_poisson as initialize_slds_poisson
+from xxm.slds.init import init_gaussian_via_pca as initialize_slds_gaussian
+from xxm.slds.init import init_poisson_via_pca as initialize_slds_poisson
 from xxm.slds.learning import laplace_em_step as slds_laplace_em_step
 from xxm.slds.learning import variational_em_step as slds_variational_em_step
 
@@ -84,7 +84,7 @@ POISSON_OBSERVATIONS = jnp.array(
 MODEL_CASES = [
     ModelCase(
         name='hmm-gaussian',
-        initialize=init_gaussian,
+        initialize=init_gaussian_via_kmeans,
         infer=infer_hmm,
         infer_kwargs={},
         em_step=hmm_em_step,
@@ -93,7 +93,7 @@ MODEL_CASES = [
     ),
     ModelCase(
         name='hmm-poisson',
-        initialize=init_poisson,
+        initialize=init_poisson_via_kmeans,
         infer=infer_hmm,
         infer_kwargs={},
         em_step=hmm_em_step,
@@ -102,7 +102,7 @@ MODEL_CASES = [
     ),
     ModelCase(
         name='arhmm-gaussian',
-        initialize=init_gaussian_ar,
+        initialize=init_gaussian_ar_via_kmeans,
         infer=infer_hmm,
         infer_kwargs={},
         em_step=hmm_em_step,
@@ -111,7 +111,7 @@ MODEL_CASES = [
     ),
     ModelCase(
         name='arhmm-poisson',
-        initialize=init_poisson_ar,
+        initialize=init_poisson_ar_via_kmeans,
         infer=infer_hmm,
         infer_kwargs={},
         em_step=hmm_em_step,

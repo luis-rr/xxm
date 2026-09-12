@@ -29,10 +29,10 @@ from .inference import (
     infer_laplace,
 )
 from .init import (
-    init_pca_gaussian,
-    init_pca_gaussian_many,
-    init_pca_poisson,
-    init_pca_poisson_many,
+    init_gaussian_via_pca,
+    init_gaussian_via_pca_many,
+    init_poisson_via_pca,
+    init_poisson_via_pca_many,
 )
 from .learning import (
     fit_em,
@@ -175,7 +175,7 @@ class GaussianLDS:
         )
 
     @classmethod
-    def from_pca(
+    def via_pca(
         cls,
         observations: jax.Array,
         latent_dim: int,
@@ -183,7 +183,7 @@ class GaussianLDS:
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     ) -> typing.Self:
         """Initialize a Gaussian LDS from a principal-component decomposition."""
-        model = init_pca_gaussian(
+        model = init_gaussian_via_pca(
             observations=observations,
             latent_dim=latent_dim,
             covariance_floor=covariance_floor,
@@ -192,7 +192,7 @@ class GaussianLDS:
         return cls(model)
 
     @classmethod
-    def from_pca_many(
+    def via_pca_many(
         cls,
         observations: jax.Array,
         latent_dim: int,
@@ -200,7 +200,7 @@ class GaussianLDS:
         covariance_floors: jax.Array,
     ) -> tuple[typing.Self, ...]:
         """Construct one Gaussian LDS for each requested covariance floor."""
-        models = init_pca_gaussian_many(
+        models = init_gaussian_via_pca_many(
             observations=observations,
             latent_dim=latent_dim,
             covariance_floors=covariance_floors,
@@ -356,7 +356,7 @@ class PoissonLDS:
         )
 
     @classmethod
-    def from_pca(
+    def via_pca(
         cls,
         observations: jax.Array,
         latent_dim: int,
@@ -364,7 +364,7 @@ class PoissonLDS:
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     ) -> typing.Self:
         """Initialize a Poisson LDS from a principal-component decomposition."""
-        model = init_pca_poisson(
+        model = init_poisson_via_pca(
             observations=observations,
             latent_dim=latent_dim,
             covariance_floor=covariance_floor,
@@ -373,7 +373,7 @@ class PoissonLDS:
         return cls(model)
 
     @classmethod
-    def from_pca_many(
+    def via_pca_many(
         cls,
         observations: jax.Array,
         latent_dim: int,
@@ -381,7 +381,7 @@ class PoissonLDS:
         covariance_floors: jax.Array,
     ) -> tuple[typing.Self, ...]:
         """Construct one Poisson LDS for each requested covariance floor."""
-        models = init_pca_poisson_many(
+        models = init_poisson_via_pca_many(
             observations=observations,
             latent_dim=latent_dim,
             covariance_floors=covariance_floors,

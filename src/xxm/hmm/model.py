@@ -27,10 +27,10 @@ from .core import Model, Posterior
 from .inference import infer_exact
 from .init import (
     DEFAULT_SELF_TRANSITION_PROB,
-    init_gaussian,
-    init_gaussian_ar,
-    init_poisson,
-    init_poisson_ar,
+    init_gaussian_ar_via_kmeans,
+    init_gaussian_via_kmeans,
+    init_poisson_ar_via_kmeans,
+    init_poisson_via_kmeans,
 )
 from .learning import fit_em, fit_em_many
 
@@ -145,7 +145,7 @@ class GaussianHMM:
         )
 
     @classmethod
-    def from_kmeans(
+    def via_kmeans(
         cls,
         key: jax.Array,
         observations: jax.Array,
@@ -154,7 +154,7 @@ class GaussianHMM:
         self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
     ) -> typing.Self:
         """Initialize a Gaussian HMM by clustering the observations with K-means."""
-        model = init_gaussian(
+        model = init_gaussian_via_kmeans(
             key=key,
             observations=observations,
             num_states=num_states,
@@ -304,7 +304,7 @@ class PoissonHMM:
         )
 
     @classmethod
-    def from_kmeans(
+    def via_kmeans(
         cls,
         key: jax.Array,
         observations: jax.Array,
@@ -313,7 +313,7 @@ class PoissonHMM:
         self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
     ) -> typing.Self:
         """Initialize a Poisson HMM by clustering the observations with K-means."""
-        model = init_poisson(
+        model = init_poisson_via_kmeans(
             key=key,
             observations=observations,
             num_states=num_states,
@@ -522,7 +522,7 @@ class GaussianARHMM:
         )
 
     @classmethod
-    def from_kmeans(
+    def via_kmeans(
         cls,
         key: jax.Array,
         observations: jax.Array,
@@ -537,7 +537,7 @@ class GaussianARHMM:
         The first ``num_lags`` observations are used only as fixed conditioning
         history.
         """
-        model = init_gaussian_ar(
+        model = init_gaussian_ar_via_kmeans(
             key=key,
             observations=observations,
             num_states=num_states,
@@ -770,7 +770,7 @@ class PoissonARHMM:
         )
 
     @classmethod
-    def from_kmeans(
+    def via_kmeans(
         cls,
         key: jax.Array,
         observations: jax.Array,
@@ -785,7 +785,7 @@ class PoissonARHMM:
         The first ``num_lags`` observations are used only as fixed conditioning
         history.
         """
-        model = init_poisson_ar(
+        model = init_poisson_ar_via_kmeans(
             key=key,
             observations=observations,
             num_states=num_states,

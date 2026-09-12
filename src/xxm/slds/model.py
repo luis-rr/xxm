@@ -30,10 +30,10 @@ from .core import (
 from .inference import infer_laplace, infer_variational
 from .init import (
     DEFAULT_SELF_TRANSITION_PROB,
-    init_arhmm_gaussian,
-    init_arhmm_poisson,
-    init_pca_gaussian,
-    init_pca_poisson,
+    init_gaussian_via_arhmm,
+    init_gaussian_via_pca,
+    init_poisson_via_arhmm,
+    init_poisson_via_pca,
 )
 from .learning import (
     fit_laplace_em,
@@ -200,7 +200,7 @@ class GaussianSLDS:
         )
 
     @classmethod
-    def from_pca(
+    def via_pca(
         cls,
         key: jax.Array,
         observations: jax.Array,
@@ -211,7 +211,7 @@ class GaussianSLDS:
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     ) -> typing.Self:
         """Initialize a Gaussian SLDS from a principal-component decomposition."""
-        model = init_pca_gaussian(
+        model = init_gaussian_via_pca(
             key=key,
             observations=observations,
             num_states=num_states,
@@ -223,7 +223,7 @@ class GaussianSLDS:
         return cls(model)
 
     @classmethod
-    def from_arhmm(
+    def via_arhmm(
         cls,
         key: jax.Array,
         observations: jax.Array,
@@ -236,7 +236,7 @@ class GaussianSLDS:
         progress: bool | str = 'AR-HMM',
     ) -> typing.Self:
         """Initialize a Gaussian SLDS using an autoregressive HMM fit."""
-        model = init_arhmm_gaussian(
+        model = init_gaussian_via_arhmm(
             key=key,
             observations=observations,
             num_states=num_states,
@@ -440,7 +440,7 @@ class PoissonSLDS:
         )
 
     @classmethod
-    def from_pca(
+    def via_pca(
         cls,
         key: jax.Array,
         observations: jax.Array,
@@ -451,7 +451,7 @@ class PoissonSLDS:
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     ) -> typing.Self:
         """Initialize a Poisson SLDS from a principal-component decomposition."""
-        model = init_pca_poisson(
+        model = init_poisson_via_pca(
             key=key,
             observations=observations,
             num_states=num_states,
@@ -463,7 +463,7 @@ class PoissonSLDS:
         return cls(model)
 
     @classmethod
-    def from_arhmm(
+    def via_arhmm(
         cls,
         key: jax.Array,
         observations: jax.Array,
@@ -476,7 +476,7 @@ class PoissonSLDS:
         progress: bool | str = 'AR-HMM',
     ) -> typing.Self:
         """Initialize a Poisson SLDS using an autoregressive HMM fit."""
-        model = init_arhmm_poisson(
+        model = init_poisson_via_arhmm(
             key=key,
             observations=observations,
             num_states=num_states,

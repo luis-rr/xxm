@@ -2,10 +2,10 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from xxm.slds.init import init_pca_gaussian
+from xxm.slds.init import init_gaussian_via_pca
 
 
-def test_init_pca_gaussian_returns_requested_model_structure():
+def test_gaussian_via_pca_returns_requested_model_structure():
     time = jnp.linspace(
         0.0,
         2.0 * jnp.pi,
@@ -21,7 +21,7 @@ def test_init_pca_gaussian_returns_requested_model_structure():
         axis=-1,
     )
 
-    model = init_pca_gaussian(
+    model = init_gaussian_via_pca(
         key=jax.random.key(0),
         observations=observations,
         num_states=2,

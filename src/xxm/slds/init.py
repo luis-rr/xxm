@@ -19,7 +19,7 @@ from xxm.hmm.core import Model as HMMModel
 from xxm.hmm.inference import infer_exact as infer_hmm
 from xxm.hmm.init import (
     DEFAULT_SELF_TRANSITION_PROB,
-    init_gaussian_ar,
+    init_gaussian_ar_via_kmeans,
 )
 from xxm.hmm.learning import fit_em as fit_hmm
 from xxm.lds.init import (
@@ -58,7 +58,7 @@ def _validate_initialization(
         )
 
 
-def _state_conditioned_initial_from_latents(
+def _init_state_conditioned_initial_from_latents(
     latents: jax.Array,  # (T, D)
     state_probs: jax.Array,  # (T, K)
     covariance_floor: float,
@@ -73,7 +73,7 @@ def _state_conditioned_initial_from_latents(
     return StateConditionedGaussian(dist=gaussian)
 
 
-def _from_arhmm(
+def _init_from_arhmm(
     latents: jax.Array,
     emissions: EmissionsT,
     arhmm: HMMModel[AREmissions[LinearGaussian]],
@@ -105,7 +105,7 @@ def _from_arhmm(
         )
     )
 
-    latent_initial = _state_conditioned_initial_from_latents(
+    latent_initial = _init_state_conditioned_initial_from_latents(
         latents=latents[1:],
         state_probs=state_probs,
         covariance_floor=covariance_floor,
@@ -124,7 +124,7 @@ def _from_arhmm(
     )
 
 
-def init_pca_gaussian(
+def init_gaussian_via_pca(
     key: jax.Array,
     observations: jax.Array,
     num_states: int,
@@ -153,7 +153,7 @@ def init_pca_gaussian(
         latent_dim,
     )
 
-    arhmm = init_gaussian_ar(
+    arhmm = init_gaussian_ar_via_kmeans(
         key=key,
         observations=latents,
         num_states=num_states,
@@ -168,7 +168,7 @@ def init_pca_gaussian(
         covariance_floor=covariance_floor,
     )
 
-    return _from_arhmm(
+    return _init_from_arhmm(
         latents=latents,
         emissions=emissions,
         arhmm=arhmm,
@@ -177,7 +177,7 @@ def init_pca_gaussian(
     )
 
 
-def init_arhmm_gaussian(
+def init_gaussian_via_arhmm(
     key: jax.Array,
     observations: jax.Array,
     num_states: int,
@@ -207,7 +207,7 @@ def init_arhmm_gaussian(
 
     latents = pca_latents(observations, latent_dim)
 
-    arhmm = init_gaussian_ar(
+    arhmm = init_gaussian_ar_via_kmeans(
         key=key,
         observations=latents,
         num_states=num_states,
@@ -229,7 +229,7 @@ def init_arhmm_gaussian(
         progress=progress,
     ).state.model
 
-    return _from_arhmm(
+    return _init_from_arhmm(
         latents=latents,
         emissions=emissions,
         arhmm=arhmm,
@@ -238,7 +238,7 @@ def init_arhmm_gaussian(
     )
 
 
-def init_pca_poisson(
+def init_poisson_via_pca(
     key: jax.Array,
     observations: jax.Array,
     num_states: int,
@@ -262,7 +262,7 @@ def init_pca_poisson(
         count_floor,
     )
 
-    arhmm = init_gaussian_ar(
+    arhmm = init_gaussian_ar_via_kmeans(
         key=key,
         observations=latents,
         num_states=num_states,
@@ -276,7 +276,7 @@ def init_pca_poisson(
         observations=observations,
     )
 
-    return _from_arhmm(
+    return _init_from_arhmm(
         latents=latents,
         emissions=emissions,
         arhmm=arhmm,
@@ -285,7 +285,7 @@ def init_pca_poisson(
     )
 
 
-def init_arhmm_poisson(
+def init_poisson_via_arhmm(
     key: jax.Array,
     observations: jax.Array,
     num_states: int,
@@ -311,7 +311,7 @@ def init_arhmm_poisson(
         count_floor,
     )
 
-    arhmm = init_gaussian_ar(
+    arhmm = init_gaussian_ar_via_kmeans(
         key=key,
         observations=latents,
         num_states=num_states,
@@ -332,7 +332,7 @@ def init_arhmm_poisson(
         progress=progress,
     ).state.model
 
-    return _from_arhmm(
+    return _init_from_arhmm(
         latents=latents,
         emissions=emissions,
         arhmm=arhmm,

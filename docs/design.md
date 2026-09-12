@@ -203,7 +203,7 @@ For example:
 ```python
 import xxm.hmm as hmm
 
-model = hmm.init_gaussian(...)
+model = hmm.init_gaussian_via_kmeans(...)
 fit = hmm.fit_em(model, observations, ...)
 posterior, log_normalizer = hmm.infer_exact(
     fit.model,
@@ -216,7 +216,9 @@ In addition, each supported concrete model has a lightweight facade class, such 
 Facade classes provide a compact model-oriented API:
 
 * `from_params` constructor hides unnecessary nesting in the core representation;
-* other named constuctors such as `from_kmeans`, or `from_pca` expose ways to initialize the model.
+* `via_kmeans`, `via_pca`, and other `via_*` constructors initialize from observations;
+* `from_lds` transfers an existing source facade without fitting it.
+  Transfer and warmstart orchestration live in the target family’s `init.py`.
 * `sample` generates data from the model
 * `infer` invokes the inference algorithm appropriate for that concrete model
 * `fit` invokes its corresponding learning procedure
@@ -227,7 +229,7 @@ For example:
 ```python
 import xxm
 
-model = xxm.GaussianLDS.from_pca(
+model = xxm.GaussianLDS.via_pca(
     observations,
     latent_dim=3,
 )
@@ -328,7 +330,10 @@ Names should follow standard statistical terminology while remaining readable to
 
 Use consistent verbs:
 
-* `init_*` — construct an initial model from data or simple assumptions;
+* Facade `from_*` — transfer an existing simpler model without fitting its parameters;
+* Facade `via_*` — initialize from observations, optionally fitting an intermediate model;
+* `init_<subtype>_via_*` and `init_<subtype>_from_*` — model-construction functions in `init.py`; generic transfers may omit the subtype. Private constructors retain a leading underscore.
+* `from_params` — construct directly from explicit parameters;
 * `infer_*` — compute posterior quantities for fixed model parameters;
 * `fit_*` — run an iterative learning procedure;
 * `*_step` — perform one learning or optimization iteration;

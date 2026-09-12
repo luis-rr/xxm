@@ -3,10 +3,10 @@
 from .core import Posterior
 from .inference import infer_exact, infer_laplace
 from .init import (
-    init_pca_gaussian,
-    init_pca_gaussian_many,
-    init_pca_poisson,
-    init_pca_poisson_many,
+    init_gaussian_via_pca,
+    init_gaussian_via_pca_many,
+    init_poisson_via_pca,
+    init_poisson_via_pca_many,
 )
 from .learning import (
     fit_em,
@@ -29,8 +29,8 @@ __all__ = [
     'fit_laplace_em_many',
     'infer_exact',
     'infer_laplace',
-    'init_pca_gaussian',
-    'init_pca_gaussian_many',
-    'init_pca_poisson',
-    'init_pca_poisson_many',
+    'init_gaussian_via_pca',
+    'init_gaussian_via_pca_many',
+    'init_poisson_via_pca',
+    'init_poisson_via_pca_many',
 ]

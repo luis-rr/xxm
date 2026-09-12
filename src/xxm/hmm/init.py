@@ -138,7 +138,7 @@ def _init_gaussian_emissions(
     )
 
 
-def init_gaussian(
+def init_gaussian_via_kmeans(
     key: jax.Array,
     observations: jax.Array,
     num_states: int,
@@ -221,7 +221,7 @@ def _init_ar_gaussian_emissions(
     return AREmissions(model)
 
 
-def init_gaussian_ar(
+def init_gaussian_ar_via_kmeans(
     key: jax.Array,
     observations: jax.Array,
     num_states: int,
@@ -269,7 +269,7 @@ def _init_poisson_emissions(
     )
 
 
-def init_poisson(
+def init_poisson_via_kmeans(
     key: jax.Array,
     observations: jax.Array,
     num_states: int,
@@ -321,7 +321,7 @@ def _init_ar_poisson_emissions(
     return AREmissions(model)
 
 
-def init_poisson_ar(
+def init_poisson_ar_via_kmeans(
     key: jax.Array,
     observations: jax.Array,
     num_states: int,
