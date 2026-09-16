@@ -29,17 +29,42 @@ class Affine(typing.NamedTuple):
         if self.coefficients.ndim <= self.bias.ndim:
             raise ValueError(
                 'coefficients must have shape (..., O, I1, I2, ...) '
-                'with at least one input dimension'
+                'with at least one input dimension.'
+                f' Got {self.coefficients.shape} and {self.bias.shape}'
             )
 
         if self.coefficients.shape[: self.bias.ndim] != self.bias.shape:
             raise ValueError(
                 'coefficients and bias must have shapes '
                 '(..., O, I1, I2, ...) and (..., O) '
-                'with matching batch and output dimensions'
+                f'with matching batch and output dimensions. Got {self.coefficients.shape} and {self.bias.shape}'
             )
 
         return self.bias.shape[:-1]
+
+    def move_batch_axis(
+        self,
+        source: int,
+        destination: int,
+    ) -> typing.Self:
+        """Move one Gaussian batch axis to another position."""
+        batch_ndim = len(self.batch_shape)
+
+        source = source % batch_ndim
+        destination = destination % batch_ndim
+
+        return self._replace(
+            coefficients=jnp.moveaxis(
+                self.coefficients,
+                source,
+                destination,
+            ),
+            bias=jnp.moveaxis(
+                self.bias,
+                source,
+                destination,
+            ),
+        )
 
     @property
     def input_shape(self) -> tuple[int, ...]:  # (I1, I2, ...)
@@ -144,6 +169,14 @@ class Affine(typing.NamedTuple):
 
     def apply(self, values: jax.Array) -> jax.Array:
         """Evaluate the affine map at input values."""
+        # TODO: `apply` does not broadcast batch dims of `self` against
+        # leading (non-input) dims of `values` (e.g. a spatial grid with
+        # shape (..., input_dim)). Calling `apply` on a batched Affine with
+        # a grid of points currently fails with an einsum shape mismatch.
+        # Consider adding explicit broadcasting support (e.g. via
+        # `jnp.expand_dims` on `self` batch dims vs. `values` grid dims) or
+        # documenting that callers must loop over `self`'s batch dims
+        # (via `select`) when applying to a grid of points.
         return (
             jnp.einsum(
                 '...oi,...i->...o',

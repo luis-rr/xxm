@@ -73,38 +73,83 @@ class Gaussian(typing.NamedTuple):
         self,
         permutation: jax.Array,
     ) -> typing.Self:
-        """Reorder the Gaussian variable dimensions."""
-        # TODO add equivalent method to other batched distributions and objects
+        """Reorder variable dimensions globally or independently by batch."""
         permutation = jnp.asarray(permutation)
 
-        if permutation.shape != (self.variable_dim,):
+        global_shape = (self.variable_dim,)
+        batched_shape = self.batch_shape + global_shape
+
+        if permutation.shape == global_shape:
+            permutation = jnp.broadcast_to(
+                permutation,
+                batched_shape,
+            )
+        elif permutation.shape != batched_shape:
             raise ValueError(
-                f'permutation must have shape {(self.variable_dim,)}, '
+                'permutation must have shape '
+                f'{global_shape} or {batched_shape}, '
                 f'got {permutation.shape}'
             )
 
+        mean = jnp.take_along_axis(
+            self.mean,
+            permutation,
+            axis=-1,
+        )
+
+        row_indices = jnp.broadcast_to(
+            permutation[..., :, None],
+            self.covariance.shape,
+        )
+        covariance = jnp.take_along_axis(
+            self.covariance,
+            row_indices,
+            axis=-2,
+        )
+
+        column_indices = jnp.broadcast_to(
+            permutation[..., None, :],
+            self.covariance.shape,
+        )
+        covariance = jnp.take_along_axis(
+            covariance,
+            column_indices,
+            axis=-1,
+        )
+
         return self._replace(
-            mean=self.mean[..., permutation],
-            covariance=self.covariance[
-                ...,
-                permutation[:, None],
-                permutation[None, :],
-            ],
+            mean=mean,
+            covariance=covariance,
         )
 
     def reorient_variables(
         self,
         coefficient_signs: jax.Array,
     ) -> typing.Self:
-        """Flip signs of Gaussian variable dimensions."""
+        """Flip variable signs globally or independently by batch."""
         coefficient_signs = jnp.asarray(coefficient_signs)
+
+        global_shape = (self.variable_dim,)
+        batched_shape = self.batch_shape + global_shape
+
+        if coefficient_signs.shape == global_shape:
+            coefficient_signs = jnp.broadcast_to(
+                coefficient_signs,
+                batched_shape,
+            )
+        elif coefficient_signs.shape != batched_shape:
+            raise ValueError(
+                'coefficient_signs must have shape '
+                f'{global_shape} or {batched_shape}, '
+                f'got {coefficient_signs.shape}'
+            )
 
         return self._replace(
             mean=self.mean * coefficient_signs,
             covariance=(
-                coefficient_signs[:, None]
+                coefficient_signs[..., :, None]
                 * self.covariance
-                * coefficient_signs[None, :]
+                * coefficient_signs[..., None, :]
             ),
         )
 
