@@ -182,17 +182,14 @@ class Gaussian(typing.NamedTuple):
         )
         return 0.5 * (self.variable_dim * (1.0 + jnp.log(2.0 * jnp.pi)) + log_det)
 
-    def sample(
-        self,
-        key: jax.Array,
-        sample_shape: tuple[int, ...] = (),
-    ) -> jax.Array:
-        """Sample from the distribution."""
+    def sample(self, key: jax.Array, sample_shape: tuple[int, ...] = ()) -> jax.Array:
+        """Sample values with shape `(*batch_shape, *sample_shape, D)`."""
+        shape = self.batch_shape + (1,) * len(sample_shape)
         return jax.random.multivariate_normal(
             key,
-            mean=self.mean,
-            cov=self.covariance,
-            shape=sample_shape + self.batch_shape,
+            mean=self.mean.reshape(shape + (self.variable_dim,)),
+            cov=self.covariance.reshape(shape + (self.variable_dim, self.variable_dim)),
+            shape=self.batch_shape + sample_shape,
         )
 
     def _validate_affine_input(

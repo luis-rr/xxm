@@ -53,7 +53,7 @@ class GaussianRandomWalk(typing.NamedTuple):
     r"""Gaussian random walk, independently replicated over arbitrary batch `*B`.
 
     `initial` and `innovation` have batch shape `*B` and event dimension `D`.
-    Samples have shape `(T, *B, D)`.
+    Samples have shape `(*B, T, D)`.
 
     $$
     x_0 \sim \mathcal{N}(\mu_0, Q_0),
@@ -126,43 +126,22 @@ class GaussianRandomWalk(typing.NamedTuple):
         return _random_walk_transition(self.innovation)
 
     def sample(self, key: jax.Array, num_steps: int) -> jax.Array:
-        """Sample a trajectory with shape `(T, *B, D)`."""
+        """Sample a trajectory with shape `(*B, T, D)`."""
         if num_steps < 0:
             raise ValueError('num_steps must be non-negative')
-
         batch_shape = self.batch_shape
         variable_dim = self.variable_dim
-
         if num_steps == 0:
-            return jnp.zeros(
-                (0,) + batch_shape + (variable_dim,),
-                dtype=self.dtype,
-            )
-
+            return jnp.zeros(batch_shape + (0, variable_dim), dtype=self.dtype)
         key_initial, key_innovation = jax.random.split(key)
-
-        initial = self.initial.sample(key_initial)
-
+        initial = self.initial.sample(key_initial)[..., None, :]
         if num_steps == 1:
-            return initial[None]
-
+            return initial
         innovations = self.innovation.sample(
-            key_innovation,
-            sample_shape=(num_steps - 1,),
+            key_innovation, sample_shape=(num_steps - 1,)
         )
-
-        subsequent = initial[None] + jnp.cumsum(
-            innovations,
-            axis=0,
-        )
-
-        return jnp.concatenate(
-            (
-                initial[None],
-                subsequent,
-            ),
-            axis=0,
-        )
+        subsequent = initial + jnp.cumsum(innovations, axis=-2)
+        return jnp.concatenate((initial, subsequent), axis=-2)
 
     def reorient_variables(
         self,
@@ -214,15 +193,50 @@ class GaussianRandomWalk(typing.NamedTuple):
             ),
         )
 
+    def select(self, index) -> typing.Self:
+        """Index only batch dimensions, retaining this object type."""
+        return self._replace(
+            initial=self.initial.select(index),
+            innovation=self.innovation.select(index),
+        )
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        """Insert replicated batch dimensions at axis."""
+        return self._replace(
+            initial=self.initial.broadcast(shape, axis=axis),
+            innovation=self.innovation.broadcast(shape, axis=axis),
+        )
+
+    def squeeze(self, axis=None) -> typing.Self:
+        """Remove singleton batch dimensions."""
+        return self._replace(
+            initial=self.initial.squeeze(axis=axis),
+            innovation=self.innovation.squeeze(axis=axis),
+        )
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        """Reorder entries along a batch axis."""
+        return self._replace(
+            initial=self.initial.permute(permutation, axis=axis),
+            innovation=self.innovation.permute(permutation, axis=axis),
+        )
+
+    def move_axis(self, source: int, destination: int) -> typing.Self:
+        """Move one batch axis to another position."""
+        return self._replace(
+            initial=self.initial.move_axis(source, destination),
+            innovation=self.innovation.move_axis(source, destination),
+        )
+
 
 class GatedGaussianRandomWalk(typing.NamedTuple):
-    r"""State-gated Gaussian random walks with additional batch dimensions `*B`.
+    r"""Gate-controlled Gaussian random walks with additional batch dimensions `*B`.
 
     Each Gaussian has batch shape `(K, *B)` and event dimension `D`. The first
-    batch axis indexes the `K` gated states; `*B` independently replicates the
-    complete gated process. Samples have shape `(T, K, *B, D)`.
+    batch axis indexes the `K` gates; `*B` independently replicates the
+    complete gated process. Samples have shape `(K, *B, T, D)`.
 
-    For each state $k$,
+    For each gate $k$,
 
     $$
     x_{0,k}
@@ -284,30 +298,15 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
         )
 
     @property
-    def num_states(self) -> int:
-        """Number `K` of gated discrete states."""
-        batch_shape = self.initial.batch_shape
-
-        if len(batch_shape) < 1:
-            raise ValueError('gated random walk must have batch shape (K, *B)')
-
-        if batch_shape[0] < 1:
-            raise ValueError('gated random walk must have at least one state')
-
-        if self.active_innovation.batch_shape != batch_shape:
-            raise ValueError('active innovation batch shape must match initial')
-
-        if self.inactive_innovation.batch_shape != batch_shape:
-            raise ValueError('inactive innovation batch shape must match initial')
-
-        return batch_shape[0]
-
-    @property
     def batch_shape(self) -> tuple[int, ...]:
-        """Additional independent batch dimensions `*B`, excluding state `K`."""
-        _ = self.num_states
-
-        return self.initial.batch_shape[1:]
+        """Complete batch shape, including the gate-indexed axis when present."""
+        shape = self.initial.batch_shape
+        if (
+            self.active_innovation.batch_shape != shape
+            or self.inactive_innovation.batch_shape != shape
+        ):
+            raise ValueError('initial and innovation batch shapes must match')
+        return shape
 
     @property
     def variable_dim(self) -> int:
@@ -337,7 +336,7 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
         self,
     ) -> LinearGaussian:
         """Construct active transition distributions with batch `(K, *B)`."""
-        _ = self.num_states
+        _ = self.batch_shape
         _ = self.variable_dim
 
         return _random_walk_transition(self.active_innovation)
@@ -346,101 +345,51 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
         self,
     ) -> LinearGaussian:
         """Construct inactive transition distributions with batch `(K, *B)`."""
-        _ = self.num_states
+        _ = self.batch_shape
         _ = self.variable_dim
 
         return _random_walk_transition(self.inactive_innovation)
 
-    def sample(
-        self,
-        key: jax.Array,
-        num_steps: int,
-        gates: jax.Array,
-    ) -> jax.Array:
-        """Sample `num_steps` values with shape `(T, K, *B, D)`."""
+    def sample(self, key: jax.Array, num_steps: int, gates: jax.Array) -> jax.Array:
+        """Sample `(K, *B, T, D)` values with gates shaped `(*B, T - 1)`.
+
+        The first batch axis indexes gates; the remaining batch axes replicate
+        the gated process. Gate labels refer to the current first-axis ordering.
+        """
         if num_steps < 0:
             raise ValueError('num_steps must be non-negative')
-
-        _ = self.num_states
-        _ = self.variable_dim
-
-        expected_gate_shape = (max(num_steps - 1, 0),) + self.batch_shape
-
+        num_gates = self.num_gates
+        variable_dim = self.variable_dim
+        expected_gate_shape = self.batch_shape[1:] + (max(num_steps - 1, 0),)
         if gates.shape != expected_gate_shape:
             raise ValueError(
                 f'gates must have shape {expected_gate_shape}, got {gates.shape}'
             )
-
         if num_steps == 0:
-            return jnp.zeros(
-                (
-                    0,
-                    self.num_states,
-                )
-                + self.batch_shape
-                + (self.variable_dim,),
-                dtype=self.dtype,
-            )
-
+            return jnp.zeros(self.batch_shape + (0, variable_dim), dtype=self.dtype)
         key_initial, key_innovation = jax.random.split(key)
-
-        initial = self.initial.sample(key_initial)
-
+        initial = self.initial.sample(key_initial)[..., None, :]
         if num_steps == 1:
-            return initial[None]
-
-        state_indices = jnp.arange(self.num_states).reshape(
-            (1, self.num_states) + (1,) * len(self.batch_shape)
+            return initial
+        gate_indices = jnp.arange(num_gates).reshape(
+            (num_gates,) + (1,) * len(self.batch_shape)
         )
-
-        active = gates[:, None, ...] == state_indices
-
+        active = gates[None, ...] == gate_indices
         innovation = Gaussian(
             mean=jnp.where(
                 active[..., None],
-                self.active_innovation.mean[None, ...],
-                self.inactive_innovation.mean[None, ...],
+                self.active_innovation.mean[..., None, :],
+                self.inactive_innovation.mean[..., None, :],
             ),
             covariance=jnp.where(
                 active[..., None, None],
-                self.active_innovation.covariance[None, ...],
-                self.inactive_innovation.covariance[None, ...],
+                self.active_innovation.covariance[..., None, :, :],
+                self.inactive_innovation.covariance[..., None, :, :],
             ),
         )
-
         increments = innovation.sample(key_innovation)
-
-        subsequent = initial[None] + jnp.cumsum(
-            increments,
-            axis=0,
-        )
-
-        return jnp.concatenate(
-            (
-                initial[None],
-                subsequent,
-            ),
-            axis=0,
-        )
-
-    def permute_states(
-        self,
-        permutation: jax.Array,
-    ) -> typing.Self:
-        """Relabel the distinguished state batch axis `K`."""
-        permutation = jnp.asarray(permutation)
-
-        if permutation.shape != (self.num_states,):
-            raise ValueError(f'permutation must have shape {(self.num_states,)}')
-
-        # Gaussian.select() indexes batch dimensions. Passing the permutation
-        # directly therefore permutes the first batch axis K while preserving
-        # all trailing *B dimensions.
-        return self._replace(
-            initial=self.initial.select(permutation),
-            active_innovation=self.active_innovation.select(permutation),
-            inactive_innovation=self.inactive_innovation.select(permutation),
-        )
+        subsequent = initial + jnp.cumsum(increments, axis=-2)
+        return jnp.concatenate((initial, subsequent), axis=-2)
 
     def reorient_variables(
         self,
@@ -493,3 +442,57 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
                 mean=self.initial.mean - offset,
             ),
         )
+
+    def select(self, index) -> typing.Self:
+        """Index only batch dimensions, retaining this object type."""
+        return self._replace(
+            initial=self.initial.select(index),
+            active_innovation=self.active_innovation.select(index),
+            inactive_innovation=self.inactive_innovation.select(index),
+        )
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        """Insert replicated batch dimensions at axis."""
+        return self._replace(
+            initial=self.initial.broadcast(shape, axis=axis),
+            active_innovation=self.active_innovation.broadcast(shape, axis=axis),
+            inactive_innovation=self.inactive_innovation.broadcast(shape, axis=axis),
+        )
+
+    def squeeze(self, axis=None) -> typing.Self:
+        """Remove singleton batch dimensions."""
+        return self._replace(
+            initial=self.initial.squeeze(axis=axis),
+            active_innovation=self.active_innovation.squeeze(axis=axis),
+            inactive_innovation=self.inactive_innovation.squeeze(axis=axis),
+        )
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        """Reorder entries along a batch axis."""
+        return self._replace(
+            initial=self.initial.permute(permutation, axis=axis),
+            active_innovation=self.active_innovation.permute(permutation, axis=axis),
+            inactive_innovation=self.inactive_innovation.permute(
+                permutation, axis=axis
+            ),
+        )
+
+    def move_axis(self, source: int, destination: int) -> typing.Self:
+        """Move one batch axis to another position."""
+        return self._replace(
+            initial=self.initial.move_axis(source, destination),
+            active_innovation=self.active_innovation.move_axis(source, destination),
+            inactive_innovation=self.inactive_innovation.move_axis(source, destination),
+        )
+
+    @property
+    def num_gates(self) -> int:
+        """Number of gates, interpreted along the first batch axis for sampling."""
+        if not self.batch_shape or self.batch_shape[0] < 1:
+            raise ValueError('gated sampling requires a nonempty first batch axis')
+        return self.batch_shape[0]
+
+    def permute_gates(self, permutation: jax.Array) -> typing.Self:
+        """Relabel gates along the first batch axis; gate inputs use the new labels."""
+        _ = self.num_gates
+        return self.permute(permutation, axis=0)

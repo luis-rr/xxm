@@ -61,16 +61,13 @@ class Categorical(typing.NamedTuple):
             probs=self.probs.astype(dtype),
         )
 
-    def sample(
-        self,
-        key: jax.Array,
-        sample_shape: tuple[int, ...] = (),
-    ) -> jax.Array:  # (*sample_shape, ...)
-        """Sample category indices."""
+    def sample(self, key: jax.Array, sample_shape: tuple[int, ...] = ()) -> jax.Array:
+        """Sample indices with shape `(*batch_shape, *sample_shape)`."""
+        shape = self.batch_shape + (1,) * len(sample_shape) + (self.num_categories,)
         return jax.random.categorical(
             key,
-            logits=jnp.log(self.probs),
-            shape=sample_shape + self.batch_shape,
+            logits=jnp.log(self.probs).reshape(shape),
+            shape=self.batch_shape + sample_shape,
         )
 
     def log_prob(self, values: jax.Array) -> jax.Array:

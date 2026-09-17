@@ -55,16 +55,13 @@ class Poisson(typing.NamedTuple):
         r"""Poisson rates $\lambda = \exp(\eta)$."""
         return jnp.exp(self.log_rates)
 
-    def sample(
-        self,
-        key: jax.Array,
-        sample_shape: tuple[int, ...] = (),
-    ) -> jax.Array:
-        """Sample from the distribution."""
+    def sample(self, key: jax.Array, sample_shape: tuple[int, ...] = ()) -> jax.Array:
+        """Sample values with shape `(*batch_shape, *sample_shape, D)`."""
+        shape = self.batch_shape + (1,) * len(sample_shape) + (self.variable_dim,)
         return jax.random.poisson(
             key,
-            lam=self.rates,
-            shape=sample_shape + self.log_rates.shape,
+            lam=self.rates.reshape(shape),
+            shape=self.batch_shape + sample_shape + (self.variable_dim,),
         )
 
     def log_prob_each(

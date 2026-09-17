@@ -344,13 +344,7 @@ class HermiteDrift:
     The coefficient prior has batch shape `*B` and event dimension `P * C`,
     where `P` is the number of motifs and `C = J - 1` is the number of free
     centered Hermite coefficients per motif. Coefficients therefore have shape
-    `(*B, P * C)` and realized temporal weights have shape `(T, *B, P)`.
-
-    The same object can be used as a state-indexed temporal latent by placing
-    the discrete-state axis first in the batch shape, `(K, *B)`. In that case
-    `num_states` and `permute_states` operate on that first batch axis. Hermite
-    trajectories are autonomous, so optional switching `gates` supplied to
-    `sample` are validated for shape but do not affect the sampled trajectories.
+    `(*B, P * C)` and realized temporal weights have shape `(*B, T, P)`.
     """
 
     coefficient_prior: Gaussian
@@ -370,19 +364,6 @@ class HermiteDrift:
     def dtype(self) -> jax.typing.DTypeLike:
         """Coefficient-prior dtype."""
         return self.coefficient_prior.dtype
-
-    @property
-    def num_states(self) -> int:
-        """Size `K` of the first batch axis when used as a switching latent."""
-        if len(self.batch_shape) < 1:
-            raise ValueError(
-                'state-indexed Hermite drift must have batch shape (K, *B)'
-            )
-
-        if self.batch_shape[0] < 1:
-            raise ValueError('Hermite drift must contain at least one state')
-
-        return self.batch_shape[0]
 
     @property
     def num_coefficients(self) -> int:
@@ -410,7 +391,7 @@ class HermiteDrift:
         r"""Compute motif weights from batched centered coefficients.
 
         `coefficients` has shape `(*B, P * C)` and the returned weights have
-        shape `(num_steps - 1, *B, P)`.
+        shape `(*B, num_steps - 1, P)`.
         """
         expected_shape = self.batch_shape + (self.num_motifs * self.num_coefficients,)
 
@@ -434,7 +415,7 @@ class HermiteDrift:
         )
 
         return jnp.einsum(
-            'tc,...pc->t...p',
+            'tc,...pc->...tp',
             basis,
             coefficients,
         )
@@ -478,54 +459,17 @@ class HermiteDrift:
         """Sample coefficients with shape `(*B, P * C)`."""
         return self.coefficient_prior.sample(key)
 
-    def sample(
-        self,
-        key: jax.Array,
-        num_steps: int,
-        gates: jax.Array | None = None,
-    ) -> jax.Array:
-        r"""Sample `num_steps` temporal values with shape `(T, *B, P)`.
-
-        `gates` is accepted so a state-batched Hermite drift satisfies the
-        switching temporal-latent interface. Hermite trajectories are not
-        state-gated, so gate values do not affect the sample.
-        """
+    def sample(self, key: jax.Array, num_steps: int) -> jax.Array:
+        """Sample `num_steps` autonomous temporal values shaped `(*B, T, P)`."""
         if num_steps < 0:
             raise ValueError('num_steps must be non-negative')
-
-        if gates is not None:
-            _ = self.num_states
-
-            expected_gate_shape = (max(num_steps - 1, 0),) + self.batch_shape[1:]
-
-            if gates.shape != expected_gate_shape:
-                raise ValueError(
-                    f'gates must have shape {expected_gate_shape}, got {gates.shape}'
-                )
-
         return self.temporal_weights(
-            self.sample_coefficients(key),
-            num_steps=num_steps + 1,
+            self.sample_coefficients(key), num_steps=num_steps + 1
         )
 
     def log_prob(self, coefficients: jax.Array) -> jax.Array:
         """Evaluate coefficient prior densities over batch `*B`."""
         return self.coefficient_prior.log_prob(coefficients)
-
-    def permute_states(
-        self,
-        permutation: jax.Array,
-    ) -> typing.Self:
-        """Relabel the distinguished first batch axis `K`."""
-        permutation = jnp.asarray(permutation)
-
-        if permutation.shape != (self.num_states,):
-            raise ValueError(f'permutation must have shape {(self.num_states,)}')
-
-        return dataclasses.replace(
-            self,
-            coefficient_prior=self.coefficient_prior.select(permutation),
-        )
 
     def reorient_variables(
         self,
@@ -586,4 +530,39 @@ class HermiteDrift:
             coefficient_prior=self.coefficient_prior.permute_variables(
                 coefficient_permutation
             ),
+        )
+
+    def select(self, index) -> typing.Self:
+        """Index only batch dimensions, retaining this object type."""
+        return dataclasses.replace(
+            self,
+            coefficient_prior=self.coefficient_prior.select(index),
+        )
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        """Insert replicated batch dimensions at axis."""
+        return dataclasses.replace(
+            self,
+            coefficient_prior=self.coefficient_prior.broadcast(shape, axis=axis),
+        )
+
+    def squeeze(self, axis=None) -> typing.Self:
+        """Remove singleton batch dimensions."""
+        return dataclasses.replace(
+            self,
+            coefficient_prior=self.coefficient_prior.squeeze(axis=axis),
+        )
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        """Reorder entries along a batch axis."""
+        return dataclasses.replace(
+            self,
+            coefficient_prior=self.coefficient_prior.permute(permutation, axis=axis),
+        )
+
+    def move_axis(self, source: int, destination: int) -> typing.Self:
+        """Move one batch axis to another position."""
+        return dataclasses.replace(
+            self,
+            coefficient_prior=self.coefficient_prior.move_axis(source, destination),
         )
