@@ -67,7 +67,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         """Return the $T-1$ repeated pair potentials for latent dynamics."""
         potential = GaussianPairPotential.from_linear_conditional(self.dynamics.dist)
 
-        return potential.broadcast(batch_shape=(num_steps - 1,))
+        return potential.broadcast(shape=(num_steps - 1,))
 
     def sample(
         self,

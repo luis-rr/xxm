@@ -177,9 +177,11 @@ class AREmissions(
             observations,
         )  # (T-L, L, N)
 
-        return self.dist.conditional(
+        values = jnp.broadcast_to(
             predictors[:, None, ...],
-        )  # (T-L, K)
+            (predictors.shape[0], self.num_states) + predictors.shape[1:],
+        )
+        return self.dist.broadcast(predictors.shape[0]).conditional(values)  # (T-L, K)
 
     def log_likelihoods(
         self,
@@ -190,7 +192,11 @@ class AREmissions(
             observations,
         )
 
-        return conditional.log_prob(observations[self.num_lags :, None, :])
+        values = jnp.broadcast_to(
+            observations[self.num_lags :, None, :],
+            conditional.batch_shape + (self.output_dim,),
+        )
+        return conditional.log_prob(values)
 
     def compute_potential(
         self,

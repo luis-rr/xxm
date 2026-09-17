@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian, PairedGaussian
@@ -14,7 +15,7 @@ def _normal_log_prob(x: float, mean: float, variance: float) -> float:
 
 
 def test_log_likelihoods_matches_univariate_gaussians():
-    observations = jnp.array([[0.0], [2.0]])
+    observations = jnp.array([[0.0], [2.0], [-1.0]])
     means = jnp.array([[0.0], [1.0]])
     covariances = jnp.array([[[1.0]], [[4.0]]])
 
@@ -26,15 +27,18 @@ def test_log_likelihoods_matches_univariate_gaussians():
         [
             [
                 _normal_log_prob(0.0, 0.0, 1.0),
-                _normal_log_prob(0.0, 1.0, 4.0),
+                _normal_log_prob(2.0, 0.0, 1.0),
+                _normal_log_prob(-1.0, 0.0, 1.0),
             ],
             [
-                _normal_log_prob(2.0, 0.0, 1.0),
+                _normal_log_prob(0.0, 1.0, 4.0),
                 _normal_log_prob(2.0, 1.0, 4.0),
+                _normal_log_prob(-1.0, 1.0, 4.0),
             ],
         ]
     )
 
+    assert actual.shape == (2, 3)  # Receiver batch, then observations.
     np.testing.assert_allclose(actual, expected, atol=ATOL)
 
 
@@ -178,7 +182,7 @@ def test_public_routines_are_jittable():
     result = run(observations, means, covariances, weights, inputs, outputs)
     jax.block_until_ready(result)
 
-    assert result[0].shape == (4, 2)
+    assert result[0].shape == (2, 4)
     assert result[2].affine.coefficients.shape == (1, 1)
     assert result[3].affine.coefficients.shape == (2, 1, 1)
 
@@ -201,7 +205,7 @@ def test_linear_gaussian_conditional_broadcasts_covariance():
     )
 
     inputs = jnp.zeros(
-        (num_steps, num_models, input_dim),
+        (num_models, num_steps, input_dim),
     )
 
     conditional = model.conditional(inputs)
@@ -213,17 +217,25 @@ def test_linear_gaussian_conditional_broadcasts_covariance():
     )
 
     assert conditional.mean.shape == (
-        num_steps,
         num_models,
+        num_steps,
         output_dim,
     )
 
     assert conditional.covariance.shape == (
-        num_steps,
         num_models,
+        num_steps,
         output_dim,
         output_dim,
     )
+
+    np.testing.assert_allclose(
+        conditional.covariance,
+        jnp.broadcast_to(model.covariance[:, None], conditional.covariance.shape),
+        atol=ATOL,
+    )
+    with pytest.raises(ValueError, match='expected batch prefix'):
+        model.conditional(jnp.swapaxes(inputs, 0, 1))
 
 
 def test_fit_linear_preserves_structured_input_shape():

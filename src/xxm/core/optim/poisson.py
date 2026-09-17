@@ -561,7 +561,7 @@ def _prepare_pair_inputs(
                 f'expected {input_shape}, got {initial_affine.input_shape}'
             )
 
-        initial_affine = initial_affine.input_reshape((initial_affine.input_size,))
+        initial_affine = initial_affine.reshape_input((initial_affine.input_size,))
 
     return flat_inputs, input_shape, initial_affine
 

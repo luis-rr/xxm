@@ -254,12 +254,14 @@ class PoissonEmissions(typing.NamedTuple):
     ) -> jax.Array:
         """Expected conditional log likelihood under Gaussian latent marginals."""
 
-        return self.dist.expected_log_prob(
-            values=observations,
-            inputs=Gaussian(
-                mean=posterior.means,
-                covariance=posterior.covariances,
-            ),
+        return jnp.sum(
+            self.dist.expected_log_prob(
+                values=observations,
+                inputs=Gaussian(
+                    mean=posterior.means,
+                    covariance=posterior.covariances,
+                ),
+            )
         )
 
     def compute_local_potential(

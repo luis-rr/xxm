@@ -65,6 +65,92 @@ Inference should orchestrate those components rather than duplicate their genera
 
 The same model components should be used for simulation, inference, and learning whenever the mathematics permits it.
 
+### Batch semantics
+
+Reusable mathematical objects in `core` may support arbitrary leading batch dimensions representing independent copies of the same object.
+
+For an object with intrinsic shape `E`, the canonical layout is
+
+```text
+(*B, *E)
+```
+
+where `*B` is the complete `batch_shape`.
+
+Batch dimensions are structural but semantically anonymous in generic core code. Model-family code may assign meaning to particular batch axes, such as discrete state, but that meaning should not leak into otherwise generic core objects.
+
+Operation-specific dimensions follow the object's batch dimensions. In particular, samples and temporal values use the conventions
+
+```text
+samples          (*B, *S, ...)
+temporal values  (*B, T, ...)
+```
+
+For unbatched objects, `*B=()`, so familiar shapes such as `(T, D)` remain unchanged.
+
+#### Batch API
+
+Objects exposing `batch_shape` should, where mathematically applicable, support a consistent batch-manipulation API:
+
+```python
+@property
+def batch_shape(self) -> tuple[int, ...]: ...
+
+
+def select(self, index) -> Self: ...
+def broadcast(self, shape, axis: int = 0) -> Self: ...
+def squeeze(self, axis=None) -> Self: ...
+def permute(self, permutation, axis: int = 0) -> Self: ...
+def move_axis(self, source: int, destination: int) -> Self: ...
+```
+
+These operations refer only to batch dimensions:
+
+* `select` indexes batch dimensions and always returns the same object type, even if all batching is removed.
+* `broadcast` explicitly inserts replicated batch dimensions.
+* `squeeze` removes singleton batch dimensions.
+* `permute` reorders entries along a batch axis.
+* `move_axis` reorders batch axes.
+
+Generic names are reserved for batch operations. Analogous operations on intrinsic dimensions use qualified names such as `squeeze_input`, `permute_variables`, or `permute_motifs`.
+
+No common `Batched` base class is required; this is a documented structural contract enforced by implementation consistency and tests.
+
+#### Naming
+
+Short, unqualified structural names such as `squeeze`, `permute`, and `move_axis` refer to batch dimensions when an object is batchable.
+
+When an object supports object-specific meaningful dimensions, operations on those intrinsic dimensions use a qualifier that names the affected structure, for example:
+
+- `permute` works on batch and `permute_variables` works on object-specific latent variables
+- `squeeze` works on batch and `squeeze_input` works on oject-specific input dimentions.
+- similarly for other opperations such as reshape, flatten, etc.
+
+The main operation should generally come first and the qualifier second. This keeps related operations grouped naturally in autocomplete and makes the distinction between generic batch manipulation and object-specific structure explicit.
+
+The same principle applies to specialized variants of mathematical operations: the base operation remains first and the qualifier describes the special behavior, as in `expected_log_prob` and `expected_log_prob_broadcast`.
+
+Names with semantic meaning such as `permute_states` are appropriate only when states are intrinsic to that abstraction. Generic core objects should not acquire such names merely because a model family happens to interpret one of their batch axes as states.
+
+#### Explicit batch alignment
+
+Ordinary mathematical operations should not rely on incidental JAX broadcasting to reconcile different object batch shapes. Batch structure should be explicitly aligned by the caller.
+
+Three concepts remain distinct:
+
+```text
+ordinary operation   aligned batch semantics
+broadcast(...)       changes an object's batch structure
+*_broadcast(...)     explicitly requests broader or Cartesian evaluation
+```
+
+Operations that reduce a batch dimension should take the reduced axis explicitly rather than assigning semantic meaning to a particular batch position.
+
+Sequential algorithms may internally move, flatten, or vectorize axes for efficient JAX execution, but those implementation details should not affect the external batch-major representation.
+
+Posterior and marginal objects produced by core inference follow the same rules as other core mathematical objects: their batch axes remain generic, and model-family code is responsible for interpreting them.
+
+
 ### Repository structure
 
 The repository uses a standard `src` layout:

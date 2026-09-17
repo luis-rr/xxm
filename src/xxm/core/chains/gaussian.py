@@ -16,6 +16,7 @@ import jax
 import jax.numpy as jnp
 import jax.scipy.linalg as jsp_linalg
 
+from xxm.core import _batch
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian, PairedGaussian
 
@@ -218,57 +219,18 @@ class GaussianPotential(typing.NamedTuple):
             log_constant=log_constant,
         )
 
-    def weighted_sum(
-        self,
-        weights: jax.Array,  # (..., K)
-    ) -> typing.Self:
-        r"""Compute the weighted sum over the last potential batch axis.
-
-        The returned potential satisfies
-        $\log \phi(u)=\sum_k w_k\log\phi_k(u)$.
-
-        The last potential batch dimension has size `K` and is reduced.
-        Any preceding potential batch dimensions broadcast against
-        `weights.shape[:-1]`.
-        """
-        if not self.batch_shape:
-            raise ValueError(
-                'weighted_sum requires at least one potential batch dimension'
-            )
-
-        if self.batch_shape[-1] != weights.shape[-1]:
-            raise ValueError(
-                'last dimension of weights must match the last potential '
-                f'batch dimension; expected {self.batch_shape[-1]}, '
-                f'got {weights.shape[-1]}'
-            )
-
-        try:
-            jnp.broadcast_shapes(
-                self.batch_shape[:-1],
-                weights.shape[:-1],
-            )
-        except ValueError as error:
-            raise ValueError(
-                'leading potential and weight batch dimensions must broadcast; '
-                f'got {self.batch_shape[:-1]} and {weights.shape[:-1]}'
-            ) from error
-
+    def weighted_sum(self, weights: jax.Array, *, axis: int) -> typing.Self:
+        """Sum log potentials over an explicit, aligned batch axis."""
+        batch_shape = self.batch_shape
         return self.__class__(
-            precision_blocks=jnp.einsum(
-                '...k,...kij->...ij',
-                weights,
-                self.precision_blocks,
+            precision_blocks=_batch.weighted_sum(
+                self.precision_blocks, weights, batch_shape, axis
             ),
-            information_vectors=jnp.einsum(
-                '...k,...ki->...i',
-                weights,
-                self.information_vectors,
+            information_vectors=_batch.weighted_sum(
+                self.information_vectors, weights, batch_shape, axis
             ),
-            log_constant=jnp.einsum(
-                '...k,...k->...',
-                weights,
-                self.log_constant,
+            log_constant=_batch.weighted_sum(
+                self.log_constant, weights, batch_shape, axis
             ),
         )
 
@@ -279,7 +241,7 @@ class GaussianPotential(typing.NamedTuple):
     ) -> jax.Array:
         r"""Compute the Gaussian expectation of this log potential.
 
-        Batch dimensions of the potential and moments must be broadcast-compatible.
+        Moment batches begin with the potential batch; query axes follow.
         `mean` stores $\mathbb{E}[u]$ and `second_moment` stores
         $\mathbb{E}[uu^\top]$.
         """
@@ -299,44 +261,89 @@ class GaussianPotential(typing.NamedTuple):
                 f'got {second_moment.shape}'
             )
 
-        jnp.broadcast_shapes(
-            self.batch_shape,
-            mean.shape[:-1],
-            second_moment.shape[:-2],
+        _batch.require_same(mean.shape[:-1], second_moment.shape[:-2])
+        shape = mean.shape[:-1]
+        precision = _batch.align_array(self.precision_blocks, self.batch_shape, shape)
+        information = _batch.align_array(
+            self.information_vectors, self.batch_shape, shape
         )
+        constant = _batch.align_array(self.log_constant, self.batch_shape, shape)
 
         return (
             -0.5
             * jnp.einsum(
                 '...ij,...ij->...',
-                self.precision_blocks,
+                precision,
                 second_moment,
             )
             + jnp.einsum(
                 '...i,...i->...',
-                self.information_vectors,
+                information,
                 mean,
             )
-            + self.log_constant
+            + constant
         )
 
     def expected_log_potential_broadcast(
-        self,
-        mean: jax.Array,
-        second_moment: jax.Array,
+        self, mean: jax.Array, second_moment: jax.Array
     ) -> jax.Array:
-        """Evaluate every moment tuple against every batched potential."""
-        extra = (1,) * len(self.batch_shape)
-
-        mean = mean.reshape(mean.shape[:-1] + extra + (self.variable_dim,))
-
-        second_moment = second_moment.reshape(
-            second_moment.shape[:-2] + extra + (self.variable_dim, self.variable_dim)
+        """Evaluate all moment tuples with receiver batch axes first."""
+        return self.expected_log_potential(
+            jnp.broadcast_to(mean, self.batch_shape + mean.shape),
+            jnp.broadcast_to(second_moment, self.batch_shape + second_moment.shape),
         )
 
-        return self.expected_log_potential(
-            mean=mean,
-            second_moment=second_moment,
+    def select(self, index) -> typing.Self:
+        """Index only batch dimensions, retaining this object type."""
+        index = _batch.selection(index, len(self.batch_shape))
+        return self.__class__(
+            precision_blocks=self.precision_blocks[index],
+            information_vectors=self.information_vectors[index],
+            log_constant=self.log_constant[index],
+        )
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        """Insert replicated batch dimensions at `axis`."""
+        shape, axis = _batch.insertion(shape, axis, len(self.batch_shape))
+        return self.__class__(
+            precision_blocks=_batch.broadcast_array(self.precision_blocks, shape, axis),
+            information_vectors=_batch.broadcast_array(
+                self.information_vectors, shape, axis
+            ),
+            log_constant=_batch.broadcast_array(self.log_constant, shape, axis),
+        )
+
+    def squeeze(self, axis=None) -> typing.Self:
+        """Remove singleton batch dimensions."""
+        axes = _batch.squeeze_axes(self.batch_shape, axis)
+        return self.__class__(
+            precision_blocks=jnp.squeeze(self.precision_blocks, axis=axes),
+            information_vectors=jnp.squeeze(self.information_vectors, axis=axes),
+            log_constant=jnp.squeeze(self.log_constant, axis=axes),
+        )
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        """Reorder entries along a batch axis."""
+        axis = _batch.axis_index(axis, len(self.batch_shape))
+        permutation = _batch.permutation_indices(permutation, self.batch_shape[axis])
+        return self.__class__(
+            precision_blocks=jnp.take(self.precision_blocks, permutation, axis=axis),
+            information_vectors=jnp.take(
+                self.information_vectors, permutation, axis=axis
+            ),
+            log_constant=jnp.take(self.log_constant, permutation, axis=axis),
+        )
+
+    def move_axis(self, source: int, destination: int) -> typing.Self:
+        """Move one batch axis to another position."""
+        source = _batch.axis_index(source, len(self.batch_shape))
+        destination = _batch.axis_index(destination, len(self.batch_shape))
+        return self.__class__(
+            precision_blocks=jnp.moveaxis(self.precision_blocks, source, destination),
+            information_vectors=jnp.moveaxis(
+                self.information_vectors, source, destination
+            ),
+            log_constant=jnp.moveaxis(self.log_constant, source, destination),
         )
 
 
@@ -457,101 +464,41 @@ class GaussianPairPotential(typing.NamedTuple):
             ),
         )
 
-    def broadcast(self, batch_shape) -> GaussianPairPotential:
-        """Prepend batch dimensions by broadcasting this pair potential."""
-        return GaussianPairPotential(
-            left_precision=jnp.broadcast_to(
-                self.left_precision,
-                batch_shape + self.left_precision.shape,
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        """Insert replicated batch dimensions at `axis`."""
+        shape, axis = _batch.insertion(shape, axis, len(self.batch_shape))
+        return self.__class__(
+            left_precision=_batch.broadcast_array(self.left_precision, shape, axis),
+            right_precision=_batch.broadcast_array(self.right_precision, shape, axis),
+            lower_precision=_batch.broadcast_array(self.lower_precision, shape, axis),
+            left_information=_batch.broadcast_array(self.left_information, shape, axis),
+            right_information=_batch.broadcast_array(
+                self.right_information, shape, axis
             ),
-            right_precision=jnp.broadcast_to(
-                self.right_precision,
-                batch_shape + self.right_precision.shape,
-            ),
-            lower_precision=jnp.broadcast_to(
-                self.lower_precision,
-                batch_shape + self.lower_precision.shape,
-            ),
-            left_information=jnp.broadcast_to(
-                self.left_information,
-                batch_shape + self.left_information.shape,
-            ),
-            right_information=jnp.broadcast_to(
-                self.right_information,
-                batch_shape + self.right_information.shape,
-            ),
-            log_constant=jnp.broadcast_to(
-                self.log_constant,
-                batch_shape + self.log_constant.shape,
-            ),
+            log_constant=_batch.broadcast_array(self.log_constant, shape, axis),
         )
 
-    def weighted_sum(
-        self,
-        weights: jax.Array,  # (..., K)
-    ) -> typing.Self:
-        r"""Compute the weighted sum over the last potential batch axis.
-
-        The returned potential satisfies
-        $\log f(x_0,x_1)=\sum_k w_k\log f_k(x_0,x_1)$.
-
-        The last potential batch dimension has size `K` and is reduced.
-        Any preceding potential batch dimensions broadcast against
-        `weights.shape[:-1]`.
-        """
-        if not self.batch_shape:
-            raise ValueError(
-                'weighted_sum requires at least one potential batch dimension'
-            )
-
-        if self.batch_shape[-1] != weights.shape[-1]:
-            raise ValueError(
-                'last dimension of weights must match the last potential '
-                f'batch dimension; expected {self.batch_shape[-1]}, '
-                f'got {weights.shape[-1]}'
-            )
-
-        try:
-            jnp.broadcast_shapes(
-                self.batch_shape[:-1],
-                weights.shape[:-1],
-            )
-        except ValueError as error:
-            raise ValueError(
-                'leading potential and weight batch dimensions must broadcast; '
-                f'got {self.batch_shape[:-1]} and {weights.shape[:-1]}'
-            ) from error
-
+    def weighted_sum(self, weights: jax.Array, *, axis: int) -> typing.Self:
+        """Sum log potentials over an explicit, aligned batch axis."""
+        batch_shape = self.batch_shape
         return self.__class__(
-            left_precision=jnp.einsum(
-                '...k,...kij->...ij',
-                weights,
-                self.left_precision,
+            left_precision=_batch.weighted_sum(
+                self.left_precision, weights, batch_shape, axis
             ),
-            right_precision=jnp.einsum(
-                '...k,...kij->...ij',
-                weights,
-                self.right_precision,
+            right_precision=_batch.weighted_sum(
+                self.right_precision, weights, batch_shape, axis
             ),
-            lower_precision=jnp.einsum(
-                '...k,...kij->...ij',
-                weights,
-                self.lower_precision,
+            lower_precision=_batch.weighted_sum(
+                self.lower_precision, weights, batch_shape, axis
             ),
-            left_information=jnp.einsum(
-                '...k,...ki->...i',
-                weights,
-                self.left_information,
+            left_information=_batch.weighted_sum(
+                self.left_information, weights, batch_shape, axis
             ),
-            right_information=jnp.einsum(
-                '...k,...ki->...i',
-                weights,
-                self.right_information,
+            right_information=_batch.weighted_sum(
+                self.right_information, weights, batch_shape, axis
             ),
-            log_constant=jnp.einsum(
-                '...k,...k->...',
-                weights,
-                self.log_constant,
+            log_constant=_batch.weighted_sum(
+                self.log_constant, weights, batch_shape, axis
             ),
         )
 
@@ -561,8 +508,7 @@ class GaussianPairPotential(typing.NamedTuple):
     ) -> jax.Array:
         r"""Compute the expected pair log potential from aligned joint moments.
 
-        Batch dimensions of the potential and posterior must be
-        broadcast-compatible.
+        Posterior batches begin with the potential batch; query axes follow.
         """
         if posterior.left_dim != self.variable_dim:
             raise ValueError(
@@ -576,9 +522,23 @@ class GaussianPairPotential(typing.NamedTuple):
                 f'got {posterior.right_dim}'
             )
 
-        jnp.broadcast_shapes(
-            self.batch_shape,
-            posterior.batch_shape,
+        batch_shape = self.batch_shape
+        shape = posterior.batch_shape
+        potential = GaussianPairPotential(
+            left_precision=_batch.align_array(self.left_precision, batch_shape, shape),
+            right_precision=_batch.align_array(
+                self.right_precision, batch_shape, shape
+            ),
+            lower_precision=_batch.align_array(
+                self.lower_precision, batch_shape, shape
+            ),
+            left_information=_batch.align_array(
+                self.left_information, batch_shape, shape
+            ),
+            right_information=_batch.align_array(
+                self.right_information, batch_shape, shape
+            ),
+            log_constant=_batch.align_array(self.log_constant, batch_shape, shape),
         )
 
         left_mean = posterior.left.mean
@@ -611,43 +571,86 @@ class GaussianPairPotential(typing.NamedTuple):
             -0.5
             * jnp.einsum(
                 '...ij,...ij->...',
-                self.left_precision,
+                potential.left_precision,
                 left_second,
             )
             - jnp.einsum(
                 '...ij,...ji->...',
-                self.lower_precision,
+                potential.lower_precision,
                 left_right_moment,
             )
             - 0.5
             * jnp.einsum(
                 '...ij,...ij->...',
-                self.right_precision,
+                potential.right_precision,
                 right_second,
             )
             + jnp.einsum(
                 '...i,...i->...',
-                self.left_information,
+                potential.left_information,
                 left_mean,
             )
             + jnp.einsum(
                 '...i,...i->...',
-                self.right_information,
+                potential.right_information,
                 right_mean,
             )
-            + self.log_constant
+            + potential.log_constant
         )
 
-    def expected_log_potential_broadcast(
-        self,
-        posterior: PairedGaussian,
-    ) -> jax.Array:
-        """Evaluate every joint moment tuple against every batched potential."""
-        index = (slice(None),) * len(posterior.batch_shape) + (None,) * len(
-            self.batch_shape
+    def expected_log_potential_broadcast(self, posterior: PairedGaussian) -> jax.Array:
+        """Evaluate all joint moments with receiver batch axes first."""
+        return self.expected_log_potential(posterior.broadcast(self.batch_shape))
+
+    def select(self, index) -> typing.Self:
+        """Index only batch dimensions, retaining this object type."""
+        index = _batch.selection(index, len(self.batch_shape))
+        return self.__class__(
+            left_precision=self.left_precision[index],
+            right_precision=self.right_precision[index],
+            lower_precision=self.lower_precision[index],
+            left_information=self.left_information[index],
+            right_information=self.right_information[index],
+            log_constant=self.log_constant[index],
         )
 
-        return self.expected_log_potential(posterior.select(index))
+    def squeeze(self, axis=None) -> typing.Self:
+        """Remove singleton batch dimensions."""
+        axes = _batch.squeeze_axes(self.batch_shape, axis)
+        return self.__class__(
+            left_precision=jnp.squeeze(self.left_precision, axis=axes),
+            right_precision=jnp.squeeze(self.right_precision, axis=axes),
+            lower_precision=jnp.squeeze(self.lower_precision, axis=axes),
+            left_information=jnp.squeeze(self.left_information, axis=axes),
+            right_information=jnp.squeeze(self.right_information, axis=axes),
+            log_constant=jnp.squeeze(self.log_constant, axis=axes),
+        )
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        """Reorder entries along a batch axis."""
+        axis = _batch.axis_index(axis, len(self.batch_shape))
+        permutation = _batch.permutation_indices(permutation, self.batch_shape[axis])
+        return self.__class__(
+            left_precision=jnp.take(self.left_precision, permutation, axis=axis),
+            right_precision=jnp.take(self.right_precision, permutation, axis=axis),
+            lower_precision=jnp.take(self.lower_precision, permutation, axis=axis),
+            left_information=jnp.take(self.left_information, permutation, axis=axis),
+            right_information=jnp.take(self.right_information, permutation, axis=axis),
+            log_constant=jnp.take(self.log_constant, permutation, axis=axis),
+        )
+
+    def move_axis(self, source: int, destination: int) -> typing.Self:
+        """Move one batch axis to another position."""
+        source = _batch.axis_index(source, len(self.batch_shape))
+        destination = _batch.axis_index(destination, len(self.batch_shape))
+        return self.__class__(
+            left_precision=jnp.moveaxis(self.left_precision, source, destination),
+            right_precision=jnp.moveaxis(self.right_precision, source, destination),
+            lower_precision=jnp.moveaxis(self.lower_precision, source, destination),
+            left_information=jnp.moveaxis(self.left_information, source, destination),
+            right_information=jnp.moveaxis(self.right_information, source, destination),
+            log_constant=jnp.moveaxis(self.log_constant, source, destination),
+        )
 
 
 class GaussianChain(typing.NamedTuple):

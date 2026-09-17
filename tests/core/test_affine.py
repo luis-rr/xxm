@@ -85,8 +85,8 @@ def test_affine_flatten_and_unflatten_input_round_trip():
         4,
     )
 
-    flattened = affine.input_flatten(values)
-    restored = affine.input_unflatten(flattened)
+    flattened = affine.flatten_input(values)
+    restored = affine.unflatten_input(flattened)
 
     assert flattened.shape == (2, 12)
 
@@ -111,7 +111,7 @@ def test_affine_reshape_input_preserves_map():
         4,
     )
 
-    flat_affine = affine.input_reshape((12,))
+    flat_affine = affine.reshape_input((12,))
     flat_input = structured_input.reshape(12)
 
     np.testing.assert_allclose(

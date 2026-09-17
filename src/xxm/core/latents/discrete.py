@@ -27,7 +27,7 @@ class CategoricalInitial(typing.NamedTuple):
     def permute(self, permutation: jax.Array) -> 'CategoricalInitial':
         """Relabel states by permutation."""
         return self._replace(
-            dist=self.dist.permute(permutation),
+            dist=self.dist.permute_categories(permutation),
         )
 
     def fit_params(
@@ -98,7 +98,9 @@ class CategoricalTransitions(typing.NamedTuple):
 
     def permute(self, permutation: jax.Array) -> 'CategoricalTransitions':
         """Relabel states by permutation."""
-        return self._replace(dist=self.dist.select(permutation).permute(permutation))
+        return self._replace(
+            dist=self.dist.select(permutation).permute_categories(permutation)
+        )
 
     def fit_params(
         self,

@@ -6,6 +6,8 @@ import typing
 import jax
 import jax.numpy as jnp
 
+from xxm.core import _batch
+
 
 class Affine(typing.NamedTuple):
     r"""Linear-affine map.
@@ -42,28 +44,13 @@ class Affine(typing.NamedTuple):
 
         return self.bias.shape[:-1]
 
-    def move_batch_axis(
-        self,
-        source: int,
-        destination: int,
-    ) -> typing.Self:
-        """Move one Gaussian batch axis to another position."""
-        batch_ndim = len(self.batch_shape)
-
-        source = source % batch_ndim
-        destination = destination % batch_ndim
-
-        return self._replace(
-            coefficients=jnp.moveaxis(
-                self.coefficients,
-                source,
-                destination,
-            ),
-            bias=jnp.moveaxis(
-                self.bias,
-                source,
-                destination,
-            ),
+    def move_axis(self, source: int, destination: int) -> typing.Self:
+        """Move one batch axis to another position."""
+        source = _batch.axis_index(source, len(self.batch_shape))
+        destination = _batch.axis_index(destination, len(self.batch_shape))
+        return self.__class__(
+            coefficients=jnp.moveaxis(self.coefficients, source, destination),
+            bias=jnp.moveaxis(self.bias, source, destination),
         )
 
     @property
@@ -82,14 +69,14 @@ class Affine(typing.NamedTuple):
         """Total size of input, product of input_shape."""
         return math.prod(self.input_shape)
 
-    def input_squeeze(self) -> typing.Self:
+    def squeeze_input(self) -> typing.Self:
         """Remove singleton dimensions from input shape."""
         input_shape = tuple(size for size in self.input_shape if size != 1)
 
         if not input_shape:
             input_shape = (1,)
 
-        return self.input_reshape(input_shape)
+        return self.reshape_input(input_shape)
 
     @property
     def output_dim(self) -> int:
@@ -108,7 +95,7 @@ class Affine(typing.NamedTuple):
             self.batch_shape + (self.output_dim, self.input_size)
         )
 
-    def input_flatten(self, values: jax.Array) -> jax.Array:
+    def flatten_input(self, values: jax.Array) -> jax.Array:
         """Flatten input dimensions of values from structured to single axis."""
         if values.shape[-self.input_ndim :] != self.input_shape:
             raise ValueError(
@@ -117,7 +104,7 @@ class Affine(typing.NamedTuple):
 
         return values.reshape(values.shape[: -self.input_ndim] + (self.input_size,))
 
-    def input_unflatten(self, values: jax.Array) -> jax.Array:
+    def unflatten_input(self, values: jax.Array) -> jax.Array:
         """Restore flattened input dimension to this affine's input shape."""
         if values.shape[-1] != self.input_size:
             raise ValueError(
@@ -127,7 +114,7 @@ class Affine(typing.NamedTuple):
 
         return values.reshape(values.shape[:-1] + self.input_shape)
 
-    def input_reshape(self, input_shape: tuple[int, ...]) -> typing.Self:
+    def reshape_input(self, input_shape: tuple[int, ...]) -> typing.Self:
         """Return affine map with input shape reshaped, preserving input size."""
         if not input_shape:
             raise ValueError('input_shape must contain at least one dimension')
@@ -160,7 +147,7 @@ class Affine(typing.NamedTuple):
         shift = jnp.einsum(
             '...oi,...i->...o',
             self.coefficients_flat,
-            self.input_flatten(center),
+            self.flatten_input(center),
         )
 
         return self._replace(
@@ -168,23 +155,13 @@ class Affine(typing.NamedTuple):
         )
 
     def apply(self, values: jax.Array) -> jax.Array:
-        """Evaluate the affine map at input values."""
-        # TODO: `apply` does not broadcast batch dims of `self` against
-        # leading (non-input) dims of `values` (e.g. a spatial grid with
-        # shape (..., input_dim)). Calling `apply` on a batched Affine with
-        # a grid of points currently fails with an einsum shape mismatch.
-        # Consider adding explicit broadcasting support (e.g. via
-        # `jnp.expand_dims` on `self` batch dims vs. `values` grid dims) or
-        # documenting that callers must loop over `self`'s batch dims
-        # (via `select`) when applying to a grid of points.
-        return (
-            jnp.einsum(
-                '...oi,...i->...o',
-                self.coefficients_flat,
-                self.input_flatten(values),
-            )
-            + self.bias
+        """Evaluate inputs shaped `(*batch_shape, *query_shape, *input_shape)`."""
+        values = self.flatten_input(values)
+        coefficients = _batch.align_array(
+            self.coefficients_flat, self.batch_shape, values.shape[:-1]
         )
+        bias = _batch.align_array(self.bias, self.batch_shape, values.shape[:-1])
+        return jnp.einsum('...oi,...i->...o', coefficients, values) + bias
 
     def astype(self, dtype: jax.typing.DTypeLike) -> typing.Self:
         """Convert to a different data type."""
@@ -194,7 +171,8 @@ class Affine(typing.NamedTuple):
         )
 
     def select(self, index) -> typing.Self:
-        """Index into batch dimensions."""
+        """Index only batch dimensions, retaining this object type."""
+        index = _batch.selection(index, len(self.batch_shape))
         return self.__class__(
             coefficients=self.coefficients[index],
             bias=self.bias[index],
@@ -212,6 +190,8 @@ class Affine(typing.NamedTuple):
                 f'({inner.output_dim},)'
             )
 
+        _batch.require_same(self.batch_shape, inner.batch_shape)
+
         coefficients = jnp.einsum(
             '...oi,...ij->...oj',
             self.coefficients_flat,
@@ -227,10 +207,7 @@ class Affine(typing.NamedTuple):
             + self.bias
         )
 
-        batch_shape = jnp.broadcast_shapes(
-            self.batch_shape,
-            inner.batch_shape,
-        )
+        batch_shape = self.batch_shape
 
         return self.__class__(
             coefficients=coefficients.reshape(
@@ -279,4 +256,29 @@ class Affine(typing.NamedTuple):
         return self.__class__(
             coefficients=coefficients,
             bias=-coefficients @ self.bias,
+        )
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        """Insert replicated batch dimensions at `axis`."""
+        shape, axis = _batch.insertion(shape, axis, len(self.batch_shape))
+        return self.__class__(
+            coefficients=_batch.broadcast_array(self.coefficients, shape, axis),
+            bias=_batch.broadcast_array(self.bias, shape, axis),
+        )
+
+    def squeeze(self, axis=None) -> typing.Self:
+        """Remove singleton batch dimensions."""
+        axes = _batch.squeeze_axes(self.batch_shape, axis)
+        return self.__class__(
+            coefficients=jnp.squeeze(self.coefficients, axis=axes),
+            bias=jnp.squeeze(self.bias, axis=axes),
+        )
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        """Reorder entries along a batch axis."""
+        axis = _batch.axis_index(axis, len(self.batch_shape))
+        permutation = _batch.permutation_indices(permutation, self.batch_shape[axis])
+        return self.__class__(
+            coefficients=jnp.take(self.coefficients, permutation, axis=axis),
+            bias=jnp.take(self.bias, permutation, axis=axis),
         )

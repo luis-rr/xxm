@@ -142,10 +142,12 @@ def test_single_state_slds_matches_gaussian_chain():
     state_probs = jnp.ones((observations.shape[0], 1))
 
     initial_potential = model.latent_initial.compute_potentials().weighted_sum(
-        state_probs[0]
+        state_probs[0], axis=0
     )
-    pair_potentials = model.dynamics.compute_pair_potentials().weighted_sum(
-        state_probs[1:]
+    pair_potentials = (
+        model.dynamics.compute_pair_potentials()
+        .broadcast(observations.shape[0] - 1)
+        .weighted_sum(state_probs[1:], axis=1)
     )
     observation_potential = model.emissions.compute_potential(observations)
 

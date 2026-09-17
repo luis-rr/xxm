@@ -466,7 +466,7 @@ def plot_dyn_linear(
     **kwargs,
 ):
     if affine.input_ndim == 2 and affine.input_shape[0] == 1:
-        affine = affine.input_squeeze()
+        affine = affine.squeeze_input()
 
     if affine.input_shape != (2,) or affine.output_dim != 2:
         raise ValueError(

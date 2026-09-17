@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 import jax.scipy as jsp
 
+from xxm.core import _batch
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian
 
@@ -31,9 +32,10 @@ class Poisson(typing.NamedTuple):
         """Number of independent Poisson variables."""
         return self.log_rates.shape[-1]
 
-    def select(self, index) -> 'Poisson':
-        """Index into batch dimensions."""
-        return Poisson(
+    def select(self, index) -> typing.Self:
+        """Index only batch dimensions, retaining this object type."""
+        index = _batch.selection(index, len(self.batch_shape))
+        return self.__class__(
             log_rates=self.log_rates[index],
         )
 
@@ -70,34 +72,60 @@ class Poisson(typing.NamedTuple):
         values: jax.Array,  # (..., N)
     ) -> jax.Array:  # (..., N)
         """Evaluate the log probability separately for each output dimension."""
-        return values * self.log_rates - self.rates - jsp.special.gammaln(values + 1)
+        if values.shape[-1:] != (self.variable_dim,):
+            raise ValueError('values must match the Poisson variable dimension')
+        log_rates = _batch.align_array(
+            self.log_rates, self.batch_shape, values.shape[:-1]
+        )
+        return values * log_rates - jnp.exp(log_rates) - jsp.special.gammaln(values + 1)
 
     def log_prob(
         self,
         values: jax.Array,  # (..., N)
     ) -> jax.Array:  # (...)
-        """Evaluate log probabilities with aligned/broadcast-compatible batch dimensions."""
+        """Evaluate log probabilities with aligned batch dimensions."""
         return jnp.sum(
             self.log_prob_each(values),
             axis=-1,
         )
 
-    def log_prob_broadcast(
-        self,
-        values: jax.Array,  # (..., N)
-    ) -> jax.Array:  # (..., *batch_shape)
-        """Evaluate every value against every batched distribution."""
-        values = values.reshape(
-            values.shape[:-1] + (1,) * len(self.batch_shape) + (self.variable_dim,)
-        )  # (..., 1, ..., 1, N)
-
+    def log_prob_broadcast(self, values: jax.Array) -> jax.Array:
+        """Evaluate all values with receiver batch axes first."""
+        values = jnp.broadcast_to(values, self.batch_shape + values.shape)
         return self.log_prob(values)
 
-    def mixture_mean(self, weights: jax.Array) -> jax.Array:
-        """Mean of mixture over last batch dimension."""
-        return jnp.sum(
-            weights[..., :, None] * self.rates,
-            axis=-2,
+    def mixture_mean(self, weights: jax.Array, *, axis: int) -> jax.Array:
+        """Compute a mixture mean over an explicit, aligned batch axis."""
+        return _batch.weighted_sum(self.rates, weights, self.batch_shape, axis)
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        """Insert replicated batch dimensions at `axis`."""
+        shape, axis = _batch.insertion(shape, axis, len(self.batch_shape))
+        return self.__class__(
+            log_rates=_batch.broadcast_array(self.log_rates, shape, axis),
+        )
+
+    def squeeze(self, axis=None) -> typing.Self:
+        """Remove singleton batch dimensions."""
+        axes = _batch.squeeze_axes(self.batch_shape, axis)
+        return self.__class__(
+            log_rates=jnp.squeeze(self.log_rates, axis=axes),
+        )
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        """Reorder entries along a batch axis."""
+        axis = _batch.axis_index(axis, len(self.batch_shape))
+        permutation = _batch.permutation_indices(permutation, self.batch_shape[axis])
+        return self.__class__(
+            log_rates=jnp.take(self.log_rates, permutation, axis=axis),
+        )
+
+    def move_axis(self, source: int, destination: int) -> typing.Self:
+        """Move one batch axis to another position."""
+        source = _batch.axis_index(source, len(self.batch_shape))
+        destination = _batch.axis_index(destination, len(self.batch_shape))
+        return self.__class__(
+            log_rates=jnp.moveaxis(self.log_rates, source, destination),
         )
 
 
@@ -149,11 +177,12 @@ class LinearPoisson(typing.NamedTuple):
     def reshape_input(self, input_shape: tuple[int, ...]) -> typing.Self:
         """Return same model with input shape reshaped."""
         return self._replace(
-            affine=self.affine.input_reshape(input_shape),
+            affine=self.affine.reshape_input(input_shape),
         )
 
     def select(self, index) -> typing.Self:
-        """Index into batch dimensions."""
+        """Index only batch dimensions, retaining this object type."""
+        index = _batch.selection(index, len(self.batch_shape))
         return self.__class__(
             affine=self.affine.select(index),
         )
@@ -184,6 +213,10 @@ class LinearPoisson(typing.NamedTuple):
     def expected_log_prob_each(self, values: jax.Array, inputs: Gaussian) -> jax.Array:
         """Expected log probabilities under Gaussian input marginals, per dimension."""
         mean, variance = self.log_rate_moments(inputs)
+        if values.shape != mean.shape:
+            raise ValueError(
+                'observations and input moments must have matching batch/query shapes'
+            )
 
         return (
             values * mean
@@ -204,9 +237,10 @@ class LinearPoisson(typing.NamedTuple):
         )
 
         if weights is not None:
+            _batch.require_same(weights.shape, log_probs.shape[:-1])
             log_probs = weights[..., None] * log_probs
 
-        return jnp.sum(log_probs)
+        return jnp.sum(log_probs, axis=-1)
 
     def compose_input(
         self,
@@ -215,4 +249,34 @@ class LinearPoisson(typing.NamedTuple):
         """Precompose with input map."""
         return self._replace(
             affine=self.affine.compose(affine),
+        )
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        """Insert replicated batch dimensions at `axis`."""
+        shape, axis = _batch.insertion(shape, axis, len(self.batch_shape))
+        return self.__class__(
+            affine=self.affine.broadcast(shape, axis=axis),
+        )
+
+    def squeeze(self, axis=None) -> typing.Self:
+        """Remove singleton batch dimensions."""
+        axes = _batch.squeeze_axes(self.batch_shape, axis)
+        return self.__class__(
+            affine=self.affine.squeeze(axes),
+        )
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        """Reorder entries along a batch axis."""
+        axis = _batch.axis_index(axis, len(self.batch_shape))
+        permutation = _batch.permutation_indices(permutation, self.batch_shape[axis])
+        return self.__class__(
+            affine=self.affine.permute(permutation, axis=axis),
+        )
+
+    def move_axis(self, source: int, destination: int) -> typing.Self:
+        """Move one batch axis to another position."""
+        source = _batch.axis_index(source, len(self.batch_shape))
+        destination = _batch.axis_index(destination, len(self.batch_shape))
+        return self.__class__(
+            affine=self.affine.move_axis(source, destination),
         )

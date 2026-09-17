@@ -112,8 +112,9 @@ class GaussianHMM:
 
     def observation_mean(self, posterior: Posterior) -> jax.Array:
         """Return the posterior mean observation at each time point."""
-        return self.states.mixture_mean(
+        return self.states.broadcast(posterior.state_probs.shape[0]).mixture_mean(
             posterior.state_probs,
+            axis=1,
         )
 
     @classmethod
@@ -273,8 +274,9 @@ class PoissonHMM:
 
     def observation_mean(self, posterior: Posterior) -> jax.Array:
         """Return the posterior mean observation at each time point."""
-        return self.states.mixture_mean(
+        return self.states.broadcast(posterior.state_probs.shape[0]).mixture_mean(
             posterior.state_probs,
+            axis=1,
         )
 
     @classmethod
@@ -483,6 +485,7 @@ class GaussianARHMM:
             observations,
         ).mixture_mean(
             posterior.state_probs,
+            axis=1,
         )
 
     @classmethod
@@ -733,6 +736,7 @@ class PoissonARHMM:
             observations,
         ).mixture_mean(
             posterior.state_probs,
+            axis=1,
         )
 
     @classmethod

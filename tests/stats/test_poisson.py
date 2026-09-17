@@ -18,7 +18,7 @@ def _poisson_log_prob(count: int, rate: float) -> float:
 
 
 def test_log_likelihoods_matches_known_poisson_probabilities():
-    observations = jnp.array([[0.0, 1.0], [2.0, 3.0]])
+    observations = jnp.array([[0.0, 1.0], [2.0, 3.0], [1.0, 0.0]])
     rates = jnp.array([[1.0, 2.0], [0.5, 4.0]])
 
     actual = Poisson(log_rates=jnp.log(rates)).log_prob_broadcast(observations)
@@ -27,15 +27,18 @@ def test_log_likelihoods_matches_known_poisson_probabilities():
         [
             [
                 _poisson_log_prob(0, 1.0) + _poisson_log_prob(1, 2.0),
-                _poisson_log_prob(0, 0.5) + _poisson_log_prob(1, 4.0),
+                _poisson_log_prob(2, 1.0) + _poisson_log_prob(3, 2.0),
+                _poisson_log_prob(1, 1.0) + _poisson_log_prob(0, 2.0),
             ],
             [
-                _poisson_log_prob(2, 1.0) + _poisson_log_prob(3, 2.0),
+                _poisson_log_prob(0, 0.5) + _poisson_log_prob(1, 4.0),
                 _poisson_log_prob(2, 0.5) + _poisson_log_prob(3, 4.0),
+                _poisson_log_prob(1, 0.5) + _poisson_log_prob(0, 4.0),
             ],
         ]
     )
 
+    assert actual.shape == (2, 3)  # Receiver batch, then observations.
     np.testing.assert_allclose(actual, expected, atol=ATOL)
 
 
@@ -219,7 +222,7 @@ def test_public_routines_are_jittable():
             values=observations,
             inputs=inputs,
         )
-        expected_total = linear_model.expected_log_prob(
+        expected_log_probs = linear_model.expected_log_prob(
             values=observations,
             inputs=inputs,
         )
@@ -235,7 +238,7 @@ def test_public_routines_are_jittable():
         return (
             log_likelihoods,
             expected_per_output,
-            expected_total,
+            expected_log_probs,
             fitted.log_rates,
             marginal_fit,
         )
@@ -290,7 +293,8 @@ def test_public_routines_are_jittable():
     )
     jax.block_until_ready(deterministic_result)
 
-    assert marginal_result[0].shape == (2, 1)
+    assert marginal_result[0].shape == (1, 2)
+    assert marginal_result[2].shape == (2,)  # Preserve observation axes.
     assert marginal_result[-1].affine.coefficients.shape == (1, 1)
     assert deterministic_result[0].affine.coefficients.shape == (1, 1)
     assert deterministic_result[1].affine.coefficients.shape == (2, 1, 1)

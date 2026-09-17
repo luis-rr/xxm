@@ -8,6 +8,8 @@ import jax
 import jax.numpy as jnp
 import jax.scipy as jsp
 
+from xxm.core import _batch
+
 
 class DiscretePotential(typing.NamedTuple):
     r"""Unary log potential.
@@ -28,6 +30,43 @@ class DiscretePotential(typing.NamedTuple):
     def num_states(self) -> int:
         """Number of states."""
         return self.log_values.shape[-1]
+
+    def select(self, index) -> typing.Self:
+        """Index only batch dimensions, retaining this object type."""
+        index = _batch.selection(index, len(self.batch_shape))
+        return self.__class__(
+            log_values=self.log_values[index],
+        )
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        """Insert replicated batch dimensions at `axis`."""
+        shape, axis = _batch.insertion(shape, axis, len(self.batch_shape))
+        return self.__class__(
+            log_values=_batch.broadcast_array(self.log_values, shape, axis),
+        )
+
+    def squeeze(self, axis=None) -> typing.Self:
+        """Remove singleton batch dimensions."""
+        axes = _batch.squeeze_axes(self.batch_shape, axis)
+        return self.__class__(
+            log_values=jnp.squeeze(self.log_values, axis=axes),
+        )
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        """Reorder entries along a batch axis."""
+        axis = _batch.axis_index(axis, len(self.batch_shape))
+        permutation = _batch.permutation_indices(permutation, self.batch_shape[axis])
+        return self.__class__(
+            log_values=jnp.take(self.log_values, permutation, axis=axis),
+        )
+
+    def move_axis(self, source: int, destination: int) -> typing.Self:
+        """Move one batch axis to another position."""
+        source = _batch.axis_index(source, len(self.batch_shape))
+        destination = _batch.axis_index(destination, len(self.batch_shape))
+        return self.__class__(
+            log_values=jnp.moveaxis(self.log_values, source, destination),
+        )
 
 
 class DiscreteChain(typing.NamedTuple):

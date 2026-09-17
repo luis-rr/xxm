@@ -198,11 +198,12 @@ class SwitchingFactors(typing.NamedTuple):
         """Compute expected Gaussian factors under q(z)."""
         initial = self.initial_potential.weighted_sum(
             discrete_posterior.state_probs[0],
+            axis=0,
         )
 
-        dynamics = self.dynamics_potential.weighted_sum(
-            discrete_posterior.state_probs[1:],
-        )
+        dynamics = self.dynamics_potential.broadcast(
+            discrete_posterior.state_probs.shape[0] - 1,
+        ).weighted_sum(discrete_posterior.state_probs[1:], axis=1)
 
         return initial, dynamics
 
@@ -220,7 +221,7 @@ class SwitchingFactors(typing.NamedTuple):
             Gaussian(
                 mean=means[0],
                 covariance=covariances[0],
-            )
+            ).broadcast(self.initial_dist.batch_shape)
         )  # (K,)
 
         dynamics_log_values = self.dynamics_dist.expected_log_prob_broadcast(
@@ -233,7 +234,7 @@ class SwitchingFactors(typing.NamedTuple):
                 covariance=covariances[1:],
             ),
             input_output_covariance=cross_covariances,
-        )  # (T - 1, K)
+        ).T  # (T - 1, K), converted from receiver-first (K, T - 1).
 
         return DiscretePotential(
             log_values=jnp.concatenate(
@@ -255,10 +256,15 @@ class SwitchingFactors(typing.NamedTuple):
             latents[0],
         )
 
-        dynamics_log_values = self.dynamics_dist.conditional(
-            latents[:-1, None, :],
-        ).log_prob(
-            latents[1:, None, :],
+        values = jnp.broadcast_to(
+            latents, self.dynamics_dist.batch_shape + latents.shape
+        )
+        dynamics_log_values = (
+            self.dynamics_dist.conditional(
+                values[..., :-1, :],
+            )
+            .log_prob(values[..., 1:, :])
+            .T
         )
 
         return DiscretePotential(

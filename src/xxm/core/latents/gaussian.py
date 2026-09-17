@@ -151,7 +151,11 @@ class GaussianLinearDynamics(typing.NamedTuple):
         inverse = alignment.inverse()
 
         return self._replace(
-            dist=(self.dist.compose_input(inverse).compose_output(alignment)),
+            dist=(
+                self.dist.compose_input(
+                    inverse.broadcast(self.dist.batch_shape)
+                ).compose_output(alignment.broadcast(self.dist.batch_shape))
+            ),
         )
 
     @classmethod
