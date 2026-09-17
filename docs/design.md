@@ -392,8 +392,10 @@ Functions split keys locally and deterministically. Reusing a key for independen
 
 Unless a mathematical object requires otherwise:
 
-* sequence or time is the leading structural axis;
-* state is the next explicit axis for state-indexed sequence quantities;
+* generic structural batch dimensions precede operation-specific axes;
+* temporal mathematical objects use `(*B, T, ...)`;
+* for ordinary unbatched family-level sequence arrays, time is usually the first explicit axis;
+* state may follow time in family-level quantities such as `(T, K)`;
 * variable and output dimensions are trailing axes;
 * distribution batch dimensions precede event dimensions;
 * matrices use trailing `(output_dim, input_dim)` or `(variable_dim, variable_dim)` axes.

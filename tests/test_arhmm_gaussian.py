@@ -288,7 +288,7 @@ def test_ar_gaussian_permute():
 
     permutation = jnp.array([2, 0, 1])
 
-    permuted = emissions.permute(permutation)
+    permuted = emissions.permute_states(permutation)
 
     np.testing.assert_array_equal(
         permuted.dist.affine.coefficients,

@@ -50,6 +50,27 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         their current parameters.
         """
 
+        if discrete.state_probs.ndim != 2:
+            raise ValueError(
+                'GaussianLinearSwitchingDynamics.fit_params expects an unbatched posterior '
+                'with state_probs shape (T, K)'
+            )
+        if continuous.means.ndim != 2:
+            raise ValueError(
+                'GaussianLinearSwitchingDynamics.fit_params expects an unbatched posterior '
+                'with means shape (T, D)'
+            )
+        if continuous.covariances.ndim != 3:
+            raise ValueError(
+                'GaussianLinearSwitchingDynamics.fit_params expects an unbatched posterior '
+                'with covariances shape (T, D, D)'
+            )
+        if continuous.cross_covariances.ndim != 3:
+            raise ValueError(
+                'GaussianLinearSwitchingDynamics.fit_params expects an unbatched posterior '
+                'with cross_covariances shape (T - 1, D, D)'
+            )
+
         weights = jnp.moveaxis(discrete.state_probs[..., 1:, :], -1, 0)
         # (K, T - 1)
 
@@ -110,7 +131,7 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
             axis=0,
         )
 
-    def permute(self, permutation: jax.Array) -> typing.Self:
+    def permute_states(self, permutation: jax.Array) -> typing.Self:
         """
         Relabel discrete-state-indexed dynamics by permutation.
         """

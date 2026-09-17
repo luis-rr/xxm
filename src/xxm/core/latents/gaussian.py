@@ -24,6 +24,17 @@ class GaussianInitial(typing.NamedTuple):
     ) -> typing.Self:
         r"""Fit the initial Gaussian from the posterior moments of $x_0$."""
 
+        if posterior.means.ndim != 2:
+            raise ValueError(
+                'GaussianInitial.fit_params expects an unbatched posterior '
+                'with means shape (T, D)'
+            )
+        if posterior.covariances.ndim != 3:
+            raise ValueError(
+                'GaussianInitial.fit_params expects an unbatched posterior '
+                'with covariances shape (T, D, D)'
+            )
+
         reference = gaussian_fit.from_moment_match(
             Gaussian(
                 mean=posterior.means,
@@ -87,6 +98,23 @@ class GaussianLinearDynamics(typing.NamedTuple):
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
     ) -> typing.Self:
         r"""Fit dynamics from posterior pair marginals via moment matching."""
+
+        if posterior.means.ndim != 2:
+            raise ValueError(
+                'GaussianLinearDynamics.fit_params expects an unbatched posterior '
+                'with means shape (T, D)'
+            )
+        if posterior.covariances.ndim != 3:
+            raise ValueError(
+                'GaussianLinearDynamics.fit_params expects an unbatched posterior '
+                'with covariances shape (T, D, D)'
+            )
+        if posterior.cross_covariances.ndim != 3:
+            raise ValueError(
+                'GaussianLinearDynamics.fit_params expects an unbatched posterior '
+                'with cross_covariances shape (T - 1, D, D)'
+            )
+
         paired = gaussian_fit.paired_from_moment_match(
             posterior.paired_marginals(),
         )
@@ -217,7 +245,7 @@ class StateConditionedGaussian(typing.NamedTuple):
         """Sample conditional on the given discrete state."""
         return self.conditional(state).sample(key)
 
-    def permute(self, permutation: jax.Array) -> typing.Self:
+    def permute_states(self, permutation: jax.Array) -> typing.Self:
         """
         Relabel state-conditioned Gaussian distributions.
         """

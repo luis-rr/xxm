@@ -143,7 +143,16 @@ class Affine(typing.NamedTuple):
         r"""
         Translate the input origin so the shifted map $g$ satisfies
         $g(u-\text{center}) = f(u)$.
+
+        `center` is global with `input_shape` or fully batch-aligned with
+        `(*batch_shape, *input_shape)`.
         """
+        if center.shape not in (self.input_shape, self.batch_shape + self.input_shape):
+            raise ValueError(
+                f'center must have shape {self.input_shape} or '
+                f'{self.batch_shape + self.input_shape}, got {center.shape}'
+            )
+
         shift = jnp.einsum(
             '...oi,...i->...o',
             self.coefficients_flat,

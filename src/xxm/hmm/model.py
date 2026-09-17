@@ -92,10 +92,10 @@ class GaussianHMM:
         """Number of discrete states $K$."""
         return self._model.num_states
 
-    def permute(self, permutation: jax.Array) -> GaussianHMM:
+    def permute_states(self, permutation: jax.Array) -> GaussianHMM:
         """Relabel discrete states by permutation."""
         return GaussianHMM(
-            _model=self._model.permute(permutation),
+            _model=self._model.permute_states(permutation),
         )
 
     @property
@@ -254,10 +254,10 @@ class PoissonHMM:
         """Number of discrete states $K$."""
         return self._model.num_states
 
-    def permute(self, permutation: jax.Array) -> PoissonHMM:
+    def permute_states(self, permutation: jax.Array) -> PoissonHMM:
         """Relabel discrete states by permutation."""
         return PoissonHMM(
-            _model=self._model.permute(permutation),
+            _model=self._model.permute_states(permutation),
         )
 
     @property
@@ -440,13 +440,13 @@ class GaussianARHMM:
         """Number of autoregressive lags $L$."""
         return self._model.emissions.num_lags
 
-    def permute(
+    def permute_states(
         self,
         permutation: jax.Array,
     ) -> GaussianARHMM:
         """Relabel discrete states by permutation."""
         return GaussianARHMM(
-            _model=self._model.permute(permutation),
+            _model=self._model.permute_states(permutation),
         )
 
     @property
@@ -691,13 +691,13 @@ class PoissonARHMM:
         """Number of autoregressive lags $L$."""
         return self._model.emissions.num_lags
 
-    def permute(
+    def permute_states(
         self,
         permutation: jax.Array,
     ) -> PoissonARHMM:
         """Relabel discrete states by permutation."""
         return PoissonARHMM(
-            _model=self._model.permute(permutation),
+            _model=self._model.permute_states(permutation),
         )
 
     @property

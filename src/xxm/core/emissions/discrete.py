@@ -39,7 +39,7 @@ class Emissions(typing.Protocol):
         """Fit emission parameters from observations and posterior state weights."""
         ...
 
-    def permute(
+    def permute_states(
         self,
         permutation: jax.Array,
     ) -> typing.Self:
@@ -99,6 +99,12 @@ class GaussianEmissions(typing.NamedTuple):
     ) -> typing.Self:
         """Fit Gaussian parameters from posterior state weights."""
 
+        if posterior.state_probs.ndim != 2:
+            raise ValueError(
+                'GaussianEmissions.fit_params expects an unbatched posterior '
+                'with state_probs shape (T, K)'
+            )
+
         weights = jnp.moveaxis(posterior.state_probs, -1, 0)
 
         fitted = gaussian_fit.from_samples_weighted(
@@ -119,7 +125,7 @@ class GaussianEmissions(typing.NamedTuple):
         """Sample observations conditional on discrete state indices."""
         return self.dist.select(states).sample(key)
 
-    def permute(self, permutation: jax.Array) -> 'GaussianEmissions':
+    def permute_states(self, permutation: jax.Array) -> 'GaussianEmissions':
         """Relabel state-specific emission parameters."""
         return self._replace(
             dist=self.dist.select(permutation),
@@ -158,6 +164,12 @@ class PoissonEmissions(typing.NamedTuple):
     ) -> typing.Self:
         """Fit state-specific Poisson log rates from posterior state weights."""
 
+        if posterior.state_probs.ndim != 2:
+            raise ValueError(
+                'PoissonEmissions.fit_params expects an unbatched posterior '
+                'with state_probs shape (T, K)'
+            )
+
         weights = jnp.moveaxis(posterior.state_probs, -1, 0)
 
         fitted = poisson_fit.from_samples_weighted(
@@ -173,7 +185,7 @@ class PoissonEmissions(typing.NamedTuple):
             ),
         )
 
-    def permute(
+    def permute_states(
         self,
         permutation: jax.Array,
     ) -> 'PoissonEmissions':

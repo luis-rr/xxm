@@ -92,7 +92,7 @@ def test_permute_relabels_all_state_dependent_components():
     model = _make_model()
     permutation = jnp.array([1, 0])
 
-    permuted = model.permute(permutation)
+    permuted = model.permute_states(permutation)
 
     np.testing.assert_allclose(
         permuted.state_initial.dist.probs,

@@ -115,10 +115,10 @@ class GaussianSLDS:
         """Linear-Gaussian observation distribution."""
         return self._model.emissions.dist
 
-    def permute(self, permutation: jax.Array) -> typing.Self:
+    def permute_states(self, permutation: jax.Array) -> typing.Self:
         """Relabel the discrete latent states."""
         return self.__class__(
-            _model=self._model.permute(permutation),
+            _model=self._model.permute_states(permutation),
         )
 
     def align(self, alignment: Affine) -> typing.Self:
@@ -357,10 +357,10 @@ class PoissonSLDS:
         """Linear-Poisson observation distribution in log-rate form."""
         return self._model.emissions.dist
 
-    def permute(self, permutation: jax.Array) -> typing.Self:
+    def permute_states(self, permutation: jax.Array) -> typing.Self:
         """Relabel the discrete latent states."""
         return self.__class__(
-            _model=self._model.permute(permutation),
+            _model=self._model.permute_states(permutation),
         )
 
     def align(self, alignment: Affine) -> typing.Self:

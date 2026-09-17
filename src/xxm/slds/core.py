@@ -28,7 +28,7 @@ class Posterior(typing.NamedTuple):
     discrete: DiscreteChainMarginals  # T discrete states
     continuous: GaussianChainMarginals  # T continuous latents
 
-    def permute(self, permutation: jax.Array) -> typing.Self:
+    def permute_states(self, permutation: jax.Array) -> typing.Self:
         r"""Relabel discrete states $z$ by permutation."""
         return self._replace(
             discrete=self.discrete.permute_states(permutation),
@@ -116,15 +116,15 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
         return states, latents, observations
 
-    def permute(self, permutation: jax.Array) -> typing.Self:
+    def permute_states(self, permutation: jax.Array) -> typing.Self:
         """
         Relabel all discrete-state-dependent parameters by permutation.
         """
         return self._replace(
-            state_initial=self.state_initial.permute(permutation),
-            transitions=self.transitions.permute(permutation),
-            latent_initial=self.latent_initial.permute(permutation),
-            dynamics=self.dynamics.permute(permutation),
+            state_initial=self.state_initial.permute_states(permutation),
+            transitions=self.transitions.permute_states(permutation),
+            latent_initial=self.latent_initial.permute_states(permutation),
+            dynamics=self.dynamics.permute_states(permutation),
         )
 
     def align(

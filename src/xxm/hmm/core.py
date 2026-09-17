@@ -43,15 +43,15 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         """Number of discrete states $K$."""
         return self.initial.num_states
 
-    def permute(
+    def permute_states(
         self,
         permutation: jax.Array,
     ) -> Model:
         """Relabel discrete states by permutation."""
         return Model(
-            initial=self.initial.permute(permutation),
-            transitions=self.transitions.permute(permutation),
-            emissions=self.emissions.permute(permutation),
+            initial=self.initial.permute_states(permutation),
+            transitions=self.transitions.permute_states(permutation),
+            emissions=self.emissions.permute_states(permutation),
         )
 
     def sample_states(

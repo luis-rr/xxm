@@ -239,7 +239,20 @@ class GaussianPotential(typing.NamedTuple):
 
         `point` stores $u_0$, `log_value` stores $a$, `gradient` stores $g$,
         and `precision` stores the negative Hessian $J$ at $u_0$.
+        All inputs must have the same structural batch prefix.
         """
+        if point.ndim < 1:
+            raise ValueError('point must have shape (*B, D)')
+        if (
+            gradient.shape != point.shape
+            or log_value.shape != point.shape[:-1]
+            or precision.shape != point.shape + (point.shape[-1],)
+        ):
+            raise ValueError(
+                'local quadratic inputs must have aligned shapes: point (*B, D), '
+                'log_value (*B), gradient (*B, D), precision (*B, D, D)'
+            )
+
         information = gradient + jnp.einsum(
             '...ij,...j->...i',
             precision,

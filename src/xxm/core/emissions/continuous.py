@@ -157,6 +157,17 @@ class GaussianEmissions(typing.NamedTuple):
     ) -> typing.Self:
         """Fit emission parameters from Gaussian latent marginals."""
 
+        if posterior.means.ndim != 2:
+            raise ValueError(
+                'GaussianEmissions.fit_params expects an unbatched posterior '
+                'with means shape (T, D)'
+            )
+        if posterior.covariances.ndim != 3:
+            raise ValueError(
+                'GaussianEmissions.fit_params expects an unbatched posterior '
+                'with covariances shape (T, D, D)'
+            )
+
         return self._replace(
             dist=gaussian_fit.linear_from_marginals(
                 inputs=Gaussian(
@@ -307,6 +318,18 @@ class PoissonEmissions(typing.NamedTuple):
         ridge=poisson_fit.DEFAULT_RIDGE,
     ) -> typing.Self:
         """Fit the emission parameters from Gaussian latent marginals."""
+
+        if posterior.means.ndim != 2:
+            raise ValueError(
+                'PoissonEmissions.fit_params expects an unbatched posterior '
+                'with means shape (T, D)'
+            )
+        if posterior.covariances.ndim != 3:
+            raise ValueError(
+                'PoissonEmissions.fit_params expects an unbatched posterior '
+                'with covariances shape (T, D, D)'
+            )
+
         model = poisson_fit.linear_from_marginals(
             outputs=observations,
             inputs=Gaussian(

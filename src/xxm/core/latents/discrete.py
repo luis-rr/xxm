@@ -24,7 +24,7 @@ class CategoricalInitial(typing.NamedTuple):
         """Sample initial discrete state."""
         return self.dist.sample(key)
 
-    def permute(self, permutation: jax.Array) -> 'CategoricalInitial':
+    def permute_states(self, permutation: jax.Array) -> 'CategoricalInitial':
         """Relabel states by permutation."""
         return self._replace(
             dist=self.dist.permute_categories(permutation),
@@ -36,6 +36,13 @@ class CategoricalInitial(typing.NamedTuple):
         pseudocount=categorical_fit.DEFAULT_PSEUDOCOUNT,
     ) -> typing.Self:
         r"""Fit initial distribution from posterior marginals $\gamma_0(k)$."""
+
+        if posterior.state_probs.ndim != 2:
+            raise ValueError(
+                'CategoricalInitial.fit_params expects an unbatched posterior '
+                'with state_probs shape (T, K)'
+            )
+
         return self._replace(
             dist=categorical_fit.from_counts(
                 posterior.state_probs[..., 0, :],
@@ -96,7 +103,7 @@ class CategoricalTransitions(typing.NamedTuple):
             axis=0,
         )
 
-    def permute(self, permutation: jax.Array) -> 'CategoricalTransitions':
+    def permute_states(self, permutation: jax.Array) -> 'CategoricalTransitions':
         """Relabel states by permutation."""
         return self._replace(
             dist=self.dist.select(permutation).permute_categories(permutation)
@@ -108,7 +115,19 @@ class CategoricalTransitions(typing.NamedTuple):
         pseudocount=categorical_fit.DEFAULT_PSEUDOCOUNT,
     ) -> typing.Self:
         r"""Fit transition probabilities from posterior pair marginals $\xi_t(i,j)$."""
-        expected_transitions = posterior.pair_probs.sum(axis=-3)  # (*B, K, K)
+
+        if posterior.state_probs.ndim != 2:
+            raise ValueError(
+                'CategoricalTransitions.fit_params expects an unbatched posterior '
+                'with state_probs shape (T, K)'
+            )
+        if posterior.pair_probs.ndim != 3:
+            raise ValueError(
+                'CategoricalTransitions.fit_params expects an unbatched posterior '
+                'with pair_probs shape (T - 1, K, K)'
+            )
+
+        expected_transitions = posterior.pair_probs.sum(axis=-3)  # (K, K)
 
         return self._replace(
             dist=categorical_fit.from_counts(

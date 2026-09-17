@@ -65,10 +65,13 @@ def filter_valid_states(
     min_expected_count: float = 1.0,
 ) -> PyTreeT:
     """
-    Keep current parameters for state-batched fits with insufficient weight.
+    Keep current parameters for fitted batches with insufficient weight.
 
-    PyTree leaves are expected to have state as their leading batch dimension.
+    Weights have shape `(*B, S)` and all PyTree leaves begin with `*B`.
     """
+    if weights.ndim < 1:
+        raise ValueError('weights must have shape (*B, S)')
+
     expected_counts = jnp.sum(
         weights,
         axis=-1,
@@ -80,7 +83,19 @@ def filter_valid_states(
         fitted_leaf: jax.Array,
         current_leaf: jax.Array,
     ) -> jax.Array:
-        mask = valid.reshape((valid.shape[0],) + (1,) * (fitted_leaf.ndim - 1))
+        if (
+            fitted_leaf.shape[: valid.ndim] != valid.shape
+            or current_leaf.shape[: valid.ndim] != valid.shape
+        ):
+            raise ValueError(
+                f'parameter leaves must begin with fitted batch shape {valid.shape}'
+            )
+        if fitted_leaf.shape != current_leaf.shape:
+            raise ValueError(
+                'fitted and current parameter leaves must have equal shapes'
+            )
+
+        mask = valid.reshape(valid.shape + (1,) * (fitted_leaf.ndim - valid.ndim))
 
         return jnp.where(
             mask,

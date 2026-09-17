@@ -218,6 +218,12 @@ class AREmissions(
     ) -> typing.Self:
         """Fit AR parameters conditional on the initial observation history."""
 
+        if posterior.state_probs.ndim != 2:
+            raise ValueError(
+                'AREmissions.fit_params expects an unbatched posterior '
+                'with state_probs shape (T, K)'
+            )
+
         predictors = self.predictors(
             observations,
         )  # (T-L, L, N)
@@ -243,7 +249,7 @@ class AREmissions(
             ),
         )
 
-    def permute(
+    def permute_states(
         self,
         permutation: jax.Array,
     ) -> typing.Self:
