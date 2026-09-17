@@ -15,6 +15,9 @@ dependencies = [
     'numpy',
 ]
 
+[project.optional-dependencies]
+plot = ['matplotlib']
+
 [dependency-groups]
 dev = [
     'pre-commit',
