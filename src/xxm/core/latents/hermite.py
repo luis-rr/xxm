@@ -1,4 +1,4 @@
-"""Centered Hermite basis mathematics and Gaussian coefficient drift."""
+"""Centered Hermite basis mathematics and Gaussian coefficient."""
 
 from __future__ import annotations
 
@@ -338,8 +338,8 @@ def _coefficient_prior(
     meta_fields=['num_motifs'],
 )
 @dataclasses.dataclass(frozen=True)
-class HermiteDrift:
-    r"""Centered Hermite drift independently replicated over batch dimensions `*B`.
+class HermiteSpline:
+    r"""Centered spline independently replicated over batch dimensions `*B`.
 
     The coefficient prior has batch shape `*B` and event dimension `P * C`,
     where `P` is the number of motifs and `C = J - 1` is the number of free
@@ -357,7 +357,7 @@ class HermiteDrift:
 
     @property
     def variable_dim(self) -> int:
-        """Number `P` of Hermite drift coordinates."""
+        """Number `P` of Hermite coordinates."""
         return self.num_motifs
 
     @property
@@ -369,7 +369,7 @@ class HermiteDrift:
     def num_coefficients(self) -> int:
         """Number of free centered Hermite coefficients per motif."""
         if self.num_motifs < 1:
-            raise ValueError('drift must contain at least one motif')
+            raise ValueError('Hermite spline must contain at least one motif')
 
         if self.coefficient_prior.variable_dim % self.num_motifs != 0:
             raise ValueError(
