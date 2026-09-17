@@ -128,7 +128,7 @@ class GaussianEmissions(typing.NamedTuple):
         latents: jax.Array,  # (T, D)
     ) -> jax.Array:  # ()
         """Compute the total conditional log likelihood."""
-        return jnp.sum(self.conditional(latents).log_prob(observations))
+        return jnp.sum(self.conditional(latents).log_prob(observations), axis=-1)
 
     def compute_potential(
         self,
@@ -245,7 +245,7 @@ class PoissonEmissions(typing.NamedTuple):
         latents: jax.Array,  # (T, D)
     ) -> jax.Array:  # ()
         """Compute the total conditional log likelihood."""
-        return jnp.sum(self.conditional(latents).log_prob(observations))
+        return jnp.sum(self.conditional(latents).log_prob(observations), axis=-1)
 
     def expected_log_likelihood(
         self,
@@ -261,7 +261,8 @@ class PoissonEmissions(typing.NamedTuple):
                     mean=posterior.means,
                     covariance=posterior.covariances,
                 ),
-            )
+            ),
+            axis=-1,
         )
 
     def compute_local_potential(

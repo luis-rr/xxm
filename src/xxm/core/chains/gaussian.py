@@ -10,6 +10,7 @@ $J^{-1}h$ and covariance $J^{-1}$. The log normalizer is $\log \int f(x)\, dx$.
 
 from __future__ import annotations
 
+import math
 import typing
 
 import jax
@@ -666,22 +667,136 @@ class GaussianChain(typing.NamedTuple):
 
     `information_vectors[t]` contains the block of $h$ associated with $x_t$.
 
-    A ``GaussianChain`` represents a single chain. Batch dimensions are
-    intentionally not supported; use ``jax.vmap`` over chains instead.
+    Leading batch dimensions index independent chains; time and variable
+    dimensions are intrinsic.
     """
 
-    diagonal_precision_blocks: jax.Array  # (T, N, N)
-    lower_precision_blocks: jax.Array  # (T - 1, N, N)
-    information_vectors: jax.Array  # (T, N)
-    log_constant: jax.Array  # scalar
+    diagonal_precision_blocks: jax.Array  # (*B, T, N, N)
+    lower_precision_blocks: jax.Array  # (*B, T - 1, N, N)
+    information_vectors: jax.Array  # (*B, T, N)
+    log_constant: jax.Array  # (*B,)
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        """Leading independent-chain dimensions."""
+        return self.diagonal_precision_blocks.shape[:-3]
+
+    def forward_backward(self) -> tuple[GaussianChainMarginals, jax.Array]:
+        """Infer each chain independently, preserving the batch prefix."""
+        if self.num_steps < 1:
+            raise ValueError('Gaussian chain inference requires at least one time step')
+        batch = self.batch_shape
+        t, d = self.num_steps, self.variable_dim
+        if (
+            self.diagonal_precision_blocks.shape != batch + (t, d, d)
+            or self.lower_precision_blocks.shape != batch + (t - 1, d, d)
+            or self.information_vectors.shape != batch + (t, d)
+            or self.log_constant.shape != batch
+        ):
+            raise ValueError(
+                'Gaussian chain fields must have aligned batch, time, and variable dimensions'
+            )
+        if not batch:
+            return self._forward_backward_single()
+        n, t, d = math.prod(batch), self.num_steps, self.variable_dim
+        flat = GaussianChain(
+            diagonal_precision_blocks=self.diagonal_precision_blocks.reshape(
+                n, t, d, d
+            ),
+            lower_precision_blocks=self.lower_precision_blocks.reshape(n, t - 1, d, d),
+            information_vectors=self.information_vectors.reshape(n, t, d),
+            log_constant=self.log_constant.reshape(n),
+        )
+        posterior, log_normalizer = jax.vmap(GaussianChain._forward_backward_single)(
+            flat
+        )
+        return GaussianChainMarginals(
+            means=posterior.means.reshape(batch + (t, d)),
+            covariances=posterior.covariances.reshape(batch + (t, d, d)),
+            cross_covariances=posterior.cross_covariances.reshape(
+                batch + (t - 1, d, d)
+            ),
+        ), log_normalizer.reshape(batch)
+
+    def select(self, index) -> typing.Self:
+        """Index only batch dimensions, retaining this object type."""
+        index = _batch.selection(index, len(self.batch_shape))
+        return self.__class__(
+            diagonal_precision_blocks=self.diagonal_precision_blocks[index],
+            lower_precision_blocks=self.lower_precision_blocks[index],
+            information_vectors=self.information_vectors[index],
+            log_constant=self.log_constant[index],
+        )
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        """Insert replicated batch dimensions at `axis`."""
+        shape, axis = _batch.insertion(shape, axis, len(self.batch_shape))
+        return self.__class__(
+            diagonal_precision_blocks=_batch.broadcast_array(
+                self.diagonal_precision_blocks, shape, axis
+            ),
+            lower_precision_blocks=_batch.broadcast_array(
+                self.lower_precision_blocks, shape, axis
+            ),
+            information_vectors=_batch.broadcast_array(
+                self.information_vectors, shape, axis
+            ),
+            log_constant=_batch.broadcast_array(self.log_constant, shape, axis),
+        )
+
+    def squeeze(self, axis=None) -> typing.Self:
+        """Remove singleton batch dimensions."""
+        axes = _batch.squeeze_axes(self.batch_shape, axis)
+        return self.__class__(
+            diagonal_precision_blocks=jnp.squeeze(
+                self.diagonal_precision_blocks, axis=axes
+            ),
+            lower_precision_blocks=jnp.squeeze(self.lower_precision_blocks, axis=axes),
+            information_vectors=jnp.squeeze(self.information_vectors, axis=axes),
+            log_constant=jnp.squeeze(self.log_constant, axis=axes),
+        )
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        """Reorder entries along a batch axis."""
+        axis = _batch.axis_index(axis, len(self.batch_shape))
+        permutation = _batch.permutation_indices(permutation, self.batch_shape[axis])
+        return self.__class__(
+            diagonal_precision_blocks=jnp.take(
+                self.diagonal_precision_blocks, permutation, axis=axis
+            ),
+            lower_precision_blocks=jnp.take(
+                self.lower_precision_blocks, permutation, axis=axis
+            ),
+            information_vectors=jnp.take(
+                self.information_vectors, permutation, axis=axis
+            ),
+            log_constant=jnp.take(self.log_constant, permutation, axis=axis),
+        )
+
+    def move_axis(self, source: int, destination: int) -> typing.Self:
+        """Move one batch axis to another position."""
+        source = _batch.axis_index(source, len(self.batch_shape))
+        destination = _batch.axis_index(destination, len(self.batch_shape))
+        return self.__class__(
+            diagonal_precision_blocks=jnp.moveaxis(
+                self.diagonal_precision_blocks, source, destination
+            ),
+            lower_precision_blocks=jnp.moveaxis(
+                self.lower_precision_blocks, source, destination
+            ),
+            information_vectors=jnp.moveaxis(
+                self.information_vectors, source, destination
+            ),
+            log_constant=jnp.moveaxis(self.log_constant, source, destination),
+        )
 
     @classmethod
     def from_pair_potentials(
         cls,
-        initial_potential: GaussianPotential,  # (N, N)
-        pair_potentials: GaussianPairPotential,  # (T-1, N, N)
+        initial_potential: GaussianPotential,  # batch *B
+        pair_potentials: GaussianPairPotential,  # batch (*B, T - 1)
     ) -> GaussianChain:
-        """Construct a chain from an initial potential and $T-1$ pair potentials."""
+        """Construct chains from potential batches `*B` and `(*B, T - 1)`."""
 
         if pair_potentials.variable_dim != initial_potential.variable_dim:
             raise ValueError(
@@ -689,34 +804,42 @@ class GaussianChain(typing.NamedTuple):
                 f'Got {initial_potential.variable_dim} and {pair_potentials.variable_dim}'
             )
 
-        num_steps = pair_potentials.left_precision.shape[0] + 1
-        latent_dim = initial_potential.precision_blocks.shape[0]
+        batch_shape = initial_potential.batch_shape
+        if (
+            len(pair_potentials.batch_shape) != len(batch_shape) + 1
+            or pair_potentials.batch_shape[:-1] != batch_shape
+        ):
+            raise ValueError(
+                'pair potentials must have batch shape (*B, T - 1) matching the initial potential'
+            )
+        num_steps = pair_potentials.batch_shape[-1] + 1
+        latent_dim = initial_potential.variable_dim
         dtype = initial_potential.precision_blocks.dtype
 
         diagonal = jnp.zeros(
-            (num_steps, latent_dim, latent_dim),
+            batch_shape + (num_steps, latent_dim, latent_dim),
             dtype=dtype,
         )
-        diagonal = diagonal.at[0].add(initial_potential.precision_blocks)
-        diagonal = diagonal.at[:-1].add(pair_potentials.left_precision)
-        diagonal = diagonal.at[1:].add(pair_potentials.right_precision)
+        diagonal = diagonal.at[..., 0, :, :].add(initial_potential.precision_blocks)
+        diagonal = diagonal.at[..., :-1, :, :].add(pair_potentials.left_precision)
+        diagonal = diagonal.at[..., 1:, :, :].add(pair_potentials.right_precision)
 
         information_vectors = jnp.zeros(
-            (num_steps, latent_dim),
+            batch_shape + (num_steps, latent_dim),
             dtype=dtype,
         )
-        information_vectors = information_vectors.at[0].add(
+        information_vectors = information_vectors.at[..., 0, :].add(
             initial_potential.information_vectors
         )
-        information_vectors = information_vectors.at[:-1].add(
+        information_vectors = information_vectors.at[..., :-1, :].add(
             pair_potentials.left_information
         )
-        information_vectors = information_vectors.at[1:].add(
+        information_vectors = information_vectors.at[..., 1:, :].add(
             pair_potentials.right_information
         )
 
         log_constant = initial_potential.log_constant + jnp.sum(
-            pair_potentials.log_constant
+            pair_potentials.log_constant, axis=-1
         )
 
         return cls(
@@ -729,12 +852,12 @@ class GaussianChain(typing.NamedTuple):
     @property
     def num_steps(self) -> int:
         """Number of time steps $T$."""
-        return self.diagonal_precision_blocks.shape[0]
+        return self.diagonal_precision_blocks.shape[-3]
 
     @property
     def variable_dim(self) -> int:
         """Dimension of each continuous state."""
-        return self.diagonal_precision_blocks.shape[1]
+        return self.diagonal_precision_blocks.shape[-1]
 
     def add_local_potential(
         self,
@@ -742,7 +865,7 @@ class GaussianChain(typing.NamedTuple):
     ) -> GaussianChain:
         """Add one unary Gaussian potential at each time step."""
 
-        expected_batch_shape = (self.num_steps,)
+        expected_batch_shape = self.batch_shape + (self.num_steps,)
 
         if potential.batch_shape != expected_batch_shape:
             raise ValueError(
@@ -765,7 +888,7 @@ class GaussianChain(typing.NamedTuple):
             information_vectors=(
                 self.information_vectors + potential.information_vectors
             ),
-            log_constant=(self.log_constant + jnp.sum(potential.log_constant)),
+            log_constant=(self.log_constant + jnp.sum(potential.log_constant, axis=-1)),
         )
 
     def log_potential(
@@ -774,7 +897,7 @@ class GaussianChain(typing.NamedTuple):
     ) -> jax.Array:
         r"""Compute $\log f(x)$ for a latent trajectory."""
 
-        expected_shape = (self.num_steps, self.variable_dim)
+        expected_shape = self.batch_shape + (self.num_steps, self.variable_dim)
 
         if latent.shape != expected_shape:
             raise ValueError(
@@ -782,20 +905,20 @@ class GaussianChain(typing.NamedTuple):
             )
 
         diagonal_terms = jnp.einsum(
-            'ti,tij,tj->',
+            '...ti,...tij,...tj->...',
             latent,
             self.diagonal_precision_blocks,
             latent,
         )
 
         cross_terms = jnp.einsum(
-            'ti,tij,tj->',
-            latent[1:],
+            '...ti,...tij,...tj->...',
+            latent[..., 1:, :],
             self.lower_precision_blocks,
-            latent[:-1],
+            latent[..., :-1, :],
         )
 
-        linear_terms = jnp.sum(latent * self.information_vectors)
+        linear_terms = jnp.sum(latent * self.information_vectors, axis=(-2, -1))
 
         return -0.5 * diagonal_terms - cross_terms + linear_terms + self.log_constant
 
@@ -809,11 +932,11 @@ class GaussianChain(typing.NamedTuple):
         diagonal_blocks = self.diagonal_precision_blocks
         lower_blocks = self.lower_precision_blocks
 
-        time_steps, variable_dim, _ = diagonal_blocks.shape
+        time_steps, variable_dim, _ = diagonal_blocks.shape[-3:]
         dense_size = time_steps * variable_dim
 
         dense = jnp.zeros(
-            (dense_size, dense_size),
+            self.batch_shape + (dense_size, dense_size),
             dtype=diagonal_blocks.dtype,
         )
 
@@ -821,19 +944,23 @@ class GaussianChain(typing.NamedTuple):
             start = t * variable_dim
             stop = (t + 1) * variable_dim
 
-            dense = dense.at[start:stop, start:stop].set(diagonal_blocks[t])
+            dense = dense.at[..., start:stop, start:stop].set(
+                diagonal_blocks[..., t, :, :]
+            )
 
             if t < time_steps - 1:
                 next_start = (t + 1) * variable_dim
                 next_stop = (t + 2) * variable_dim
-                lower_block = lower_blocks[t]
+                lower_block = lower_blocks[..., t, :, :]
 
                 dense = dense.at[
+                    ...,
                     start:stop,
                     next_start:next_stop,
-                ].set(lower_block.T)
+                ].set(jnp.swapaxes(lower_block, -1, -2))
 
                 dense = dense.at[
+                    ...,
                     next_start:next_stop,
                     start:stop,
                 ].set(lower_block)
@@ -887,7 +1014,7 @@ class GaussianChain(typing.NamedTuple):
             terminal_mean=final_carry.mean_offset,
         )
 
-    def forward_backward(
+    def _forward_backward_single(
         self,
     ) -> tuple[GaussianChainMarginals, jax.Array]:
         """Compute moments and log normalizer for a Gaussian chain."""
@@ -1075,7 +1202,8 @@ def _log_det(covariance: jax.Array) -> jax.Array:
                 axis1=-2,
                 axis2=-1,
             )
-        )
+        ),
+        axis=-1,
     )
 
 
@@ -1097,10 +1225,14 @@ def _conditional_log_det(
         cross_covariance,
     )
 
-    conditional_covariance = next_covariance - cross_covariance.T @ solved
+    conditional_covariance = (
+        next_covariance - jnp.swapaxes(cross_covariance, -1, -2) @ solved
+    )
 
     # Remove small numerical asymmetries before Cholesky.
-    conditional_covariance = 0.5 * (conditional_covariance + conditional_covariance.T)
+    conditional_covariance = 0.5 * (
+        conditional_covariance + jnp.swapaxes(conditional_covariance, -1, -2)
+    )
 
     return _log_det(
         conditional_covariance,
@@ -1118,14 +1250,92 @@ class GaussianChainMarginals(typing.NamedTuple):
     * `cross_covariances[t]` stores $\operatorname{Cov}_q(x_t,x_{t+1})$.
     """
 
-    means: jax.Array
-    covariances: jax.Array
-    cross_covariances: jax.Array
+    means: jax.Array  # (*B, T, D)
+    covariances: jax.Array  # (*B, T, D, D)
+    cross_covariances: jax.Array  # (*B, T - 1, D, D)
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        """Leading independent-chain dimensions."""
+        return self.means.shape[:-2]
+
+    @property
+    def num_steps(self) -> int:
+        """Number of time steps."""
+        return self.means.shape[-2]
+
+    @property
+    def variable_dim(self) -> int:
+        """Dimension of each Gaussian variable."""
+        return self.means.shape[-1]
+
+    def entropy(self) -> jax.Array:
+        """Entropy per chain, preserving the batch prefix."""
+        if self.num_steps == 0:
+            return jnp.zeros(self.batch_shape, dtype=self.means.dtype)
+        initial_log_det = _log_det(self.covariances[..., 0, :, :])
+        conditional_log_dets = _conditional_log_det(
+            self.covariances[..., :-1, :, :],
+            self.covariances[..., 1:, :, :],
+            self.cross_covariances,
+        )
+        joint_log_det = initial_log_det + jnp.sum(conditional_log_dets, axis=-1)
+        joint_dim = self.num_steps * self.variable_dim
+        return 0.5 * (joint_dim * (1.0 + jnp.log(2.0 * jnp.pi)) + joint_log_det)
+
+    def select(self, index) -> typing.Self:
+        """Index only batch dimensions, retaining this object type."""
+        index = _batch.selection(index, len(self.batch_shape))
+        return self.__class__(
+            means=self.means[index],
+            covariances=self.covariances[index],
+            cross_covariances=self.cross_covariances[index],
+        )
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        """Insert replicated batch dimensions at `axis`."""
+        shape, axis = _batch.insertion(shape, axis, len(self.batch_shape))
+        return self.__class__(
+            means=_batch.broadcast_array(self.means, shape, axis),
+            covariances=_batch.broadcast_array(self.covariances, shape, axis),
+            cross_covariances=_batch.broadcast_array(
+                self.cross_covariances, shape, axis
+            ),
+        )
+
+    def squeeze(self, axis=None) -> typing.Self:
+        """Remove singleton batch dimensions."""
+        axes = _batch.squeeze_axes(self.batch_shape, axis)
+        return self.__class__(
+            means=jnp.squeeze(self.means, axis=axes),
+            covariances=jnp.squeeze(self.covariances, axis=axes),
+            cross_covariances=jnp.squeeze(self.cross_covariances, axis=axes),
+        )
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        """Reorder entries along a batch axis."""
+        axis = _batch.axis_index(axis, len(self.batch_shape))
+        permutation = _batch.permutation_indices(permutation, self.batch_shape[axis])
+        return self.__class__(
+            means=jnp.take(self.means, permutation, axis=axis),
+            covariances=jnp.take(self.covariances, permutation, axis=axis),
+            cross_covariances=jnp.take(self.cross_covariances, permutation, axis=axis),
+        )
+
+    def move_axis(self, source: int, destination: int) -> typing.Self:
+        """Move one batch axis to another position."""
+        source = _batch.axis_index(source, len(self.batch_shape))
+        destination = _batch.axis_index(destination, len(self.batch_shape))
+        return self.__class__(
+            means=jnp.moveaxis(self.means, source, destination),
+            covariances=jnp.moveaxis(self.covariances, source, destination),
+            cross_covariances=jnp.moveaxis(self.cross_covariances, source, destination),
+        )
 
     def raw_second_moments(self) -> jax.Array:
         r"""Return raw second moments $\mathbb{E}_q[x_t x_t^\top]$."""
         extra = jnp.einsum(
-            'ti,tj->tij',
+            '...ti,...tj->...tij',
             self.means,
             self.means,
         )
@@ -1135,46 +1345,23 @@ class GaussianChainMarginals(typing.NamedTuple):
     def raw_cross_moments(self) -> jax.Array:
         r"""Return raw cross moments $\mathbb{E}_q[x_t x_{t+1}^\top]$ for $T-1$ pairs."""
         extra = jnp.einsum(
-            'ti,tj->tij',
-            self.means[:-1],
-            self.means[1:],
+            '...ti,...tj->...tij',
+            self.means[..., :-1, :],
+            self.means[..., 1:, :],
         )
 
         return self.cross_covariances + extra
-
-    def entropy(self) -> jax.Array:
-        """Entropy of the normalized Gaussian chain distribution."""
-
-        num_steps, variable_dim = self.means.shape
-
-        initial_log_det = _log_det(
-            self.covariances[0],
-        )
-
-        conditional_log_dets = jax.vmap(
-            _conditional_log_det,
-        )(
-            self.covariances[:-1],
-            self.covariances[1:],
-            self.cross_covariances,
-        )
-
-        joint_log_det = initial_log_det + jnp.sum(conditional_log_dets)
-
-        joint_dim = num_steps * variable_dim
-
-        return 0.5 * (joint_dim * (1.0 + jnp.log(2.0 * jnp.pi)) + joint_log_det)
 
     def paired_marginals(self) -> PairedGaussian:
         """Return adjacent marginals $(x_t, x_{t+1})$."""
         return PairedGaussian(
             left=Gaussian(
-                mean=self.means[:-1],
-                covariance=self.covariances[:-1],
+                mean=self.means[..., :-1, :],
+                covariance=self.covariances[..., :-1, :, :],
             ),
             right=Gaussian(
-                mean=self.means[1:],
-                covariance=self.covariances[1:],
+                mean=self.means[..., 1:, :],
+                covariance=self.covariances[..., 1:, :, :],
             ),
             cross_covariance=jnp.swapaxes(
                 self.cross_covariances,
@@ -1188,7 +1375,8 @@ class GaussianChainMarginals(typing.NamedTuple):
         chain: GaussianChain,
     ) -> jax.Array:
         r"""Compute the expected chain log potential $\mathbb{E}_q[\log f(x)]$."""
-        if chain.num_steps != self.means.shape[0]:
+        _batch.require_same(self.batch_shape, chain.batch_shape)
+        if chain.num_steps != self.num_steps:
             raise ValueError('chain and posterior must have the same number of steps')
 
         if chain.variable_dim != self.means.shape[-1]:
@@ -1198,19 +1386,19 @@ class GaussianChainMarginals(typing.NamedTuple):
         cross_moments = self.raw_cross_moments()
 
         unary_quadratic = jnp.einsum(
-            'tij,tij->',
+            '...tij,...tij->...',
             chain.diagonal_precision_blocks,
             second_moments,
         )
 
         pair_quadratic = jnp.einsum(
-            'tij,tij->',
+            '...tij,...tji->...',
             chain.lower_precision_blocks,
             cross_moments,
         )
 
         linear = jnp.einsum(
-            'ti,ti->',
+            '...ti,...ti->...',
             chain.information_vectors,
             self.means,
         )

@@ -36,10 +36,10 @@ def lagged_observations(
 
     return jnp.stack(
         [
-            observations[num_lags - i - 1 : observations.shape[0] - i - 1]
+            observations[..., num_lags - i - 1 : observations.shape[-2] - i - 1, :]
             for i in range(num_lags)
         ],
-        axis=1,
+        axis=-2,
     )
 
 
@@ -178,10 +178,12 @@ class AREmissions(
         )  # (T-L, L, N)
 
         values = jnp.broadcast_to(
-            predictors[:, None, ...],
-            (predictors.shape[0], self.num_states) + predictors.shape[1:],
+            predictors[..., None, :, :],
+            predictors.shape[:-2] + (self.num_states,) + predictors.shape[-2:],
         )
-        return self.dist.broadcast(predictors.shape[0]).conditional(values)  # (T-L, K)
+        return self.dist.broadcast(predictors.shape[:-2]).conditional(
+            values
+        )  # (T-L, K)
 
     def log_likelihoods(
         self,
@@ -193,7 +195,7 @@ class AREmissions(
         )
 
         values = jnp.broadcast_to(
-            observations[self.num_lags :, None, :],
+            observations[..., self.num_lags :, None, :],
             conditional.batch_shape + (self.output_dim,),
         )
         return conditional.log_prob(values)
@@ -220,7 +222,7 @@ class AREmissions(
             observations,
         )  # (T-L, L, N)
 
-        current = observations[self.num_lags :]  # (T-L, N)
+        current = observations[..., self.num_lags :, :]  # (T-L, N)
 
         weights = posterior.state_probs  # (T-L, K)
 

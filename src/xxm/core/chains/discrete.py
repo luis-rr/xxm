@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import typing
 
 import jax
@@ -81,23 +82,23 @@ class DiscreteChain(typing.NamedTuple):
     - `transition_probs[t,i,j]` stores $P_t(i,j) = p(z_{t+1}=j \mid z_t=i)$
     - `state_log_potentials[t,k]` stores $\ell_t(k) = \log \phi_t(z_t=k)$
 
-    Represents a single chain. Batch dimensions not supported; use `jax.vmap` for batching.
-    Transitions represented explicitly with shape $(T-1, K, K)$.
+    Leading batch dimensions index independent chains. Transitions have shape
+    `(*B, T - 1, K, K)`.
     """
 
-    initial_probs: jax.Array  # (K,)
-    transition_probs: jax.Array  # (T - 1, K, K)
-    state_log_potentials: jax.Array  # (T, K)
+    initial_probs: jax.Array  # (*B, K)
+    transition_probs: jax.Array  # (*B, T - 1, K, K)
+    state_log_potentials: jax.Array  # (*B, T, K)
 
     @property
     def num_states(self) -> int:
         """Number of discrete states $K$."""
-        return self.initial_probs.shape[0]
+        return self.initial_probs.shape[-1]
 
     @property
     def num_steps(self) -> int:
         """Number of time steps $T$."""
-        return self.state_log_potentials.shape[0]
+        return self.state_log_potentials.shape[-2]
 
     @classmethod
     def from_markov_prior(
@@ -107,39 +108,121 @@ class DiscreteChain(typing.NamedTuple):
     ) -> typing.Self:
         """Construct chain from Markov model with uniform potentials."""
 
-        if transition_probs.ndim != 3:
-            raise ValueError('transition_probs must have shape (T - 1, K, K)')
-
-        num_steps = transition_probs.shape[0] + 1
-        num_states = initial_probs.shape[0]
-
-        if transition_probs.shape[1:] != (num_states, num_states):
+        if initial_probs.ndim < 1 or transition_probs.ndim < 3:
             raise ValueError(
-                'transition_probs must have shape (T - 1, K, K), with K matching initial_probs'
+                'initial and transition probabilities need intrinsic state/time axes'
+            )
+        batch = initial_probs.shape[:-1]
+        num_steps = transition_probs.shape[-3] + 1
+        num_states = initial_probs.shape[-1]
+        if transition_probs.shape != batch + (num_steps - 1, num_states, num_states):
+            raise ValueError(
+                'transition_probs must have shape (*B, T - 1, K, K) matching initial_probs'
             )
 
         return cls(
             initial_probs=initial_probs,
             transition_probs=transition_probs,
             state_log_potentials=jnp.zeros(
-                (num_steps, num_states),
+                batch + (num_steps, num_states),
                 dtype=initial_probs.dtype,
             ),
         )
 
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        """Leading independent-chain dimensions."""
+        return self.initial_probs.shape[:-1]
+
     def forward_backward(self) -> tuple[DiscreteChainMarginals, jax.Array]:
-        """Run forward-backward inference and return marginals and log normalizer."""
+        """Infer each chain independently, preserving the batch prefix."""
+        if self.num_steps < 1:
+            raise ValueError('Discrete chain inference requires at least one time step')
+        batch = self.batch_shape
+        t, k = self.num_steps, self.num_states
+        if self.transition_probs.shape != batch + (
+            t - 1,
+            k,
+            k,
+        ) or self.state_log_potentials.shape != batch + (t, k):
+            raise ValueError(
+                'Discrete chain fields must have aligned batch, time, and state dimensions'
+            )
+        if not batch:
+            return _forward_backward(self).compute_marginals(self)
+        n, t, k = math.prod(batch), self.num_steps, self.num_states
+        flat = DiscreteChain(
+            initial_probs=self.initial_probs.reshape(n, k),
+            transition_probs=self.transition_probs.reshape(n, t - 1, k, k),
+            state_log_potentials=self.state_log_potentials.reshape(n, t, k),
+        )
+        posterior, log_normalizer = jax.vmap(
+            lambda chain: _forward_backward(chain).compute_marginals(chain)
+        )(flat)
+        return DiscreteChainMarginals(
+            state_probs=posterior.state_probs.reshape(batch + (t, k)),
+            pair_probs=posterior.pair_probs.reshape(batch + (t - 1, k, k)),
+        ), log_normalizer.reshape(batch)
 
-        messages = _forward_backward(self)
+    def select(self, index) -> typing.Self:
+        """Index only batch dimensions, retaining this object type."""
+        index = _batch.selection(index, len(self.batch_shape))
+        return self.__class__(
+            initial_probs=self.initial_probs[index],
+            transition_probs=self.transition_probs[index],
+            state_log_potentials=self.state_log_potentials[index],
+        )
 
-        return messages.compute_marginals(self)
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        """Insert replicated batch dimensions at `axis`."""
+        shape, axis = _batch.insertion(shape, axis, len(self.batch_shape))
+        return self.__class__(
+            initial_probs=_batch.broadcast_array(self.initial_probs, shape, axis),
+            transition_probs=_batch.broadcast_array(self.transition_probs, shape, axis),
+            state_log_potentials=_batch.broadcast_array(
+                self.state_log_potentials, shape, axis
+            ),
+        )
+
+    def squeeze(self, axis=None) -> typing.Self:
+        """Remove singleton batch dimensions."""
+        axes = _batch.squeeze_axes(self.batch_shape, axis)
+        return self.__class__(
+            initial_probs=jnp.squeeze(self.initial_probs, axis=axes),
+            transition_probs=jnp.squeeze(self.transition_probs, axis=axes),
+            state_log_potentials=jnp.squeeze(self.state_log_potentials, axis=axes),
+        )
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        """Reorder entries along a batch axis."""
+        axis = _batch.axis_index(axis, len(self.batch_shape))
+        permutation = _batch.permutation_indices(permutation, self.batch_shape[axis])
+        return self.__class__(
+            initial_probs=jnp.take(self.initial_probs, permutation, axis=axis),
+            transition_probs=jnp.take(self.transition_probs, permutation, axis=axis),
+            state_log_potentials=jnp.take(
+                self.state_log_potentials, permutation, axis=axis
+            ),
+        )
+
+    def move_axis(self, source: int, destination: int) -> typing.Self:
+        """Move one batch axis to another position."""
+        source = _batch.axis_index(source, len(self.batch_shape))
+        destination = _batch.axis_index(destination, len(self.batch_shape))
+        return self.__class__(
+            initial_probs=jnp.moveaxis(self.initial_probs, source, destination),
+            transition_probs=jnp.moveaxis(self.transition_probs, source, destination),
+            state_log_potentials=jnp.moveaxis(
+                self.state_log_potentials, source, destination
+            ),
+        )
 
     def add_local_potential(
         self,
         potential: DiscretePotential,
     ) -> DiscreteChain:
         """Add unary log potentials to each state."""
-        if potential.batch_shape != (self.num_steps,):
+        if potential.batch_shape != self.batch_shape + (self.num_steps,):
             raise ValueError(
                 f'Potential must have shape (T, K). Got shape {potential.batch_shape}'
             )
@@ -164,17 +247,74 @@ class DiscreteChainMarginals(typing.NamedTuple):
     - `state_probs[t,k]` stores $\gamma_t(k) = q(z_t=k)$
     - `pair_probs[t,i,j]` stores $\xi_t(i,j) = q(z_t=i,z_{t+1}=j)$
 
-    Represents marginals of one chain. Apply `jax.vmap` to introduce batch dimensions.
+    Leading batch dimensions index independent chains.
     """
 
-    state_probs: jax.Array  # (T, K)
-    pair_probs: jax.Array  # (T - 1, K, K)
+    state_probs: jax.Array  # (*B, T, K)
+    pair_probs: jax.Array  # (*B, T - 1, K, K)
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        """Leading independent-chain dimensions."""
+        return self.state_probs.shape[:-2]
+
+    @property
+    def num_steps(self) -> int:
+        """Number of time steps."""
+        return self.state_probs.shape[-2]
+
+    @property
+    def num_states(self) -> int:
+        """Number of discrete states."""
+        return self.state_probs.shape[-1]
+
+    def select(self, index) -> typing.Self:
+        """Index only batch dimensions, retaining this object type."""
+        index = _batch.selection(index, len(self.batch_shape))
+        return self.__class__(
+            state_probs=self.state_probs[index],
+            pair_probs=self.pair_probs[index],
+        )
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        """Insert replicated batch dimensions at `axis`."""
+        shape, axis = _batch.insertion(shape, axis, len(self.batch_shape))
+        return self.__class__(
+            state_probs=_batch.broadcast_array(self.state_probs, shape, axis),
+            pair_probs=_batch.broadcast_array(self.pair_probs, shape, axis),
+        )
+
+    def squeeze(self, axis=None) -> typing.Self:
+        """Remove singleton batch dimensions."""
+        axes = _batch.squeeze_axes(self.batch_shape, axis)
+        return self.__class__(
+            state_probs=jnp.squeeze(self.state_probs, axis=axes),
+            pair_probs=jnp.squeeze(self.pair_probs, axis=axes),
+        )
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        """Reorder entries along a batch axis."""
+        axis = _batch.axis_index(axis, len(self.batch_shape))
+        permutation = _batch.permutation_indices(permutation, self.batch_shape[axis])
+        return self.__class__(
+            state_probs=jnp.take(self.state_probs, permutation, axis=axis),
+            pair_probs=jnp.take(self.pair_probs, permutation, axis=axis),
+        )
+
+    def move_axis(self, source: int, destination: int) -> typing.Self:
+        """Move one batch axis to another position."""
+        source = _batch.axis_index(source, len(self.batch_shape))
+        destination = _batch.axis_index(destination, len(self.batch_shape))
+        return self.__class__(
+            state_probs=jnp.moveaxis(self.state_probs, source, destination),
+            pair_probs=jnp.moveaxis(self.pair_probs, source, destination),
+        )
 
     def incoming_state_probs(
         self,
     ) -> jax.Array:
         """State probabilities associated with incoming transitions."""
-        return self.state_probs[1:]
+        return self.state_probs[..., 1:, :]
 
     def entropy(self) -> jax.Array:
         """
@@ -183,23 +323,26 @@ class DiscreteChainMarginals(typing.NamedTuple):
 
         initial_entropy = -jnp.sum(
             jsp.special.xlogy(
-                self.state_probs[0],
-                self.state_probs[0],
-            )
+                self.state_probs[..., 0, :],
+                self.state_probs[..., 0, :],
+            ),
+            axis=-1,
         )
 
         pair_entropy = -jnp.sum(
             jsp.special.xlogy(
                 self.pair_probs,
                 self.pair_probs,
-            )
+            ),
+            axis=(-3, -2, -1),
         )
 
         conditioning_entropy = jnp.sum(
             jsp.special.xlogy(
-                self.state_probs[:-1],
-                self.state_probs[:-1],
-            )
+                self.state_probs[..., :-1, :],
+                self.state_probs[..., :-1, :],
+            ),
+            axis=(-2, -1),
         )
 
         return initial_entropy + pair_entropy + conditioning_entropy
@@ -210,35 +353,43 @@ class DiscreteChainMarginals(typing.NamedTuple):
     ) -> jax.Array:
         r"""Expected chain log potential $\mathbb{E}_q[\log f(z)]$."""
 
+        _batch.require_same(self.batch_shape, chain.batch_shape)
+        if self.state_probs.shape != chain.state_log_potentials.shape:
+            raise ValueError('chain and posterior time/state dimensions must match')
         expected_initial = jnp.sum(
             jsp.special.xlogy(
-                self.state_probs[0],
+                self.state_probs[..., 0, :],
                 chain.initial_probs,
-            )
+            ),
+            axis=-1,
         )
 
         expected_transitions = jnp.sum(
             jsp.special.xlogy(
                 self.pair_probs,
                 chain.transition_probs,
-            )
+            ),
+            axis=(-3, -2, -1),
         )
 
-        expected_local = jnp.sum(self.state_probs * chain.state_log_potentials)
+        expected_local = jnp.sum(
+            self.state_probs * chain.state_log_potentials, axis=(-2, -1)
+        )
 
         return expected_initial + expected_transitions + expected_local
 
-    def permute(self, permutation: jax.Array) -> typing.Self:
+    def permute_states(self, permutation: jax.Array) -> typing.Self:
         """Relabel discrete states by permutation."""
+        permutation = _batch.permutation_indices(permutation, self.num_states)
         return self._replace(
-            state_probs=self.state_probs[:, permutation],
-            pair_probs=self.pair_probs[:, permutation, :][:, :, permutation],
+            state_probs=self.state_probs[..., permutation],
+            pair_probs=self.pair_probs[..., permutation, :][..., permutation],
         )
 
 
 class _DiscreteChainMessages(typing.NamedTuple):
     """
-    Normalized forward messages and scaled backward messages for one chain.
+    Normalized forward messages and scaled backward messages with optional leading batch dimensions.
 
     - `forward_messages[t,k]` are normalized probability-space messages
     - `backward_messages[t,k]` use forward scaling factors and terminate at
@@ -246,9 +397,9 @@ class _DiscreteChainMessages(typing.NamedTuple):
     - `log_scaling_factors[t]` are per-step log normalization constants
     """
 
-    forward_messages: jax.Array  # (T, K)
-    backward_messages: jax.Array  # (T, K)
-    log_scaling_factors: jax.Array  # (T,)
+    forward_messages: jax.Array  # (*B, T, K)
+    backward_messages: jax.Array  # (*B, T, K)
+    log_scaling_factors: jax.Array  # (*B, T,)
 
     def compute_marginals(
         self,
@@ -270,12 +421,12 @@ class _DiscreteChainMessages(typing.NamedTuple):
         Compute state marginals $\gamma_t(k)$.
         """
         if (
-            self.forward_messages.ndim != 2
-            or self.backward_messages.ndim != 2
+            self.forward_messages.ndim < 2
+            or self.backward_messages.ndim < 2
             or self.forward_messages.shape != self.backward_messages.shape
         ):
             raise ValueError(
-                'forward_messages and backward_messages must both have shape (T, K) and match.'
+                'forward_messages and backward_messages must both have shape (*B, T, K) and match.'
             )
 
         unnormalized_state_marginals = self.forward_messages * self.backward_messages
@@ -285,7 +436,7 @@ class _DiscreteChainMessages(typing.NamedTuple):
         state_marginal_normalizers = jnp.maximum(
             jnp.sum(
                 unnormalized_state_marginals,
-                axis=1,
+                axis=-1,
                 keepdims=True,
             ),
             min_normalizer,
@@ -301,59 +452,30 @@ class _DiscreteChainMessages(typing.NamedTuple):
         Compute adjacent-state marginals $\xi_t(i,j)$.
         """
         if (
-            self.forward_messages.ndim != 2
-            or self.backward_messages.ndim != 2
+            self.forward_messages.ndim < 2
+            or self.backward_messages.ndim < 2
             or self.forward_messages.shape != self.backward_messages.shape
         ):
             raise ValueError(
-                'forward_messages and backward_messages must both have shape (T, K) and match.'
+                'forward_messages and backward_messages must both have shape (*B, T, K) and match.'
             )
 
-        t = chain.num_steps
-        k = chain.num_states
-
-        if t == 1:
-            return jnp.zeros(
-                (0, k, k),
-                dtype=self.forward_messages.dtype,
-            )
-
-        def pair_step(
-            current_forward_messages: jax.Array,
-            transition_probs: jax.Array,
-            next_backward_messages: jax.Array,
-            next_state_log_potential: jax.Array,
-            next_log_normalizer: jax.Array,
-        ) -> jax.Array:
-            observation_offset = jnp.max(next_state_log_potential)
-
-            next_observation_weights = jnp.exp(
-                next_state_log_potential - observation_offset
-            )
-
-            future_weights = next_observation_weights * next_backward_messages
-
-            unnormalized_pair_probs = (
-                current_forward_messages[:, None]
-                * transition_probs
-                * future_weights[None, :]
-            )
-
-            normalization_scale = jnp.exp(observation_offset - next_log_normalizer)
-
-            return unnormalized_pair_probs * normalization_scale
-
-        return jax.vmap(pair_step)(
-            self.forward_messages[:-1],
-            chain.transition_probs,
-            self.backward_messages[1:],
-            chain.state_log_potentials[1:],
-            self.log_scaling_factors[1:],
+        if self.forward_messages.shape != chain.state_log_potentials.shape:
+            raise ValueError('message and chain shapes must match')
+        next_potentials = chain.state_log_potentials[..., 1:, :]
+        offset = jnp.max(next_potentials, axis=-1, keepdims=True)
+        future = jnp.exp(next_potentials - offset) * self.backward_messages[..., 1:, :]
+        scale = jnp.exp(offset[..., 0] - self.log_scaling_factors[..., 1:])
+        return (
+            self.forward_messages[..., :-1, :, None]
+            * chain.transition_probs
+            * future[..., None, :]
+            * scale[..., None, None]
         )
 
     def compute_log_normalizer(self) -> jax.Array:
         """Compute the chain log normalizer from forward scaling factors."""
-        return jnp.sum(self.log_scaling_factors)
+        return jnp.sum(self.log_scaling_factors, axis=-1)
 
 
 def _forward_pass(

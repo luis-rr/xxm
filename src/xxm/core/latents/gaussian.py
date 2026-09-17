@@ -32,14 +32,14 @@ class GaussianInitial(typing.NamedTuple):
         )
 
         covariance = gaussian_fit.add_covariance_floor(
-            posterior.covariances[0],
+            posterior.covariances[..., 0, :, :],
             reference_covariance=reference.covariance,
             covariance_floor=covariance_floor,
         )
 
         return self._replace(
             dist=Gaussian(
-                mean=posterior.means[0],
+                mean=posterior.means[..., 0, :],
                 covariance=covariance,
             )
         )

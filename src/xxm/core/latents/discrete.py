@@ -38,7 +38,7 @@ class CategoricalInitial(typing.NamedTuple):
         r"""Fit initial distribution from posterior marginals $\gamma_0(k)$."""
         return self._replace(
             dist=categorical_fit.from_counts(
-                posterior.state_probs[0],
+                posterior.state_probs[..., 0, :],
                 pseudocount=pseudocount,
             )
         )
@@ -108,7 +108,7 @@ class CategoricalTransitions(typing.NamedTuple):
         pseudocount=categorical_fit.DEFAULT_PSEUDOCOUNT,
     ) -> typing.Self:
         r"""Fit transition probabilities from posterior pair marginals $\xi_t(i,j)$."""
-        expected_transitions = posterior.pair_probs.sum(axis=0)  # (K, K)
+        expected_transitions = posterior.pair_probs.sum(axis=-3)  # (*B, K, K)
 
         return self._replace(
             dist=categorical_fit.from_counts(

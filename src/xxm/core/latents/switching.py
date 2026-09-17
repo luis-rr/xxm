@@ -46,11 +46,11 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         Fit dynamics from continuous pair moments weighted by incoming state marginals.
 
         The pair $(x_{t-1},x_t)$ receives weight $q(z_t=k)$, taken from
-        `discrete.state_probs[1:]`. States with insufficient posterior mass retain
+        `discrete.state_probs[..., 1:, :]`. States with insufficient posterior mass retain
         their current parameters.
         """
 
-        weights = discrete.state_probs[1:]  # (T - 1, K)
+        weights = discrete.state_probs[..., 1:, :]  # (T - 1, K)
 
         paired = gaussian_fit.paired_from_moment_match(
             continuous.paired_marginals(),

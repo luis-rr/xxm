@@ -31,7 +31,7 @@ class Posterior(typing.NamedTuple):
     def permute(self, permutation: jax.Array) -> typing.Self:
         r"""Relabel discrete states $z$ by permutation."""
         return self._replace(
-            discrete=self.discrete.permute(permutation),
+            discrete=self.discrete.permute_states(permutation),
         )
 
 

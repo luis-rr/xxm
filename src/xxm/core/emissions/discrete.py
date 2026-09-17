@@ -83,7 +83,7 @@ class GaussianEmissions(typing.NamedTuple):
 
     def log_likelihoods(self, observations: jax.Array) -> jax.Array:
         r"""Evaluate log probabilities $\log p(y_t|z_t=k)$ for all states and time."""
-        return jnp.swapaxes(self.dist.log_prob_broadcast(observations), 0, 1)
+        return jnp.moveaxis(self.dist.log_prob_broadcast(observations), 0, -1)
 
     def compute_potential(self, observations: jax.Array) -> DiscretePotential:
         """Construct one state potential from each observation log likelihood."""
@@ -143,7 +143,7 @@ class PoissonEmissions(typing.NamedTuple):
 
     def log_likelihoods(self, observations: jax.Array) -> jax.Array:
         r"""Evaluate $\log p(y_t\mid z_t=k)$ for all states and time."""
-        return jnp.swapaxes(self.dist.log_prob_broadcast(observations), 0, 1)
+        return jnp.moveaxis(self.dist.log_prob_broadcast(observations), 0, -1)
 
     def compute_potential(self, observations: jax.Array) -> DiscretePotential:
         """Construct one state potential from each observation log likelihood."""
