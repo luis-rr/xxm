@@ -116,7 +116,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
         initial_latent: jax.Array,
         num_steps: int,
     ) -> jax.Array:
-        """Sample latent trajectory conditional on initial state."""
+        """Sample latent trajectories with shape `(*B, T, D)`."""
 
         def step(carry, _):
             latent, key = carry
@@ -136,12 +136,18 @@ class GaussianLinearDynamics(typing.NamedTuple):
             length=num_steps - 1,
         )
 
+        subsequent_latents = jnp.moveaxis(
+            subsequent_latents,
+            0,
+            -2,
+        )
+
         return jnp.concatenate(
             [
-                initial_latent[None],
+                initial_latent[..., None, :],
                 subsequent_latents,
             ],
-            axis=0,
+            axis=-2,
         )
 
     def align(self, alignment: Affine) -> typing.Self:

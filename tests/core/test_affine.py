@@ -147,3 +147,32 @@ def test_affine_structured_input_is_jittable():
         eager,
         atol=ATOL,
     )
+
+
+def test_affine_pseudoinverse_supports_batches():
+    affine = Affine(
+        coefficients=jnp.array(
+            [
+                [[1.0], [2.0]],
+                [[2.0], [-1.0]],
+            ]
+        ),
+        bias=jnp.array(
+            [
+                [0.5, -0.5],
+                [1.0, 0.25],
+            ]
+        ),
+    )
+
+    values = jnp.array(
+        [
+            [[-1.0], [0.0], [1.0]],
+            [[-2.0], [0.5], [2.0]],
+        ]
+    )
+
+    recovered = affine.pseudoinverse().apply(affine.apply(values))
+
+    assert recovered.shape == values.shape
+    assert jnp.allclose(recovered, values)

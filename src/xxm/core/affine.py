@@ -253,9 +253,15 @@ class Affine(typing.NamedTuple):
 
         coefficients = jnp.linalg.pinv(self.coefficients)
 
+        bias = -jnp.einsum(
+            '...io,...o->...i',
+            coefficients,
+            self.bias,
+        )
+
         return self.__class__(
             coefficients=coefficients,
-            bias=-coefficients @ self.bias,
+            bias=bias,
         )
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:

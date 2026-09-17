@@ -127,7 +127,7 @@ class GaussianPotential(typing.NamedTuple):
     def from_linear_likelihood(
         cls,
         model: LinearGaussian,
-        observations: jax.Array,  # (T, N)
+        observations: jax.Array,
     ) -> GaussianPotential:
         """Construct the potential over inputs induced by a linear Gaussian likelihood."""
         if model.input_ndim != 1:
@@ -136,40 +136,84 @@ class GaussianPotential(typing.NamedTuple):
                 f'got {model.input_shape}'
             )
 
-        coefficients = model.affine.coefficients  # (N, D)
-        residuals = observations - model.affine.bias  # (T, N)
+        if observations.shape[-1] != model.output_dim:
+            raise ValueError(
+                'observations must have trailing output dimension '
+                f'{model.output_dim}; got {observations.shape}'
+            )
 
-        cholesky = jnp.linalg.cholesky(
-            model.covariance,
-        )  # (N, N)
+        batch_shape = model.batch_shape
+        query_shape = observations.shape[:-1]
+
+        coefficients = model.affine.coefficients_flat
+
+        residuals = observations - _batch.align_array(
+            model.affine.bias,
+            batch_shape,
+            query_shape,
+        )
+
+        cholesky = jnp.linalg.cholesky(model.covariance)
 
         whitened_coefficients = jsp_linalg.solve_triangular(
             cholesky,
             coefficients,
             lower=True,
-        )  # (N, D)
+        )
+
+        precision_block = jnp.einsum(
+            '...nd,...ne->...de',
+            whitened_coefficients,
+            whitened_coefficients,
+        )
 
         whitened_residuals = jsp_linalg.solve_triangular(
-            cholesky,
-            residuals.T,
+            _batch.align_array(
+                cholesky,
+                batch_shape,
+                query_shape,
+            ),
+            residuals[..., None],
             lower=True,
-        ).T  # (T, N)
+        )[..., 0]
 
-        precision_block = whitened_coefficients.T @ whitened_coefficients  # (D, D)
+        information_vectors = jnp.einsum(
+            '...nd,...n->...d',
+            _batch.align_array(
+                whitened_coefficients,
+                batch_shape,
+                query_shape,
+            ),
+            whitened_residuals,
+        )
 
-        information_vectors = whitened_residuals @ whitened_coefficients  # (T, D)
+        quadratic_terms = jnp.sum(
+            whitened_residuals**2,
+            axis=-1,
+        )
 
-        quadratic_terms = jnp.sum(whitened_residuals**2, axis=-1)  # (T,)
+        log_det_covariance = 2.0 * jnp.sum(
+            jnp.log(
+                jnp.diagonal(
+                    cholesky,
+                    axis1=-2,
+                    axis2=-1,
+                )
+            ),
+            axis=-1,
+        )
 
-        log_det_covariance = _log_det_from_cholesky(cholesky)  # ()
-
-        num_steps = observations.shape[0]
-        variable_dim = model.input_size
+        log_det_covariance = _batch.align_array(
+            log_det_covariance,
+            batch_shape,
+            query_shape,
+        )
 
         return cls(
-            precision_blocks=jnp.broadcast_to(
+            precision_blocks=_batch.align_array(
                 precision_block,
-                (num_steps, variable_dim, variable_dim),
+                batch_shape,
+                query_shape,
             ),
             information_vectors=information_vectors,
             log_constant=-0.5
