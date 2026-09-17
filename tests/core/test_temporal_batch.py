@@ -8,7 +8,7 @@ import pytest
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
-from xxm.core.latents.hermite import HermiteDrift
+from xxm.core.latents.hermite import HermiteSpline
 from xxm.core.latents.random_walk import GatedGaussianRandomWalk, GaussianRandomWalk
 
 
@@ -64,17 +64,17 @@ def test_gated_random_walk_aligns_gates_and_replicates(steps):
     active = initial._replace(mean=initial.mean + 10.0)
     inactive = initial._replace(mean=initial.mean - 10.0)
     rw = GatedGaussianRandomWalk(initial, active, inactive)
-    gates = jnp.arange(3 * max(steps - 1, 0)).reshape(3, max(steps - 1, 0)) % 2
+    gates = jnp.arange(2 * max(steps - 1, 0)).reshape(2, max(steps - 1, 0)) % 3
     key = jax.random.key(20)
     actual = jax.jit(lambda k, gates: rw.sample(k, steps, gates))(key, gates)
-    assert rw.batch_shape == (2, 3)
-    assert rw.num_gates == 2
-    assert rw.active_transition_dist().batch_shape == rw.batch_shape
+    assert rw.batch_shape == (2,)
+    assert rw.num_gates == 3
+    assert rw.active_transition_dist().batch_shape == rw.batch_shape + (rw.num_gates,)
     assert actual.shape == (2, 3, steps, 1)
     if steps:
         ki, ke = jax.random.split(key)
         first = initial.sample(ki)[..., None, :]
-        mask = gates[None] == jnp.arange(2)[:, None, None]
+        mask = gates[..., None, :] == jnp.arange(3)[None, :, None]
         increments = Gaussian(
             jnp.where(
                 mask[..., None], active.mean[..., None, :], inactive.mean[..., None, :]
@@ -88,14 +88,15 @@ def test_gated_random_walk_aligns_gates_and_replicates(steps):
             jnp.concatenate((first, first + jnp.cumsum(increments, axis=-2)), axis=-2),
         )
     np.testing.assert_array_equal(
-        rw.permute_gates(jnp.array([1, 0])).initial.mean, initial.mean[::-1]
+        rw.permute_gates(jnp.array([2, 0, 1])).initial.mean,
+        initial.mean[..., [2, 0, 1], :],
     )
     with pytest.raises(ValueError, match='gates must have shape'):
         rw.sample(key, steps, gates.T[..., None])
 
 
 def hermite():
-    return HermiteDrift.from_function_prior(
+    return HermiteSpline.from_function_prior(
         num_motifs=2, num_knots=3, alpha_amp=1.0, alpha_smooth=1.0, batch_shape=(2, 3)
     )
 
@@ -108,13 +109,20 @@ def test_temporal_common_batch_api(process):
         'gated': lambda: GatedGaussianRandomWalk(g, g, g),
         'hermite': hermite,
     }[process]()
-    assert obj.select((1, 2)).batch_shape == ()
-    assert obj.broadcast((1, 4), axis=1).batch_shape == (2, 1, 4, 3)
-    assert obj.broadcast(1, axis=1).squeeze(1).batch_shape == (2, 3)
-    assert obj.move_axis(0, 1).batch_shape == (3, 2)
-    assert obj.permute(jnp.array([2, 0, 1]), axis=1).batch_shape == (2, 3)
+    if process == 'gated':
+        assert obj.select(1).batch_shape == ()
+        assert obj.broadcast((1, 4), axis=1).batch_shape == (2, 1, 4)
+        assert obj.broadcast(1, axis=1).squeeze(1).batch_shape == (2,)
+        assert obj.move_axis(0, 0).batch_shape == (2,)
+        assert obj.permute(jnp.array([1, 0]), axis=0).batch_shape == (2,)
+    else:
+        assert obj.select((1, 2)).batch_shape == ()
+        assert obj.broadcast((1, 4), axis=1).batch_shape == (2, 1, 4, 3)
+        assert obj.broadcast(1, axis=1).squeeze(1).batch_shape == (2, 3)
+        assert obj.move_axis(0, 1).batch_shape == (3, 2)
+        assert obj.permute(jnp.array([2, 0, 1]), axis=1).batch_shape == (2, 3)
     with pytest.raises(IndexError):
-        obj.select((0, 0, 0))
+        obj.select((0, 0, 0) if process != 'gated' else (0, 0))
     with pytest.raises(IndexError):
         obj.select(None)
 

@@ -224,7 +224,9 @@ class DiscreteChain(typing.NamedTuple):
         """Add unary log potentials to each state."""
         if potential.batch_shape != self.batch_shape + (self.num_steps,):
             raise ValueError(
-                f'Potential must have shape (T, K). Got shape {potential.batch_shape}'
+                'Potential must have batch shape '
+                f'{self.batch_shape + (self.num_steps,)}; '
+                f'got {potential.batch_shape}'
             )
 
         if potential.num_states != self.num_states:
