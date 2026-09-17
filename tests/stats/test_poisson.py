@@ -101,7 +101,7 @@ def test_fit_weighted_matches_weighted_sample_means():
             [0.0, 1.0],
             [0.0, 1.0],
         ]
-    )
+    ).T
 
     fit = poisson_fit.from_samples_weighted(observations, weights)
 
@@ -115,7 +115,7 @@ def test_fit_weighted_matches_weighted_sample_means():
 def test_fit_weighted_keeps_zero_rates_finite():
     fit = poisson_fit.from_samples_weighted(
         values=jnp.zeros((2, 1)),
-        weights=jnp.ones((2, 1)),
+        weights=jnp.ones((1, 2)),
     )
 
     assert np.isfinite(np.asarray(fit.log_rates)).all()
@@ -170,7 +170,7 @@ def test_fit_weighted_linear_recovers_state_specific_two_point_mles():
             [0.0, 1.0],
             [0.0, 1.0],
         ]
-    )
+    ).T
 
     fit = poisson_fit.linear_from_samples_weighted(
         inputs=inputs,
@@ -199,7 +199,7 @@ def test_public_routines_are_jittable():
     covariances = jnp.array([[[0.1]], [[0.1]]])
     coefficients = jnp.zeros((1, 1))
     bias = jnp.zeros(1)
-    weights = jnp.ones((2, 1))
+    weights = jnp.ones((1, 2))
     log_rates = jnp.zeros((1, 1))
 
     @jax.jit
@@ -263,7 +263,7 @@ def test_public_routines_are_jittable():
             [0.0, 1.0],
             [0.0, 1.0],
         ]
-    )
+    ).T
 
     @jax.jit
     def run_deterministic_fits(inputs, outputs, weights):
@@ -292,12 +292,23 @@ def test_public_routines_are_jittable():
         state_weights,
     )
     jax.block_until_ready(deterministic_result)
-
     assert marginal_result[0].shape == (1, 2)
     assert marginal_result[2].shape == (2,)  # Preserve observation axes.
     assert marginal_result[-1].affine.coefficients.shape == (1, 1)
     assert deterministic_result[0].affine.coefficients.shape == (1, 1)
     assert deterministic_result[1].affine.coefficients.shape == (2, 1, 1)
+
+
+def test_weighted_poisson_fit_supports_multi_axis_batches():
+    values = jnp.arange(15.0).reshape(5, 3)
+    weights = jnp.arange(30.0).reshape(2, 3, 5) + 1.0
+
+    fit = poisson_fit.from_samples_weighted(values, weights)
+
+    assert fit.batch_shape == (2, 3)
+    for index in np.ndindex((2, 3)):
+        expected = poisson_fit.from_samples_weighted(values, weights[index])
+        np.testing.assert_allclose(fit.log_rates[index], expected.log_rates, atol=ATOL)
 
 
 def test_fit_linear_preserves_structured_input_shape():

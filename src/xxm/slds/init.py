@@ -66,7 +66,7 @@ def _init_state_conditioned_initial_from_latents(
     """Estimate state-conditioned latent Gaussians from weighted samples."""
     gaussian = gaussian_fit.from_samples_weighted(
         values=latents,
-        weights=state_probs,
+        weights=jnp.moveaxis(state_probs, -1, 0),
         covariance_floor=covariance_floor,
     )
 

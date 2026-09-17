@@ -51,7 +51,7 @@ def test_fit_weighted_matches_hard_assignments():
             [0.0, 1.0],
             [0.0, 1.0],
         ]
-    )
+    ).T
 
     fit = gaussian_fit.from_samples_weighted(
         observations,
@@ -114,7 +114,7 @@ def test_fit_weighted_linear_recovers_state_specific_affine_maps():
             [0.0, 1.0],
             [0.0, 1.0],
         ]
-    )
+    ).T
 
     fit = gaussian_fit.linear_from_samples_weighted(
         inputs,
@@ -144,7 +144,7 @@ def test_public_routines_are_jittable():
             [0.0, 1.0],
             [0.0, 1.0],
         ]
-    )
+    ).T
     inputs = jnp.array([[0.0], [1.0], [2.0], [3.0]])
     outputs = jnp.array([[1.0], [3.0], [8.0], [7.0]])
 
@@ -185,6 +185,31 @@ def test_public_routines_are_jittable():
     assert result[0].shape == (2, 4)
     assert result[2].affine.coefficients.shape == (1, 1)
     assert result[3].affine.coefficients.shape == (2, 1, 1)
+
+
+def test_weighted_fits_support_multi_axis_batches():
+    values = jnp.arange(15.0).reshape(5, 3)
+    weights = jnp.arange(30.0).reshape(2, 3, 5) + 1.0
+
+    fit = gaussian_fit.from_samples_weighted(
+        values,
+        weights,
+        covariance_floor=0.0,
+    )
+
+    assert fit.batch_shape == (2, 3)
+    for index in np.ndindex((2, 3)):
+        expected = gaussian_fit.from_samples_weighted(
+            values,
+            weights[index],
+            covariance_floor=0.0,
+        )
+        np.testing.assert_allclose(fit.mean[index], expected.mean, atol=ATOL)
+        np.testing.assert_allclose(
+            fit.covariance[index],
+            expected.covariance,
+            atol=ATOL,
+        )
 
 
 def test_linear_gaussian_conditional_broadcasts_covariance():

@@ -99,7 +99,7 @@ class GaussianEmissions(typing.NamedTuple):
     ) -> typing.Self:
         """Fit Gaussian parameters from posterior state weights."""
 
-        weights = posterior.state_probs
+        weights = jnp.moveaxis(posterior.state_probs, -1, 0)
 
         fitted = gaussian_fit.from_samples_weighted(
             observations,
@@ -158,7 +158,7 @@ class PoissonEmissions(typing.NamedTuple):
     ) -> typing.Self:
         """Fit state-specific Poisson log rates from posterior state weights."""
 
-        weights = posterior.state_probs
+        weights = jnp.moveaxis(posterior.state_probs, -1, 0)
 
         fitted = poisson_fit.from_samples_weighted(
             values=observations,

@@ -76,13 +76,17 @@ def _normalize_weights(
             dtype=dtype,
         )
 
-    assert weights.shape[0] == num_samples
+    if weights.shape[-1] != num_samples:
+        raise ValueError(
+            f'weights must have sample axis of length {num_samples}; '
+            f'got shape {weights.shape}'
+        )
 
     weights = weights.astype(dtype)
 
     totals = jnp.sum(
         weights,
-        axis=0,
+        axis=-1,
     )
 
     safe_totals = jnp.where(
@@ -91,30 +95,28 @@ def _normalize_weights(
         1.0,
     )
 
-    return weights / safe_totals[None, ...]
+    return weights / safe_totals[..., None]
 
 
 def _center_samples(
     values: jax.Array,  # (T, N)
     mean: jax.Array,  # (..., N)
-) -> jax.Array:  # (T, ..., N)
+) -> jax.Array:  # (..., T, N)
     """Center samples around one or more means."""
     batch_ndim = mean.ndim - 1
 
-    values = values.reshape(
-        (values.shape[0],) + (1,) * batch_ndim + (values.shape[-1],)
-    )
+    values = values.reshape((1,) * batch_ndim + values.shape)
 
-    return values - mean[None, ...]
+    return values - mean[..., None, :]
 
 
 def _from_samples_normalized(
     values: jax.Array,  # (T, N)
-    weights: jax.Array,  # (T, ...)
+    weights: jax.Array,  # (..., T)
 ) -> Gaussian:
     """Fit a Gaussian using already-normalized weights."""
     mean = jnp.einsum(
-        't...,ti->...i',
+        '...t,ti->...i',
         weights,
         values,
     )
@@ -125,7 +127,7 @@ def _from_samples_normalized(
     )
 
     covariance = jnp.einsum(
-        't...,t...i,t...j->...ij',
+        '...t,...ti,...tj->...ij',
         weights,
         residuals,
         residuals,
@@ -180,7 +182,7 @@ def from_samples(
 
 def from_samples_weighted(
     values: jax.Array,  # (T, N)
-    weights: jax.Array,  # (T, ...)
+    weights: jax.Array,  # (..., T)
     *,
     covariance_floor: float,
 ) -> Gaussian:
@@ -227,7 +229,7 @@ def from_samples_grouped(
             values,
             jnp.float32,
         ),
-    )
+    ).T
 
     return from_samples_weighted(
         values=values,
@@ -247,7 +249,7 @@ def _from_moment_match_weighted(
     )
 
     covariance = result.covariance + jnp.einsum(
-        't...,tij->...ij',
+        '...t,tij->...ij',
         normalized_weights,
         distributions.covariance,
     )
@@ -275,7 +277,7 @@ def from_moment_match(
 
     The returned covariance combines average within-distribution
     covariance with covariance across the distribution means.
-    Optional trailing weight dimensions produce a batched result.
+    Weights have shape ``(*B, S)`` and produce a result batched as ``*B``.
     """
     assert len(distributions.batch_shape) == 1
 
@@ -396,7 +398,7 @@ def paired_from_samples(
     left: jax.Array,  # (T, L)
     right: jax.Array,  # (T, R)
     *,
-    weights: jax.Array | None = None,  # (T, ...)
+    weights: jax.Array | None = None,  # (..., T)
 ) -> PairedGaussian:
     """Fit a paired Gaussian from aligned left and right samples."""
     assert left.shape[0] == right.shape[0]
@@ -440,7 +442,7 @@ def paired_from_samples(
     )
 
     cross_covariance = jnp.einsum(
-        't...,t...i,t...j->...ij',
+        '...t,...ti,...tj->...ij',
         normalized_weights,
         right_residuals,
         left_residuals,
@@ -502,7 +504,7 @@ def paired_from_left_marginals(
     )
 
     cross_covariance = jnp.einsum(
-        't...,t...i,t...j->...ij',
+        '...t,...ti,...tj->...ij',
         normalized_weights,
         right_residuals,
         left_residuals,
@@ -704,7 +706,7 @@ def linear_from_samples(
 def linear_from_samples_weighted(
     inputs: jax.Array,  # (T, *input_shape)
     outputs: jax.Array,  # (T, O)
-    weights: jax.Array,  # (T, ...)
+    weights: jax.Array,  # (..., T)
     *,
     ridge: float,
     covariance_floor: float,
@@ -751,7 +753,7 @@ def linear_from_samples_grouped(
             outputs,
             jnp.float32,
         ),
-    )  # (T, K)
+    ).T  # (K, T)
 
     return linear_from_samples_weighted(
         inputs=inputs,

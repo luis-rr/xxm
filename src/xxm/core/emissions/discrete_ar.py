@@ -224,7 +224,7 @@ class AREmissions(
 
         current = observations[..., self.num_lags :, :]  # (T-L, N)
 
-        weights = posterior.state_probs  # (T-L, K)
+        weights = jnp.moveaxis(posterior.state_probs, -1, 0)  # (K, T-L)
 
         fitted = _fit_ar_model(
             dist=self.dist,

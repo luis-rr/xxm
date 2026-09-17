@@ -71,7 +71,7 @@ def filter_valid_states(
     """
     expected_counts = jnp.sum(
         weights,
-        axis=0,
+        axis=-1,
     )
 
     valid = expected_counts >= min_expected_count

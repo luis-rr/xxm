@@ -50,7 +50,8 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         their current parameters.
         """
 
-        weights = discrete.state_probs[..., 1:, :]  # (T - 1, K)
+        weights = jnp.moveaxis(discrete.state_probs[..., 1:, :], -1, 0)
+        # (K, T - 1)
 
         paired = gaussian_fit.paired_from_moment_match(
             continuous.paired_marginals(),

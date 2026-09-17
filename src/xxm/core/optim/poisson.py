@@ -1,5 +1,6 @@
 """Poisson parameter fitting routines."""
 
+import math
 import typing
 
 import jax
@@ -254,7 +255,7 @@ class _NewtonSearchModel(typing.NamedTuple):
 
 
 def from_samples(
-    values: jax.Array,  # (T, N)
+    values: jax.Array,  # (S, N)
 ) -> Poisson:
     """Fit independent Poisson log rates from sample means."""
     rates = jnp.mean(values, axis=0)
@@ -263,14 +264,20 @@ def from_samples(
 
 def from_samples_weighted(
     values: jax.Array,  # (T, N)
-    weights: jax.Array,  # (T, ...)
+    weights: jax.Array,  # (..., T)
 ) -> Poisson:
     """Fit one weighted Poisson model per batch entry of ``weights``."""
-    total = jnp.sum(weights, axis=0)
+    if weights.shape[-1] != values.shape[0]:
+        raise ValueError(
+            f'weights must have sample axis of length {values.shape[0]}; '
+            f'got shape {weights.shape}'
+        )
+
+    total = jnp.sum(weights, axis=-1)
     counts = jnp.where(total > 0, total, EPS)
     rates = (
         jnp.einsum(
-            't...,tn->...n',
+            '...t,tn->...n',
             weights,
             values,
         )
@@ -292,7 +299,7 @@ def from_samples_grouped(
         assignments,
         num_groups,
         dtype=jnp.result_type(values, jnp.float32),
-    )  # (T, K)
+    ).T  # (K, T)
 
     return from_samples_weighted(
         values=values,
@@ -301,9 +308,9 @@ def from_samples_grouped(
 
 
 def _initial_affine(
-    inputs: jax.Array,  # (T, I)
-    outputs: jax.Array,  # (T, O)
-    weights: jax.Array | None = None,  # (T, ...)
+    inputs: jax.Array,  # (S, I)
+    outputs: jax.Array,  # (S, O)
+    weights: jax.Array | None = None,  # (..., T)
 ) -> Affine:
     """Initialize with zero coefficients and empirical output log rates."""
     dtype = jnp.result_type(
@@ -325,7 +332,7 @@ def _initial_affine(
             weights=weights,
         ).log_rates  # (..., O)
 
-        batch_shape = weights.shape[1:]
+        batch_shape = weights.shape[:-1]
 
     coefficients = jnp.zeros(
         batch_shape
@@ -500,10 +507,107 @@ def _linear_from_marginals(
     )
 
 
+def _validate_weighted_linear_shapes(
+    num_samples: int,
+    outputs: jax.Array,
+    weights: jax.Array,
+    initial_affine: Affine | None,
+) -> tuple[int, ...]:
+    """Validate shared samples, weight batches, and initial parameters."""
+    if outputs.ndim < 2:
+        raise ValueError('outputs must have shape (S, O)')
+
+    if outputs.shape[0] != num_samples:
+        raise ValueError(
+            'inputs and outputs must have the same number of samples; '
+            f'got {num_samples} and {outputs.shape[0]}'
+        )
+
+    if weights.ndim < 1 or weights.shape[-1] != num_samples:
+        raise ValueError(
+            f'weights must have sample axis of length {num_samples}; '
+            f'got shape {weights.shape}'
+        )
+
+    batch_shape = weights.shape[:-1]
+    if initial_affine is not None and initial_affine.batch_shape != batch_shape:
+        raise ValueError(
+            'initial_affine batch shape must match weights; '
+            f'expected {batch_shape}, got {initial_affine.batch_shape}'
+        )
+
+    return batch_shape
+
+
+def _linear_from_batched_marginals(
+    input_means: jax.Array,
+    input_covariances: jax.Array | None,
+    outputs: jax.Array,
+    weights: jax.Array,
+    initial_affine: Affine | None,
+    max_iter: int,
+    tol: float,
+    max_line_search_iters: int,
+    ridge: float,
+) -> LinearPoisson:
+    """Fit and restore a batch of independent marginal regressions."""
+    batch_shape = _validate_weighted_linear_shapes(
+        num_samples=input_means.shape[0],
+        outputs=outputs,
+        weights=weights,
+        initial_affine=initial_affine,
+    )
+
+    flat_size = math.prod(batch_shape)
+    flat_weights = weights.reshape((flat_size, weights.shape[-1]))
+    flat_initial = None
+    if initial_affine is not None:
+        flat_initial = initial_affine._replace(
+            coefficients=initial_affine.coefficients.reshape(
+                (flat_size,) + initial_affine.coefficients.shape[len(batch_shape) :]
+            ),
+            bias=initial_affine.bias.reshape(
+                (flat_size,) + initial_affine.bias.shape[len(batch_shape) :]
+            ),
+        )
+
+    def fit_one(
+        sample_weights: jax.Array,
+        sample_initial: Affine | None,
+    ) -> LinearPoisson:
+        return _linear_from_marginals(
+            outputs=outputs,
+            input_means=input_means,
+            input_covariances=input_covariances,
+            weights=sample_weights,
+            initial_affine=sample_initial,
+            max_iter=max_iter,
+            tol=tol,
+            max_line_search_iters=max_line_search_iters,
+            ridge=ridge,
+        )
+
+    if flat_initial is None:
+        fitted = jax.vmap(lambda sample_weights: fit_one(sample_weights, None))(
+            flat_weights
+        )
+    else:
+        fitted = jax.vmap(fit_one)(flat_weights, flat_initial)
+
+    return fitted._replace(
+        affine=fitted.affine._replace(
+            coefficients=fitted.affine.coefficients.reshape(
+                batch_shape + fitted.affine.coefficients.shape[1:]
+            ),
+            bias=fitted.affine.bias.reshape(batch_shape + fitted.affine.bias.shape[1:]),
+        )
+    )
+
+
 def linear_from_marginals(
     inputs: Gaussian,  # T-batched
     outputs: jax.Array,  # (T, O)
-    weights: jax.Array | None = None,  # (T,)
+    weights: jax.Array | None = None,  # (..., T)
     initial_affine: Affine | None = None,
     max_iter: int = 20,
     tol: float = 1e-6,
@@ -526,10 +630,43 @@ def linear_from_marginals(
             f'got {initial_affine.input_shape}'
         )
 
-    return _linear_from_marginals(
-        outputs=outputs,
+    if weights is None or weights.ndim == 1:
+        if weights is not None:
+            _validate_weighted_linear_shapes(
+                num_samples=inputs.mean.shape[0],
+                outputs=outputs,
+                weights=weights,
+                initial_affine=initial_affine,
+            )
+        elif outputs.ndim < 2:
+            raise ValueError('outputs must have shape (S, O)')
+        elif outputs.shape[0] != inputs.mean.shape[0]:
+            raise ValueError(
+                'inputs and outputs must have the same number of samples; '
+                f'got {inputs.mean.shape[0]} and {outputs.shape[0]}'
+            )
+        elif initial_affine is not None and initial_affine.batch_shape != ():
+            raise ValueError(
+                'initial_affine batch shape must match weights; '
+                f'expected (), got {initial_affine.batch_shape}'
+            )
+
+        return _linear_from_marginals(
+            outputs=outputs,
+            input_means=inputs.mean,
+            input_covariances=inputs.covariance,
+            weights=weights,
+            initial_affine=initial_affine,
+            max_iter=max_iter,
+            tol=tol,
+            max_line_search_iters=max_line_search_iters,
+            ridge=ridge,
+        )
+
+    return _linear_from_batched_marginals(
         input_means=inputs.mean,
         input_covariances=inputs.covariance,
+        outputs=outputs,
         weights=weights,
         initial_affine=initial_affine,
         max_iter=max_iter,
@@ -611,7 +748,7 @@ def linear_from_samples(
 def linear_from_samples_weighted(
     inputs: jax.Array,  # (T, *input_shape)
     outputs: jax.Array,  # (T, O)
-    weights: jax.Array,  # (T, K)
+    weights: jax.Array,  # (..., T)
     initial_affine: Affine | None = None,
     max_iter: int = 20,
     tol: float = 1e-6,
@@ -620,7 +757,7 @@ def linear_from_samples_weighted(
     ridge: float,
 ) -> LinearPoisson:
     """
-    Fit one weighted model for each weight column.
+    Fit one weighted model for each weight batch entry.
 
     `ridge` is relative to each model's weighted average predictor variance.
     """
@@ -634,42 +771,24 @@ def linear_from_samples_weighted(
         initial_affine,
     )
 
-    def fit_state(
-        state_weights: jax.Array,
-        state_affine: Affine | None,
-    ) -> LinearPoisson:
+    _validate_weighted_linear_shapes(
+        num_samples=flat_inputs.shape[0],
+        outputs=outputs,
+        weights=weights,
+        initial_affine=initial_affine,
+    )
 
-        return _linear_from_marginals(
-            outputs=outputs,
-            input_means=flat_inputs,
-            input_covariances=None,
-            weights=state_weights,
-            initial_affine=state_affine,
-            max_iter=max_iter,
-            tol=tol,
-            max_line_search_iters=max_line_search_iters,
-            ridge=ridge,
-        )
-
-    if initial_affine is None:
-        model = jax.vmap(
-            lambda state_weights: fit_state(
-                state_weights,
-                None,
-            ),
-            in_axes=1,
-        )(
-            weights,
-        )
-
-    else:
-        model = jax.vmap(
-            fit_state,
-            in_axes=(1, 0),
-        )(
-            weights,
-            initial_affine,
-        )
+    model = _linear_from_batched_marginals(
+        input_means=flat_inputs,
+        input_covariances=None,
+        outputs=outputs,
+        weights=weights,
+        initial_affine=initial_affine,
+        max_iter=max_iter,
+        tol=tol,
+        max_line_search_iters=max_line_search_iters,
+        ridge=ridge,
+    )
 
     return model.reshape_input(
         input_shape,
@@ -698,7 +817,7 @@ def linear_from_samples_grouped(
             outputs,
             jnp.float32,
         ),
-    )
+    ).T
 
     return linear_from_samples_weighted(
         inputs=inputs,
