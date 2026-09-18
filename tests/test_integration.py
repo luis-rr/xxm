@@ -7,12 +7,14 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from xxm.arhmm.inference import infer_exact as infer_arhmm
+from xxm.arhmm.init import init_gaussian_via_kmeans as initialize_arhmm_gaussian
+from xxm.arhmm.init import init_poisson_via_kmeans as initialize_arhmm_poisson
+from xxm.arhmm.learning import em_step as arhmm_em_step
 from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS
 from xxm.hmm.inference import infer_exact as infer_hmm
 from xxm.hmm.init import (
-    init_gaussian_ar_via_kmeans,
     init_gaussian_via_kmeans,
-    init_poisson_ar_via_kmeans,
     init_poisson_via_kmeans,
 )
 from xxm.hmm.learning import em_step as hmm_em_step
@@ -102,19 +104,19 @@ MODEL_CASES = [
     ),
     ModelCase(
         name='arhmm-gaussian',
-        initialize=init_gaussian_ar_via_kmeans,
-        infer=infer_hmm,
+        initialize=initialize_arhmm_gaussian,
+        infer=infer_arhmm,
         infer_kwargs={},
-        em_step=hmm_em_step,
+        em_step=arhmm_em_step,
         observations=AR_GAUSSIAN_OBSERVATIONS,
         init_kwargs={'num_states': 2, 'num_lags': 1, 'key': jax.random.key(0)},
     ),
     ModelCase(
         name='arhmm-poisson',
-        initialize=init_poisson_ar_via_kmeans,
-        infer=infer_hmm,
+        initialize=initialize_arhmm_poisson,
+        infer=infer_arhmm,
         infer_kwargs={},
-        em_step=hmm_em_step,
+        em_step=arhmm_em_step,
         observations=POISSON_OBSERVATIONS,
         init_kwargs={'num_states': 2, 'num_lags': 1, 'key': jax.random.key(0)},
     ),

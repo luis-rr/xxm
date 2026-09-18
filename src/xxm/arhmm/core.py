@@ -1,4 +1,4 @@
-r"""Single-sequence homogeneous Hidden Markov Model."""
+r"""Single-sequence autoregressive Hidden Markov Model."""
 
 from __future__ import annotations
 
@@ -7,38 +7,46 @@ import typing
 import jax
 
 from xxm.core.chains.discrete import DiscreteChainMarginals as Posterior
-from xxm.core.emissions.discrete import Emissions
 from xxm.core.latents.discrete import CategoricalInitial, CategoricalTransitions
 
-EmissionsT = typing.TypeVar('EmissionsT', bound=Emissions)
+from .data import ARObservations
+from .emissions import AREmissions, ConditionalDistT
 
 
-class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
+class Model(typing.NamedTuple, typing.Generic[ConditionalDistT]):
     r"""
-    Hidden Markov Model with discrete latent states.
+    HMM whose state selects an autoregressive conditional distribution.
 
-    $$p(z_{0:T-1}, y_{0:T-1}) =
-    p(z_0)
-    \prod_{t=0}^{T-2} p(z_{t+1}\mid z_t)
-    \prod_{t=0}^{T-1} p(y_t\mid z_t).$$
+    For history length $L$, posterior row $r$ selects the regression producing
+    $y_{L+r}$ from $(y_{L+r-1}, ..., y_r)$. The first $L$ observations are
+    fixed conditioning history; the chain has $T-L$ states.
 
-    `initial` stores $p(z_0)$, `transitions` stores $p(z_{t+1}\mid z_t)$,
-    and `emissions` stores the state-conditional observation model.
+    Sampling uses zero prehistory or explicit chronological continuation history.
     """
 
     initial: CategoricalInitial
     transitions: CategoricalTransitions
-    emissions: EmissionsT
+    emissions: AREmissions[ConditionalDistT]
 
     @property
     def num_states(self) -> int:
         """Number of discrete states $K$."""
         return self.initial.num_states
 
+    @property
+    def num_lags(self) -> int:
+        """Number of autoregressive lags $L$."""
+        return self.emissions.num_lags
+
+    @property
+    def output_dim(self) -> int:
+        """Observation dimension $D_y$."""
+        return self.emissions.output_dim
+
     def permute_states(
         self,
         permutation: jax.Array,
-    ) -> Model:
+    ) -> Model[ConditionalDistT]:
         """Relabel discrete states by permutation."""
         return Model(
             initial=self.initial.permute_states(permutation),
@@ -81,11 +89,28 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
         return states, observations
 
+    def sample_continuation(
+        self,
+        key: jax.Array,
+        num_steps: int,
+        initial_history: jax.Array,
+    ) -> tuple[jax.Array, jax.Array]:
+        """Sample states and observations conditional on an explicit history."""
+        key_states, key_observations = jax.random.split(key)
+
+        states = self.sample_states(key_states, num_steps)
+
+        observations = self.emissions.sample_continuation(
+            key_observations, states, initial_history
+        )
+
+        return states, observations
+
     def fit_params(
         self,
-        observations: jax.Array,
+        data: ARObservations,
         posterior: Posterior,
-    ) -> Model[EmissionsT]:
+    ) -> Model[ConditionalDistT]:
         """
         Perform the EM M-step from posterior state and pair marginals.
         """
@@ -93,7 +118,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
             initial=self.initial.fit_params(posterior),
             transitions=self.transitions.fit_params(posterior),
             emissions=self.emissions.fit_params(
-                observations,
+                data,
                 posterior,
             ),
         )

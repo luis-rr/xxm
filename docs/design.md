@@ -200,8 +200,7 @@ src/xxm/
 │   ├── emissions/
 │   │   ├── __init__.py
 │   │   ├── continuous.py
-│   │   ├── discrete.py
-│   │   └── discrete_ar.py
+│   │   └── discrete.py
 │   │
 │   ├── models/
 │   │   ├── __init__.py
@@ -211,12 +210,23 @@ src/xxm/
 │   └── optim/
 │       ├── __init__.py
 │       ├── gaussian.py
+│       ├── kmeans.py
 │       ├── poisson.py
 │       ├── newton.py
 │       └── loop.py
 │
 ├── hmm/
 │   ├── __init__.py
+│   ├── model.py
+│   ├── core.py
+│   ├── inference.py
+│   ├── learning.py
+│   └── init.py
+│
+├── arhmm/
+│   ├── __init__.py
+│   ├── data.py
+│   ├── emissions.py
 │   ├── model.py
 │   ├── core.py
 │   ├── inference.py
@@ -240,7 +250,7 @@ src/xxm/
     └── init.py
 ```
 
-`core` contains reusable mathematical building blocks. `hmm`, `lds`, `slds`, and future sibling packages contain complete model families built from those components.
+`core` contains reusable mathematical building blocks. `hmm`, `arhmm`, `lds`, `slds`, and future sibling packages contain complete model families built from those components.
 
 ### Dependency direction
 
@@ -249,15 +259,15 @@ Dependencies should remain simple and mostly one-way:
 ```text
 core
  ↓
-hmm / lds / slds / ...
+hmm / arhmm / lds / slds / ...
 ```
 
 More precisely:
 
 * `core` does not depend on complete model families;
-* HMM and LDS depend on reusable mathematical components in `core`;
-* HMM and LDS should not depend on one another;
-* SLDS initialization may compose HMM or LDS initialization and fitting routines where this is mathematically useful;
+* HMM, AR-HMM, and LDS depend on reusable mathematical components in `core`;
+* HMM, AR-HMM, and LDS should not depend on one another;
+* SLDS initialization may compose AR-HMM or LDS initialization and fitting routines where this is mathematically useful;
 * model components do not depend on inference algorithms;
 * inference does not depend on learning;
 * learning may depend on model and inference;

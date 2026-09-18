@@ -4,76 +4,18 @@ import jax
 from jax import numpy as jnp
 
 from xxm.core.dists.categorical import Categorical
-from xxm.core.dists.gaussian import LinearGaussian
-from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.discrete import (
     Emissions,
     GaussianEmissions,
     PoissonEmissions,
 )
-from xxm.core.emissions.discrete_ar import (
-    AREmissions,
-    lagged_observations,
-)
 from xxm.core.latents.discrete import CategoricalInitial, CategoricalTransitions
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import poisson as poisson_fit
+from xxm.core.optim.kmeans import kmeans_assignments
 from xxm.hmm.core import Model
 
 DEFAULT_SELF_TRANSITION_PROB = 0.9
-
-
-def _kmeans(
-    key: jax.Array,
-    observations: jax.Array,
-    num_states: int,
-    num_iters: int = 20,
-) -> jax.Array:
-    """Compute K-means cluster assignments."""
-    observations = jnp.asarray(
-        observations,
-        dtype=jnp.result_type(observations, jnp.float32),
-    )
-
-    initial_indices = jax.random.choice(
-        key,
-        observations.shape[0],
-        shape=(num_states,),
-        replace=False,
-    )
-    initial_centers = observations[initial_indices]
-
-    def step(_, centers):
-        distances = jnp.sum(
-            (observations[:, None, :] - centers[None, :, :]) ** 2,
-            axis=-1,
-        )
-        assignments = jnp.argmin(distances, axis=1)
-
-        weights = jax.nn.one_hot(assignments, num_states, dtype=observations.dtype)
-        counts = weights.sum(axis=0)
-
-        new_centers = weights.T @ observations / jnp.maximum(counts[:, None], 1)
-
-        # Keep the old center if a cluster is empty.
-        return jnp.where(
-            (counts > 0)[:, None],
-            new_centers,
-            centers,
-        )
-
-    centers = jax.lax.fori_loop(
-        0,
-        num_iters,
-        step,
-        initial_centers,
-    )
-
-    distances = jnp.sum(
-        (observations[:, None, :] - centers[None, :, :]) ** 2,
-        axis=-1,
-    )
-    return jnp.argmin(distances, axis=1)
 
 
 def _init(
@@ -120,10 +62,10 @@ def _init_gaussian_emissions(
     num_states: int,
     covariance_floor,
 ) -> GaussianEmissions:
-    assignments = _kmeans(
+    assignments = kmeans_assignments(
         key=key,
         observations=observations,
-        num_states=num_states,
+        num_groups=num_states,
     )  # (T,)
 
     gaussian = gaussian_fit.from_samples_grouped(
@@ -160,102 +102,15 @@ def init_gaussian_via_kmeans(
     )
 
 
-def _init_ar_state_assignments(
-    key: jax.Array,
-    predictors: jax.Array,  # (T-L, L, N)
-    current: jax.Array,  # (T-L, N)
-    num_states: int,
-) -> jax.Array:  # (T-L,)
-    """Initialize AR states by clustering predictors and current observations."""
-    flat_predictors = predictors.reshape(
-        predictors.shape[0],
-        -1,
-    )  # (T-L, L*N)
-
-    features = jnp.concatenate(
-        [
-            flat_predictors,
-            current,
-        ],
-        axis=-1,
-    )  # (T-L, (L+1)*N)
-
-    return _kmeans(
-        key=key,
-        observations=features,
-        num_states=num_states,
-    )
-
-
-def _init_ar_gaussian_emissions(
-    key: jax.Array,
-    observations: jax.Array,  # (T, N)
-    num_states: int,
-    num_lags: int,
-    ridge=gaussian_fit.DEFAULT_RIDGE,
-    covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
-) -> AREmissions[LinearGaussian]:
-    predictors = lagged_observations(
-        observations,
-        num_lags=num_lags,
-    )  # (T-L, L, N)
-
-    current = observations[num_lags:]  # (T-L, N)
-
-    assignments = _init_ar_state_assignments(
-        key=key,
-        predictors=predictors,
-        current=current,
-        num_states=num_states,
-    )  # (T-L,)
-
-    model = gaussian_fit.linear_from_samples_grouped(
-        inputs=predictors,
-        outputs=current,
-        assignments=assignments,
-        num_groups=num_states,
-        ridge=ridge,
-        covariance_floor=covariance_floor,
-    )
-
-    return AREmissions(model)
-
-
-def init_gaussian_ar_via_kmeans(
-    key: jax.Array,
-    observations: jax.Array,
-    num_states: int,
-    num_lags: int,
-    self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
-    *,
-    covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
-) -> Model:
-    r"""Initialize Gaussian AR-HMM with first $L$ observations as fixed history."""
-    emissions = _init_ar_gaussian_emissions(
-        key=key,
-        observations=observations,
-        num_states=num_states,
-        num_lags=num_lags,
-        covariance_floor=covariance_floor,
-    )
-
-    return _init(
-        emissions=emissions,
-        num_states=num_states,
-        dtype=observations.dtype,
-        self_transition_prob=self_transition_prob,
-    )
-
-
 def _init_poisson_emissions(
     key: jax.Array,
     observations: jax.Array,  # (T, N)
     num_states: int,
 ) -> PoissonEmissions:
-    assignments = _kmeans(
+    assignments = kmeans_assignments(
         key=key,
         observations=observations,
-        num_states=num_states,
+        num_groups=num_states,
     )  # (T,)
 
     poisson = poisson_fit.from_samples_grouped(
@@ -286,64 +141,4 @@ def init_poisson_via_kmeans(
         num_states=num_states,
         self_transition_prob=self_transition_prob,
         dtype=observations.dtype,
-    )
-
-
-def _init_ar_poisson_emissions(
-    key: jax.Array,
-    observations: jax.Array,  # (T, N)
-    num_states: int,
-    num_lags: int,
-    ridge=poisson_fit.DEFAULT_RIDGE,
-) -> AREmissions[LinearPoisson]:
-    predictors = lagged_observations(
-        observations,
-        num_lags=num_lags,
-    )  # (T-L, L, N)
-
-    current = observations[num_lags:]  # (T-L, N)
-
-    assignments = _init_ar_state_assignments(
-        key=key,
-        predictors=predictors,
-        current=current,
-        num_states=num_states,
-    )  # (T-L,)
-
-    model = poisson_fit.linear_from_samples_grouped(
-        inputs=predictors,
-        outputs=current,
-        assignments=assignments,
-        num_groups=num_states,
-        ridge=ridge,
-    )
-
-    return AREmissions(model)
-
-
-def init_poisson_ar_via_kmeans(
-    key: jax.Array,
-    observations: jax.Array,
-    num_states: int,
-    num_lags: int,
-    self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
-) -> Model:
-    """
-    Initialize a Poisson AR-HMM conditional on the first ``num_lags`` values.
-
-    ``observations[:num_lags]`` provide the fixed autoregressive history.
-    Latent states correspond only to ``observations[num_lags:]``.
-    """
-    emissions = _init_ar_poisson_emissions(
-        key=key,
-        observations=observations,
-        num_states=num_states,
-        num_lags=num_lags,
-    )
-
-    return _init(
-        emissions=emissions,
-        num_states=num_states,
-        self_transition_prob=self_transition_prob,
-        dtype=jnp.result_type(observations, jnp.float32),
     )

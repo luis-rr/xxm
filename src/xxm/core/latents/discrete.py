@@ -5,9 +5,30 @@ import typing
 import jax
 import jax.numpy as jnp
 
+from xxm.core.chains.discrete import DiscreteChain
 from xxm.core.dists.categorical import Categorical
 from xxm.core.optim import categorical as categorical_fit
 from xxm.core.posteriors import DiscretePosterior
+
+
+def homogeneous_chain(
+    initial: 'CategoricalInitial',
+    transitions: 'CategoricalTransitions',
+    num_steps: int,
+) -> DiscreteChain:
+    """Construct a homogeneous Markov-chain prior over num_steps states."""
+    num_states = initial.num_states
+    return DiscreteChain(
+        initial_probs=initial.dist.probs,
+        transition_probs=jnp.broadcast_to(
+            transitions.dist.probs,
+            (num_steps - 1, num_states, num_states),
+        ),
+        state_log_potentials=jnp.zeros(
+            (num_steps, num_states),
+            dtype=initial.dist.probs.dtype,
+        ),
+    )
 
 
 class CategoricalInitial(typing.NamedTuple):

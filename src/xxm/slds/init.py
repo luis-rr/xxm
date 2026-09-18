@@ -3,25 +3,24 @@
 import jax
 import jax.numpy as jnp
 
+from xxm.arhmm.core import Model as ARHMMModel
+from xxm.arhmm.inference import infer_exact as infer_arhmm
+from xxm.arhmm.init import (
+    DEFAULT_SELF_TRANSITION_PROB,
+    init_gaussian_via_kmeans,
+)
+from xxm.arhmm.learning import fit_em as fit_arhmm
 from xxm.core.dists.gaussian import LinearGaussian
 from xxm.core.emissions.continuous import (
     EmissionsT,
     GaussianEmissions,
     PoissonEmissions,
 )
-from xxm.core.emissions.discrete_ar import AREmissions
 from xxm.core.latents.discrete import CategoricalInitial
 from xxm.core.latents.gaussian import StateConditionedGaussian
 from xxm.core.optim import categorical as categorical_fit
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import poisson as poisson_fit
-from xxm.hmm.core import Model as HMMModel
-from xxm.hmm.inference import infer_exact as infer_hmm
-from xxm.hmm.init import (
-    DEFAULT_SELF_TRANSITION_PROB,
-    init_gaussian_ar_via_kmeans,
-)
-from xxm.hmm.learning import fit_em as fit_hmm
 from xxm.lds.init import (
     pca_latents,
     pca_latents_poisson,
@@ -76,7 +75,7 @@ def _init_state_conditioned_initial_from_latents(
 def _init_from_arhmm(
     latents: jax.Array,
     emissions: EmissionsT,
-    arhmm: HMMModel[AREmissions[LinearGaussian]],
+    arhmm: ARHMMModel[LinearGaussian],
     covariance_floor: float,
     pseudocount: float,
 ) -> Model[EmissionsT]:
@@ -88,7 +87,7 @@ def _init_from_arhmm(
     Trajectory-wide state occupancies are used as proxies for the boundary
     distributions of ``z[0]`` and ``x[0] | z[0]``.
     """
-    inferred = infer_hmm(
+    inferred = infer_arhmm(
         arhmm,
         latents,
     )
@@ -153,7 +152,7 @@ def init_gaussian_via_pca(
         latent_dim,
     )
 
-    arhmm = init_gaussian_ar_via_kmeans(
+    arhmm = init_gaussian_via_kmeans(
         key=key,
         observations=latents,
         num_states=num_states,
@@ -207,7 +206,7 @@ def init_gaussian_via_arhmm(
 
     latents = pca_latents(observations, latent_dim)
 
-    arhmm = init_gaussian_ar_via_kmeans(
+    arhmm = init_gaussian_via_kmeans(
         key=key,
         observations=latents,
         num_states=num_states,
@@ -222,7 +221,7 @@ def init_gaussian_via_arhmm(
         covariance_floor=covariance_floor,
     )
 
-    arhmm = fit_hmm(
+    arhmm = fit_arhmm(
         arhmm,
         latents,
         num_iters=num_arhmm_iters,
@@ -262,7 +261,7 @@ def init_poisson_via_pca(
         count_floor,
     )
 
-    arhmm = init_gaussian_ar_via_kmeans(
+    arhmm = init_gaussian_via_kmeans(
         key=key,
         observations=latents,
         num_states=num_states,
@@ -311,7 +310,7 @@ def init_poisson_via_arhmm(
         count_floor,
     )
 
-    arhmm = init_gaussian_ar_via_kmeans(
+    arhmm = init_gaussian_via_kmeans(
         key=key,
         observations=latents,
         num_states=num_states,
@@ -325,7 +324,7 @@ def init_poisson_via_arhmm(
         observations=observations,
     )
 
-    arhmm = fit_hmm(
+    arhmm = fit_arhmm(
         arhmm,
         latents,
         num_iters=num_arhmm_iters,

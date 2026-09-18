@@ -1,9 +1,11 @@
 """Lightweight JAX implementation of statistical state space models."""
 
-from xxm.hmm import (
+from xxm.arhmm import (
     GaussianARHMM,
-    GaussianHMM,
     PoissonARHMM,
+)
+from xxm.hmm import (
+    GaussianHMM,
     PoissonHMM,
 )
 from xxm.lds import (

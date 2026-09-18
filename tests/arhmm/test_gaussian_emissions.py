@@ -2,10 +2,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from xxm.arhmm.data import ARObservations, lagged_observations
+from xxm.arhmm.emissions import AREmissions
 from xxm.core.affine import Affine
 from xxm.core.chains.discrete import DiscreteChainMarginals
 from xxm.core.dists.gaussian import LinearGaussian
-from xxm.core.emissions.discrete_ar import AREmissions, lagged_observations
 
 ATOL = 1e-6
 FIT_ATOL = 2e-5
@@ -122,7 +123,9 @@ def test_ar_gaussian_conditional_means_known_solution():
         ]
     )
 
-    means = emissions.conditional(observations).mean
+    means = emissions.conditional(
+        ARObservations.from_observations(observations, emissions.num_lags).predictors
+    ).mean
 
     expected = jnp.array(
         [
@@ -153,7 +156,9 @@ def test_ar_gaussian_log_likelihoods_known_solution():
         ]
     )
 
-    log_likelihoods = emissions.log_likelihoods(observations)
+    log_likelihoods = emissions.log_likelihoods(
+        ARObservations.from_observations(observations, emissions.num_lags)
+    )
 
     # y1 | y0 ~ N(1, 4), residual = 1
     # y2 | y1 ~ N(2, 4), residual = 2
@@ -197,7 +202,9 @@ def test_ar_gaussian_log_likelihoods_shortest_valid_sequence():
         ]
     )
 
-    log_likelihoods = emissions.log_likelihoods(observations)
+    log_likelihoods = emissions.log_likelihoods(
+        ARObservations.from_observations(observations, emissions.num_lags)
+    )
 
     # history = (y1, y0) = (2, 1)
     # mean = 0.5 * 2 + 0.25 * 1 = 1.25
@@ -245,7 +252,7 @@ def test_ar_gaussian_fit_recovers_known_ar2_parameters():
     )
 
     fitted = emissions.fit_params(
-        observations,
+        ARObservations.from_observations(observations, emissions.num_lags),
         posterior,
     )
 
@@ -389,16 +396,24 @@ def test_ar_gaussian_methods_are_jittable():
     key = jax.random.key(0)
 
     conditional_means_jit = jax.jit(
-        lambda emissions, observations: emissions.conditional(observations).mean
+        lambda emissions, observations: (
+            emissions.conditional(
+                ARObservations.from_observations(
+                    observations, emissions.num_lags
+                ).predictors
+            ).mean
+        )
     )
 
     log_likelihoods_jit = jax.jit(
-        lambda emissions, observations: emissions.log_likelihoods(observations)
+        lambda emissions, observations: emissions.log_likelihoods(
+            ARObservations.from_observations(observations, emissions.num_lags)
+        )
     )
 
     fit_params_jit = jax.jit(
         lambda emissions, observations, posterior: emissions.fit_params(
-            observations,
+            ARObservations.from_observations(observations, emissions.num_lags),
             posterior,
         )
     )
@@ -415,7 +430,11 @@ def test_ar_gaussian_methods_are_jittable():
             emissions,
             observations,
         ),
-        emissions.conditional(observations).mean,
+        emissions.conditional(
+            ARObservations.from_observations(
+                observations, emissions.num_lags
+            ).predictors
+        ).mean,
         atol=ATOL,
     )
 
@@ -424,7 +443,9 @@ def test_ar_gaussian_methods_are_jittable():
             emissions,
             observations,
         ),
-        emissions.log_likelihoods(observations),
+        emissions.log_likelihoods(
+            ARObservations.from_observations(observations, emissions.num_lags)
+        ),
         atol=ATOL,
     )
 
@@ -435,7 +456,7 @@ def test_ar_gaussian_methods_are_jittable():
     )
 
     fitted = emissions.fit_params(
-        observations,
+        ARObservations.from_observations(observations, emissions.num_lags),
         posterior,
     )
 

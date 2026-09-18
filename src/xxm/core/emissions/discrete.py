@@ -15,7 +15,7 @@ from xxm.core.posteriors import DiscretePosterior
 
 
 class Emissions(typing.Protocol):
-    """Protocol for emission models over discrete latent states."""
+    """Protocol for memoryless emissions conditional on discrete latent states."""
 
     def log_likelihoods(
         self,
@@ -52,19 +52,6 @@ class Emissions(typing.Protocol):
         states: jax.Array,
     ) -> jax.Array:
         """Sample observations conditional on discrete states."""
-        ...
-
-
-class ContinuationEmissions(Emissions, typing.Protocol):
-    """Emissions that can conditionally sample given history."""
-
-    def sample_continuation(
-        self,
-        key: jax.Array,
-        states: jax.Array,
-        initial_history: jax.Array,
-    ) -> jax.Array:
-        """Sample new observations given states and a fixed chronological history."""
         ...
 
 

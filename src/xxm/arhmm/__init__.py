@@ -1,4 +1,4 @@
-"""Hidden Markov model public API."""
+"""Autoregressive Hidden Markov model public API."""
 
 from .core import Posterior
 from .inference import infer_exact
@@ -8,13 +8,13 @@ from .init import (
 )
 from .learning import fit_em, fit_em_many
 from .model import (
-    GaussianHMM,
-    PoissonHMM,
+    GaussianARHMM,
+    PoissonARHMM,
 )
 
 __all__ = [
-    'GaussianHMM',
-    'PoissonHMM',
+    'GaussianARHMM',
+    'PoissonARHMM',
     'Posterior',
     'fit_em',
     'fit_em_many',

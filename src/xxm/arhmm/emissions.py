@@ -28,20 +28,7 @@ from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import poisson as poisson_fit
 from xxm.core.posteriors import DiscretePosterior
 
-
-def lagged_observations(
-    observations: jax.Array, num_lags: int
-) -> jax.Array:  # (T-L, L, N)
-    """Return histories ordered from lag 1 to lag L."""
-
-    return jnp.stack(
-        [
-            observations[..., num_lags - i - 1 : observations.shape[-2] - i - 1, :]
-            for i in range(num_lags)
-        ],
-        axis=-2,
-    )
-
+from .data import ARObservations
 
 ConditionalDistT = typing.TypeVar(
     'ConditionalDistT',
@@ -98,10 +85,9 @@ class AREmissions(
     ``(y[t-1], ..., y[t-L])``. For an affine conditional model, coefficients
     therefore have shape $(K,D_y,L,D_y)$.
 
-    Likelihood and fitting methods receive a chronological sequence whose first
-    ``L`` observations are fixed conditioning history. Only the remaining
-    observations have associated latent states: posterior index $s$ corresponds
-    to `observations[L+s]`.
+    Likelihood and fitting methods receive prepared autoregressive rows.
+    Posterior index $r$ corresponds to `data.targets[r]`, or raw observation
+    `observations[L+r]`, after the fixed conditioning history.
 
     Autonomous sampling uses an all-zero history. Conditional continuation
     sampling accepts an explicit chronological history, ordered from oldest
@@ -140,43 +126,29 @@ class AREmissions(
 
         return num_lags
 
-    def predictors(
-        self,
-        observations: jax.Array,
-    ) -> jax.Array:  # (T-L, L, N)
-        """Construct predictors ordered from most recent to oldest."""
-        return lagged_observations(
-            observations,
-            self.num_lags,
-        )
-
     @typing.overload
     def conditional(
         self: 'AREmissions[LinearGaussian]',
-        observations: jax.Array,
+        predictors: jax.Array,
     ) -> Gaussian: ...
 
     @typing.overload
     def conditional(
         self: 'AREmissions[LinearPoisson]',
-        observations: jax.Array,
+        predictors: jax.Array,
     ) -> Poisson: ...
 
     @typing.overload
     def conditional(
         self: 'AREmissions[ConditionalDistT]',
-        observations: jax.Array,
+        predictors: jax.Array,
     ) -> Gaussian | Poisson: ...
 
     def conditional(
         self,
-        observations: jax.Array,
+        predictors: jax.Array,
     ) -> Gaussian | Poisson:
         """Conditional distribution for each modeled time point and state."""
-        predictors = self.predictors(
-            observations,
-        )  # (T-L, L, N)
-
         values = jnp.broadcast_to(
             predictors[..., None, :, :],
             predictors.shape[:-2] + (self.num_states,) + predictors.shape[-2:],
@@ -187,31 +159,31 @@ class AREmissions(
 
     def log_likelihoods(
         self,
-        observations: jax.Array,
+        data: ARObservations,
     ) -> jax.Array:  # (T-L, K)
         """Emission log likelihoods conditional on the initial history."""
         conditional = self.conditional(
-            observations,
+            data.predictors,
         )
 
         values = jnp.broadcast_to(
-            observations[..., self.num_lags :, None, :],
+            data.targets[..., None, :],
             conditional.batch_shape + (self.output_dim,),
         )
         return conditional.log_prob(values)
 
     def compute_potential(
         self,
-        observations: jax.Array,
+        data: ARObservations,
     ) -> DiscretePotential:
         """Construct potentials only for observations after the history."""
         return DiscretePotential(
-            log_values=self.log_likelihoods(observations),
+            log_values=self.log_likelihoods(data),
         )
 
     def fit_params(
         self,
-        observations: jax.Array,
+        data: ARObservations,
         posterior: DiscretePosterior,
         ridge: float | None = None,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
@@ -224,18 +196,12 @@ class AREmissions(
                 'with state_probs shape (T, K)'
             )
 
-        predictors = self.predictors(
-            observations,
-        )  # (T-L, L, N)
-
-        current = observations[..., self.num_lags :, :]  # (T-L, N)
-
         weights = jnp.moveaxis(posterior.state_probs, -1, 0)  # (K, T-L)
 
         fitted = _fit_ar_model(
             dist=self.dist,
-            inputs=predictors,
-            outputs=current,
+            inputs=data.predictors,
+            outputs=data.targets,
             weights=weights,
             ridge=ridge,
             covariance_floor=covariance_floor,
