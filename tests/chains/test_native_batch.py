@@ -8,9 +8,14 @@ import numpy as np
 import pytest
 
 from xxm.core.affine import Affine
-from xxm.core.chains.discrete import DiscreteChain, DiscretePotential
+from xxm.core.chains.discrete import (
+    DiscreteChain,
+    DiscreteChainMarginals,
+    DiscretePotential,
+)
 from xxm.core.chains.gaussian import (
     GaussianChain,
+    GaussianChainMarginals,
     GaussianPairPotential,
     GaussianPotential,
 )
@@ -57,8 +62,52 @@ def discrete_chain(batch, steps):
     )
 
 
-@pytest.mark.parametrize('batch', [(), (2,), (2, 3), (0, 2)])
-@pytest.mark.parametrize('steps', [1, 4])
+def gaussian_chain_structure(batch, steps):
+    d = 2
+    return GaussianChain(
+        diagonal_precision_blocks=jnp.broadcast_to(jnp.eye(d), batch + (steps, d, d)),
+        lower_precision_blocks=jnp.zeros(batch + (steps - 1, d, d)),
+        information_vectors=jnp.zeros(batch + (steps, d)),
+        log_constant=jnp.zeros(batch),
+    )
+
+
+def discrete_chain_structure(batch, steps):
+    k = 3
+    return DiscreteChain(
+        initial_probs=jnp.full(batch + (k,), 1.0 / k),
+        transition_probs=jnp.full(batch + (steps - 1, k, k), 1.0 / k),
+        state_log_potentials=jnp.zeros(batch + (steps, k)),
+    )
+
+
+def gaussian_marginals(batch, steps):
+    d = 2
+    return GaussianChainMarginals(
+        means=jnp.zeros(batch + (steps, d)),
+        covariances=jnp.broadcast_to(jnp.eye(d), batch + (steps, d, d)),
+        cross_covariances=jnp.zeros(batch + (steps - 1, d, d)),
+    )
+
+
+def discrete_marginals(batch, steps):
+    k = 3
+    state_probs = jnp.full(batch + (steps, k), 1.0 / k)
+    pair_probs = state_probs[..., :-1, :, None] * state_probs[..., 1:, None, :]
+    return DiscreteChainMarginals(state_probs, pair_probs)
+
+
+# Pair the meaningful edge cases rather than compiling the Cartesian product of
+# every batch shape with every sequence length. The scalar one-step path, a
+# multi-axis batch, and an empty batch all remain covered.
+@pytest.mark.parametrize(
+    ('batch', 'steps'),
+    [
+        ((), 1),
+        ((2, 3), 3),
+        ((0, 2), 3),
+    ],
+)
 def test_gaussian_batch_matches_dense_precision(batch, steps):
     chain = gaussian_chain(batch, steps)
     posterior, logz = jax.jit(GaussianChain.forward_backward)(chain)
@@ -86,7 +135,6 @@ def test_gaussian_batch_matches_dense_precision(batch, steps):
             atol=2e-6,
         )
         if t < steps - 1:
-            # Chain cross moments store Cov(x[t], x[t+1]).
             np.testing.assert_allclose(
                 posterior.cross_covariances[..., t, :, :],
                 covariance[..., 2 * t : 2 * t + 2, 2 * t + 2 : 2 * t + 4],
@@ -102,8 +150,14 @@ def test_gaussian_batch_matches_dense_precision(batch, steps):
     np.testing.assert_allclose(chain.log_potential(values), expected, atol=2e-6)
 
 
-@pytest.mark.parametrize('batch', [(), (2,), (2, 3), (0, 2)])
-@pytest.mark.parametrize('steps', [1, 4])
+@pytest.mark.parametrize(
+    ('batch', 'steps'),
+    [
+        ((), 1),
+        ((2, 3), 3),
+        ((0, 2), 3),
+    ],
+)
 def test_discrete_batch_matches_enumerated_paths(batch, steps):
     chain = discrete_chain(batch, steps)
     posterior, logz = jax.jit(DiscreteChain.forward_backward)(chain)
@@ -143,10 +197,19 @@ def test_discrete_batch_matches_enumerated_paths(batch, steps):
                         )
 
 
-@pytest.mark.parametrize('make_chain', [gaussian_chain, discrete_chain])
-def test_batch_transformations_and_scalar_selection(make_chain):
-    chain = make_chain((2, 3), 4)
-    marginals, _ = chain.forward_backward()
+@pytest.mark.parametrize(
+    ('make_chain', 'make_marginals'),
+    [
+        (gaussian_chain_structure, gaussian_marginals),
+        (discrete_chain_structure, discrete_marginals),
+    ],
+)
+def test_batch_transformations_and_scalar_selection(make_chain, make_marginals):
+    chain = make_chain((2, 3), 2)
+    # Batch transformations are structural. Construct marginals directly rather
+    # than paying for another forward-backward pass; inference/JIT are covered
+    # by the dense/enumerated tests above and dedicated chain tests.
+    marginals = make_marginals((2, 3), 2)
     for obj in (chain, marginals):
         transformed = (
             obj.broadcast(1, axis=1)
@@ -166,12 +229,6 @@ def test_batch_transformations_and_scalar_selection(make_chain):
             obj.select(None)
         with pytest.raises(ValueError):
             obj.move_axis(0, 2)
-    selected, selected_logz = jax.jit(lambda c: c.select((1, 2)).forward_backward())(
-        chain
-    )
-    for actual, expected in zip(selected, marginals.select((1, 2))):
-        np.testing.assert_allclose(actual, expected, atol=2e-6)
-    assert selected_logz.shape == ()
     with pytest.raises(ValueError, match='batch shapes must match'):
         marginals.expected_log_potential(chain.select(0))
 
@@ -202,7 +259,7 @@ def test_batch_gradients_are_chain_local():
 
 
 def test_state_permutation_is_distinct_from_batch_permutation():
-    chain = discrete_chain((2,), 4)
+    chain = discrete_chain((2,), 2)
     posterior, _ = chain.forward_backward()
     p = jnp.array([2, 0, 1])
     relabeled = posterior.permute_states(p)

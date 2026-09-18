@@ -19,19 +19,21 @@ def gaussian(batch=(2, 3), dim=2):
     )
 
 
-@pytest.mark.parametrize('sample_shape', [(), (2,), (2, 2), (0,)])
+@pytest.mark.parametrize('sample_shape', [(), (2, 2), (0,)])
 def test_distribution_samples_follow_batch(sample_shape):
     key = jax.random.key(7)
     g = gaussian()
     shape = g.batch_shape + sample_shape
     expanded = g.broadcast(sample_shape, axis=2)
     np.testing.assert_array_equal(g.sample(key, sample_shape), expanded.sample(key))
+
     p = Poisson(jnp.log(jnp.arange(1.0, 13.0).reshape(2, 3, 2)))
     np.testing.assert_array_equal(
         p.sample(key, sample_shape), p.broadcast(sample_shape, axis=2).sample(key)
     )
+
     c = Categorical(jax.nn.one_hot(jnp.arange(6).reshape(2, 3) % 4, 4))
-    result = jax.jit(lambda k: c.sample(k, sample_shape))(key)
+    result = c.sample(key, sample_shape)
     assert result.shape == shape
     np.testing.assert_array_equal(
         result,
@@ -40,6 +42,12 @@ def test_distribution_samples_follow_batch(sample_shape):
             shape,
         ),
     )
+
+
+def test_categorical_sampling_is_jittable():
+    categorical = Categorical(jax.nn.one_hot(jnp.arange(6).reshape(2, 3) % 4, 4))
+    result = jax.jit(lambda key: categorical.sample(key, (2,)))(jax.random.key(7))
+    assert result.shape == (2, 3, 2)
 
 
 @pytest.mark.parametrize('steps', [0, 1, 5])
@@ -163,9 +171,29 @@ def test_gated_random_walk_aligns_gates_and_replicates(steps):
 
 
 def hermite():
-    return HermiteSpline.from_function_prior(
-        num_motifs=2, num_knots=3, alpha_amp=1.0, alpha_smooth=1.0, batch_shape=(2, 3)
+    # The common-batch test is about structural operations, so construct a
+    # valid spline directly instead of rebuilding the function prior each time.
+    return HermiteSpline(
+        coefficient_prior=Gaussian(
+            mean=jnp.zeros((2, 3, 4)),
+            covariance=jnp.broadcast_to(jnp.eye(4), (2, 3, 4, 4)),
+        ),
+        num_motifs=2,
     )
+
+
+def test_hermite_function_prior_constructor():
+    # Keep explicit coverage of the factory, but use its minimal valid problem.
+    spline = HermiteSpline.from_function_prior(
+        num_motifs=1,
+        num_knots=2,
+        alpha_amp=1.0,
+        alpha_smooth=1.0,
+    )
+    assert spline.batch_shape == ()
+    assert spline.num_motifs == 1
+    assert spline.num_knots == 2
+    assert spline.coefficient_prior.mean.shape == (1,)
 
 
 @pytest.mark.parametrize(

@@ -1,13 +1,20 @@
 import jax
-from jax import numpy as jnp
+import jax.numpy as jnp
 
 from xxm.lds.init import init_gaussian_via_pca
 
+OBSERVATIONS = jnp.array(
+    [
+        [0.0, 1.0, 0.5],
+        [1.0, 0.0, -0.5],
+        [2.0, 1.0, 1.0],
+        [3.0, -1.0, 0.0],
+    ]
+)
+
 
 def test_gaussian_via_pca_returns_model_with_requested_latent_dimension():
-    observations = jnp.arange(24.0).reshape(8, 3)
-
-    model = init_gaussian_via_pca(observations, latent_dim=2)
+    model = init_gaussian_via_pca(OBSERVATIONS, latent_dim=2)
 
     assert model.initial.dist.mean.shape == (2,)
     assert model.dynamics.dist.affine.coefficients.shape == (2, 2)
@@ -15,10 +22,8 @@ def test_gaussian_via_pca_returns_model_with_requested_latent_dimension():
 
 
 def test_gaussian_via_pca_is_jittable():
-    observations = jnp.arange(24.0).reshape(8, 3)
-
     model = jax.jit(init_gaussian_via_pca, static_argnames='latent_dim')(
-        observations, latent_dim=2
+        OBSERVATIONS, latent_dim=2
     )
 
     assert model.emissions.dist.covariance.shape == (3, 3)

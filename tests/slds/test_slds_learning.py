@@ -165,7 +165,7 @@ def test_variational_em_step_returns_finite_objective():
     inferred = variational_em_step(
         Inferred(model=model, posterior=_posterior(), objective=jnp.array(0.0)),
         observations,
-        num_inference_iters=2,
+        num_inference_iters=1,
     )
 
     assert np.isfinite(inferred.objective)

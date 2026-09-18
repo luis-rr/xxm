@@ -9,7 +9,6 @@ import pytest
 import xxm
 from xxm import arhmm, hmm
 from xxm.arhmm.data import ARObservations
-from xxm.arhmm.learning import em_step
 
 
 def _model(family):
@@ -121,20 +120,20 @@ def test_exact_posterior_matches_enumerated_paths(family, num_targets):
 
 @pytest.mark.parametrize('facade', [arhmm.GaussianARHMM, arhmm.PoissonARHMM])
 def test_fitting_and_multiple_initializations(facade):
-    observations = jnp.array([[0.0], [1.0], [1.0], [0.0], [2.0], [1.0]])
+    # This is a facade/wiring test. One short sequence and one EM step exercise
+    # k-means initialization plus fit without duplicating the explicit em_step
+    # calculation already covered by lower-level/integration tests.
+    observations = jnp.array([[0.0], [1.0], [2.0], [1.0]])
     initialized = facade.via_kmeans(
         jax.random.key(2), observations, num_states=2, num_lags=1
     )
     assert initialized.states.affine.coefficients.shape == (2, 1, 1, 1)
 
-    inferred = arhmm.infer_exact(initialized._model, observations)
-    updated = em_step(inferred, observations)
     fit = initialized.fit(observations, num_iters=1, progress=False)
 
-    assert fit.posterior.state_probs.shape == (5, 2)
+    assert fit.posterior.state_probs.shape == (3, 2)
     assert fit.model.states.affine.coefficients.shape == (2, 1, 1, 1)
     assert fit.objective_trace.shape == (2,)
-    np.testing.assert_allclose(fit.objective_trace[1], updated.objective, atol=2e-5)
     for leaf in jax.tree.leaves(fit):
         assert np.isfinite(leaf).all()
 

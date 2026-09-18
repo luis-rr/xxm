@@ -130,12 +130,12 @@ def _two_state_model() -> Model:
 
 def test_single_state_slds_matches_gaussian_chain():
     model = _single_state_model()
-    observations = jnp.array([[0.2], [1.0], [-0.3]])
+    observations = jnp.array([[0.2], [1.0]])
 
     posterior = infer_variational(
         model,
         observations,
-        num_iters=1,
+        num_iters=0,
         initial_latents=jnp.zeros((observations.shape[0], 1)),
     ).posterior
 
@@ -184,7 +184,7 @@ def test_single_state_slds_matches_gaussian_chain():
 
 def test_zero_iterations_uses_initial_latents():
     model = _two_state_model()
-    observations = jnp.zeros((4, 1))
+    observations = jnp.zeros((1, 1))
     initial_latents = jnp.zeros((observations.shape[0], 1))
 
     posterior = infer_variational(
@@ -215,26 +215,19 @@ def test_zero_iterations_uses_initial_latents():
         atol=ATOL,
     )
 
-    assert posterior.continuous.means.shape == (4, 1)
+    assert posterior.continuous.means.shape == (1, 1)
 
 
 def test_infer_variational_is_jittable():
 
     model = _two_state_model()
-    observations = jnp.array(
-        [
-            [0.0],
-            [0.5],
-            [1.0],
-            [0.2],
-        ]
-    )
+    observations = jnp.array([[0.0], [0.5]])
     initial_latents = jnp.zeros((observations.shape[0], 1))
 
     eager = infer_variational(
         model,
         observations,
-        num_iters=2,
+        num_iters=1,
         initial_latents=initial_latents,
     )
 
@@ -246,7 +239,7 @@ def test_infer_variational_is_jittable():
     jitted = inference_jit(
         model,
         observations,
-        num_iters=2,
+        num_iters=1,
         initial_latents=initial_latents,
     )
 

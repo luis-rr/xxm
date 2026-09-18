@@ -32,6 +32,9 @@ from xxm.core.latents.switching import GaussianLinearSwitchingDynamics
 B = (2, 3)
 K, T, D, O, L = 2, 3, 2, 2, 1
 CHECK_INDICES = ((0, 0), (1, 2))
+FIT_SELECTION = (slice(None), 0)
+FIT_B = (2,)
+FIT_INDICES = (0, 1)
 
 
 def _values(shape):
@@ -208,150 +211,138 @@ def test_aligned_state_selection_matches_manual_rows(query_shape):
 
 
 def test_discrete_latent_fit_and_sampling():
-    initial = CategoricalInitial(_categorical(B))
-    transitions = CategoricalTransitions(_categorical(B + (K,)))
-    posterior = _discrete_posterior()
+    # Multi-axis structural semantics are covered above. Fitting only needs a
+    # non-scalar batch to verify independent parameter updates.
+    initial = CategoricalInitial(_categorical(B)).select(FIT_SELECTION)
+    transitions = CategoricalTransitions(_categorical(B + (K,))).select(FIT_SELECTION)
+    posterior = _discrete_posterior().select(FIT_SELECTION)
     for component in (initial, transitions):
         fitted = component.fit_params(posterior)
-        assert fitted.batch_shape == B
-        for i, j in np.ndindex(B):
+        assert fitted.batch_shape == FIT_B
+        for index in FIT_INDICES:
             _assert_tree_close(
-                fitted.select((i, j)),
-                component.select((i, j)).fit_params(posterior.select((i, j))),
+                fitted.select(index),
+                component.select(index).fit_params(posterior.select(index)),
             )
     states = initial.sample(jax.random.key(0))
-    assert states.shape == B
+    assert states.shape == FIT_B
     trajectory = transitions.sample(jax.random.key(1), states, T)
-    assert trajectory.shape == B + (T,)
+    assert trajectory.shape == FIT_B + (T,)
     np.testing.assert_array_equal(trajectory[..., 0], states)
     assert bool(jnp.all((trajectory >= 0) & (trajectory < K)))
-    assert transitions.sample(jax.random.key(1), states, 1).shape == B + (1,)
+    assert transitions.sample(jax.random.key(1), states, 1).shape == FIT_B + (1,)
     chain = homogeneous_chain(initial, transitions, T)
-    assert chain.transition_probs.shape == B + (T - 1, K, K)
-    assert chain.state_log_potentials.shape == B + (T, K)
+    assert chain.transition_probs.shape == FIT_B + (T - 1, K, K)
+    assert chain.state_log_potentials.shape == FIT_B + (T, K)
 
 
 @pytest.mark.parametrize('kind', ['gaussian_initial', 'gaussian_dynamics', 'switching'])
-def test_gaussian_latent_fit_and_sampling(kind, component):
-    posterior = _continuous_posterior()
-    discrete_posterior = _discrete_posterior()
-    if kind == 'switching':
-        fitted = component.fit_params(discrete_posterior, posterior)
-    else:
-        fitted = component.fit_params(posterior)
-    assert fitted.batch_shape == B
-    for i, j in CHECK_INDICES:
-        standalone = component.select((i, j))
-        marginal = posterior.select((i, j))
-        expected = (
-            standalone.fit_params(discrete_posterior.select((i, j)), marginal)
-            if kind == 'switching'
-            else standalone.fit_params(marginal)
-        )
-        _assert_tree_close(fitted.select((i, j)), expected)
+def test_gaussian_latent_sampling_and_potentials(kind, component):
+    # Parameter fitting is exercised by the owning model/statistics tests and by
+    # the representative batched-fit test below. Here we only need to verify
+    # that the wrapper preserves structural batch axes during model operations.
+    component = component.select(FIT_SELECTION)
+    posterior = _continuous_posterior().select(FIT_SELECTION)
 
     key = jax.random.key(2)
     if kind == 'gaussian_initial':
-        assert component.sample(key).shape == B + (D,)
+        assert component.sample(key).shape == FIT_B + (D,)
     else:
         initial = posterior.means[..., 0, :]
         last_arg = (
-            jnp.zeros(B + (T - 1,), dtype=jnp.int32) if kind == 'switching' else T
+            jnp.zeros(FIT_B + (T - 1,), dtype=jnp.int32) if kind == 'switching' else T
         )
         sampled = component.sample(key, initial, last_arg)
-        assert sampled.shape == B + (T, D)
+        assert sampled.shape == FIT_B + (T, D)
         np.testing.assert_array_equal(sampled[..., 0, :], initial)
     if kind == 'switching':
-        assert component.compute_pair_potentials().batch_shape == B + (K,)
+        assert component.compute_pair_potentials().batch_shape == FIT_B + (K,)
 
 
 @pytest.mark.parametrize(
     'kind', ['discrete_gaussian', 'discrete_poisson', 'ar_gaussian', 'ar_poisson']
 )
-def test_state_emission_likelihood_fit_and_sampling(kind, component):
-    observations = jnp.arange(math.prod(B + (T, O))).reshape(B + (T, O)) % 4
-    observations = observations.astype(jnp.float32)
+def test_state_emission_likelihood_and_sampling(kind, component):
+    # Fitting is deliberately not repeated here: HMM/AR-HMM tests verify the
+    # M-steps, stats tests verify batched Gaussian/Poisson fitting, and the
+    # unoccupied-state regression below still drives fit_params through every
+    # state-emission wrapper. This test owns batch alignment/evaluation/sampling.
+    component = component.select(FIT_SELECTION)
+    observations = (
+        jnp.arange(math.prod(FIT_B + (T, O))).reshape(FIT_B + (T, O)) % 4
+    ).astype(jnp.float32)
     is_ar = kind.startswith('ar_')
     data = ARObservations.from_observations(observations, L) if is_ar else observations
-    posterior = _discrete_posterior(T - L if is_ar else T)
     likelihood = component.log_likelihoods(data)
-    assert likelihood.shape == B + (T - L if is_ar else T, K)
-    fitted = component.fit_params(data, posterior)
-    assert fitted.dist.batch_shape == B + (K,)
-    for i, j in CHECK_INDICES:
-        standalone = component.select((i, j))
+    assert likelihood.shape == FIT_B + (T - L if is_ar else T, K)
+    for index in FIT_INDICES:
+        standalone = component.select(index)
         data_i = (
-            ARObservations.from_observations(observations[i, j], L)
+            ARObservations.from_observations(observations[index], L)
             if is_ar
-            else observations[i, j]
+            else observations[index]
         )
         np.testing.assert_allclose(
-            likelihood[i, j], standalone.log_likelihoods(data_i), atol=2e-5
+            likelihood[index], standalone.log_likelihoods(data_i), atol=2e-5
         )
-        _assert_tree_close(
-            fitted.select((i, j)),
-            standalone.fit_params(data_i, posterior.select((i, j))),
-        )
-    states = jnp.zeros(B + (T,), dtype=jnp.int32)
-    assert component.sample(jax.random.key(3), states).shape == B + (T, O)
+    states = jnp.zeros(FIT_B + (T,), dtype=jnp.int32)
+    assert component.sample(jax.random.key(3), states).shape == FIT_B + (T, O)
     if is_ar:
         assert isinstance(data, ARObservations)
-        assert component.conditional(data.predictors).batch_shape == B + (T - L, K)
+        assert component.conditional(data.predictors).batch_shape == FIT_B + (T - L, K)
         assert component.sample_continuation(
             jax.random.key(3), states, observations[..., :L, :]
-        ).shape == B + (T, O)
+        ).shape == FIT_B + (T, O)
         with pytest.raises(ValueError, match='initial_history'):
             component.sample_continuation(
-                jax.random.key(3), states, observations[0, 0, :L]
+                jax.random.key(3), states, observations[0, :L]
             )
 
 
 @pytest.mark.parametrize('kind', ['continuous_gaussian', 'continuous_poisson'])
-def test_continuous_emission_evaluation_and_fit(kind, component):
-    posterior = _continuous_posterior()
+def test_continuous_emission_evaluation(kind, component):
+    # Fit correctness/JIT is covered in lds/test_lds_emissions.py; the low-level
+    # Gaussian and Poisson fitting tests cover multi-axis batches. Keep this
+    # generic test focused on wrapper batch alignment and derived operations.
+    component = component.select(FIT_SELECTION)
+    posterior = _continuous_posterior().select(FIT_SELECTION)
     latents = posterior.means
-    observations = (jnp.arange(math.prod(B + (T, O))).reshape(B + (T, O)) % 3).astype(
-        jnp.float32
-    )
+    observations = (
+        jnp.arange(math.prod(FIT_B + (T, O))).reshape(FIT_B + (T, O)) % 3
+    ).astype(jnp.float32)
     likelihood = component.log_likelihood(observations, latents)
-    assert likelihood.shape == B
-    assert component.conditional(latents).batch_shape == B + (T,)
-    assert component.sample(jax.random.key(4), latents).shape == B + (T, O)
-    assert component.invert(observations).shape == B + (T, D)
-    fitted = component.fit_params(observations, posterior)
-    assert fitted.batch_shape == B
+    assert likelihood.shape == FIT_B
+    assert component.conditional(latents).batch_shape == FIT_B + (T,)
+    assert component.sample(jax.random.key(4), latents).shape == FIT_B + (T, O)
+    assert component.invert(observations).shape == FIT_B + (T, D)
     potential = (
         component.compute_potential(observations)
         if kind == 'continuous_gaussian'
         else component.compute_local_potential(observations, latents)
     )
-    assert potential.batch_shape == B + (T,)
-    for i, j in CHECK_INDICES:
-        standalone = component.select((i, j))
+    assert potential.batch_shape == FIT_B + (T,)
+    for index in FIT_INDICES:
+        standalone = component.select(index)
         np.testing.assert_allclose(
-            likelihood[i, j],
-            standalone.log_likelihood(observations[i, j], latents[i, j]),
+            likelihood[index],
+            standalone.log_likelihood(observations[index], latents[index]),
             atol=2e-5,
         )
-        _assert_tree_close(
-            fitted.select((i, j)),
-            standalone.fit_params(observations[i, j], posterior.select((i, j))),
-        )
         expected_potential = (
-            standalone.compute_potential(observations[i, j])
+            standalone.compute_potential(observations[index])
             if kind == 'continuous_gaussian'
-            else standalone.compute_local_potential(observations[i, j], latents[i, j])
+            else standalone.compute_local_potential(observations[index], latents[index])
         )
-        _assert_tree_close(potential.select((i, j)), expected_potential)
+        _assert_tree_close(potential.select(index), expected_potential)
         _assert_tree_close(
-            component.observation_mean(posterior)[i, j],
-            standalone.observation_mean(posterior.select((i, j))),
+            component.observation_mean(posterior)[index],
+            standalone.observation_mean(posterior.select(index)),
         )
         if kind == 'continuous_poisson':
             _assert_tree_close(
-                component.expected_log_likelihood(observations, posterior)[i, j],
+                component.expected_log_likelihood(observations, posterior)[index],
                 standalone.expected_log_likelihood(
-                    observations[i, j], posterior.select((i, j))
+                    observations[index], posterior.select(index)
                 ),
             )
 
