@@ -2,7 +2,6 @@ import jax
 import numpy as np
 from jax import numpy as jnp
 
-from tests.lds.lds_helpers import make_model, make_observations
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
@@ -19,6 +18,8 @@ from xxm.lds.inference import (
     infer_laplace,
     to_chain,
 )
+
+from .lds_helpers import make_model, make_observations
 
 
 def make_scalar_poisson_model() -> Model[PoissonEmissions]:

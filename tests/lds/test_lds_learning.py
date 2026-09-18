@@ -1,9 +1,10 @@
 import jax
 import numpy as np
 
-from tests.lds.lds_helpers import make_model, make_observations
 from xxm.lds.inference import infer_exact
 from xxm.lds.learning import em_step, fit_em
+
+from .lds_helpers import make_model, make_observations
 
 
 def test_em_step_returns_a_model_and_finite_objective():
