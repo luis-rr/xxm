@@ -72,7 +72,10 @@ class GaussianInitial(typing.NamedTuple):
         r"""
         Express the initial distribution in coordinates $x' = f(x)$ defined by `alignment`.
         """
-        assert alignment.batch_shape in ((), self.batch_shape)
+        if alignment.batch_shape == ():
+            alignment = alignment.broadcast(self.batch_shape)
+        else:
+            _batch.require_same(alignment.batch_shape, self.batch_shape)
         return self._replace(dist=self.dist.affine(alignment))
 
     @classmethod
@@ -302,5 +305,13 @@ class StateConditionedGaussian(typing.NamedTuple):
         """
         Express the conditional distributions in coordinates $x' = f(x)$.
         """
-        assert alignment.batch_shape in ((), self.batch_shape)
-        return self._replace(dist=self.dist.affine(alignment))
+        if alignment.batch_shape == ():
+            aligned = alignment.broadcast(self.dist.batch_shape)
+        else:
+            _batch.require_same(alignment.batch_shape, self.batch_shape)
+            aligned = alignment.broadcast(
+                (self.num_states,),
+                axis=len(self.batch_shape),
+            )
+
+        return self._replace(dist=self.dist.affine(aligned))

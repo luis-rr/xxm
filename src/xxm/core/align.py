@@ -5,6 +5,7 @@ import itertools
 import jax
 import jax.numpy as jnp
 
+from xxm.core import _batch
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.optim import gaussian as _gaussian_fit
@@ -238,15 +239,15 @@ def zscore_gaussian(gaussian: Gaussian) -> Affine:
     """Return an affine map that z-scores a Gaussian distribution.
 
     For a batched Gaussian, first moment-match the batch into a single
-    distribution. The returned map centers each variable at zero and scales
-    it to unit marginal variance.
+    distribution. Structural batch entries are flattened and equally
+    moment-matched before computing the z-score transform. The returned map
+    centers each variable at zero and scales it to unit marginal variance.
     """
-    if len(gaussian.batch_shape) > 1:
-        raise ValueError(
-            'gaussian must be unbatched or have exactly one batch dimension'
-        )
-
     if gaussian.batch_shape:
+        gaussian = _batch.flatten_batch(
+            gaussian,
+            gaussian.batch_shape,
+        )
         gaussian = _gaussian_fit.from_moment_match(gaussian)
 
     scale = jnp.sqrt(gaussian.variance)

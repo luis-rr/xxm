@@ -96,6 +96,7 @@ class _NewtonSearchModel(typing.NamedTuple):
         if self.input_covariances is None:
             return linear_model.conditional(self.input_means).rates
 
+        linear_model = linear_model.broadcast((self.input_means.shape[0],))
         return linear_model.expected_rates(
             Gaussian(
                 mean=self.input_means,
@@ -115,6 +116,7 @@ class _NewtonSearchModel(typing.NamedTuple):
             )
 
         else:
+            linear_model = linear_model.broadcast((self.input_means.shape[0],))
             log_probs = linear_model.expected_log_prob_each(
                 values=self.values,
                 inputs=Gaussian(

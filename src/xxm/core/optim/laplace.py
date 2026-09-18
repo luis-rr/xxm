@@ -19,22 +19,27 @@ class _NewtonSearchParams(typing.NamedTuple):
     latents: jax.Array
 
     def take_step(self, direction: typing.Self, step_size: jax.Array) -> typing.Self:
-
         return self.__class__(
-            latents=self.latents + step_size * direction.latents,
+            latents=(self.latents + step_size[..., None, None] * direction.latents),
         )
 
     def relative_change_from(self, other: typing.Self) -> jax.Array:
+        distance = jnp.linalg.norm(
+            self.latents - other.latents,
+            axis=(-2, -1),
+        )
 
-        distance = jnp.linalg.norm(self.latents - other.latents)
-
-        return distance / (1.0 + jnp.linalg.norm(other.latents))
+        scale = 1.0 + jnp.linalg.norm(
+            other.latents,
+            axis=(-2, -1),
+        )
+        return distance / scale
 
     def where(self, mask: jax.Array, other: typing.Self) -> typing.Self:
 
         return self.__class__(
             latents=jnp.where(
-                mask,
+                mask[..., None, None],
                 self.latents,
                 other.latents,
             ),

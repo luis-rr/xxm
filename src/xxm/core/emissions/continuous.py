@@ -325,9 +325,14 @@ class PoissonEmissions(typing.NamedTuple):
         posterior: ContinuousPosterior,
     ) -> jax.Array:
         """Expected conditional log likelihood under Gaussian latent marginals."""
+        num_steps = posterior.means.shape[-2]
+        dist = self.dist.broadcast(
+            (num_steps,),
+            axis=len(self.batch_shape),
+        )
 
         return jnp.sum(
-            self.dist.expected_log_prob(
+            dist.expected_log_prob(
                 values=observations,
                 inputs=Gaussian(
                     mean=posterior.means,
@@ -403,7 +408,12 @@ class PoissonEmissions(typing.NamedTuple):
 
     def observation_mean(self, posterior: ContinuousPosterior) -> jax.Array:
         """Compute expected observations under posterior latent marginals."""
-        return self.dist.expected_rates(
+        num_steps = posterior.means.shape[-2]
+        dist = self.dist.broadcast(
+            (num_steps,),
+            axis=len(self.batch_shape),
+        )
+        return dist.expected_rates(
             Gaussian(
                 mean=posterior.means,
                 covariance=posterior.covariances,

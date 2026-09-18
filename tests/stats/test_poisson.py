@@ -48,7 +48,7 @@ def test_expected_log_likelihood_matches_gaussian_moment_formula():
     # E[eta] = 2, Var[eta] = 2, so E[exp(eta)] = exp(3).
     linear_model = LinearPoisson(
         affine=Affine(coefficients=jnp.array([[2.0]]), bias=jnp.array([0.0]))
-    )
+    ).broadcast((1,))
 
     actual = linear_model.expected_log_prob(
         values=jnp.array([[2.0]]),
@@ -65,7 +65,7 @@ def test_deterministic_inputs_match_zero_covariance_marginals():
     means = jnp.array([[0.0], [1.0]])
     linear_model = LinearPoisson(
         affine=Affine(coefficients=jnp.array([[0.5]]), bias=jnp.array([-0.2]))
-    )
+    ).broadcast((2,))
 
     deterministic = linear_model.conditional(means).log_prob_each(observations)
     zero_covariance = linear_model.expected_log_prob_each(
@@ -215,7 +215,7 @@ def test_public_routines_are_jittable():
     ):
         linear_model = LinearPoisson(
             affine=Affine(coefficients=coefficients, bias=bias)
-        )
+        ).broadcast((observations.shape[0],))
         inputs = Gaussian(mean=means, covariance=covariances)
 
         log_likelihoods = Poisson(log_rates=log_rates).log_prob_broadcast(observations)

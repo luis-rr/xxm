@@ -566,7 +566,7 @@ class GaussianPairPotential(typing.NamedTuple):
     ) -> jax.Array:
         r"""Compute the expected pair log potential from aligned joint moments.
 
-        Posterior batches begin with the potential batch; query axes follow.
+        The posterior and potential batches must be aligned.
         """
         if posterior.left_dim != self.variable_dim:
             raise ValueError(
@@ -579,25 +579,7 @@ class GaussianPairPotential(typing.NamedTuple):
                 f'right variable dimension must be {self.variable_dim}; '
                 f'got {posterior.right_dim}'
             )
-
-        batch_shape = self.batch_shape
-        shape = posterior.batch_shape
-        potential = GaussianPairPotential(
-            left_precision=_batch.align_array(self.left_precision, batch_shape, shape),
-            right_precision=_batch.align_array(
-                self.right_precision, batch_shape, shape
-            ),
-            lower_precision=_batch.align_array(
-                self.lower_precision, batch_shape, shape
-            ),
-            left_information=_batch.align_array(
-                self.left_information, batch_shape, shape
-            ),
-            right_information=_batch.align_array(
-                self.right_information, batch_shape, shape
-            ),
-            log_constant=_batch.align_array(self.log_constant, batch_shape, shape),
-        )
+        _batch.require_same(self.batch_shape, posterior.batch_shape)
 
         left_mean = posterior.left.mean
         right_mean = posterior.right.mean
@@ -629,36 +611,42 @@ class GaussianPairPotential(typing.NamedTuple):
             -0.5
             * jnp.einsum(
                 '...ij,...ij->...',
-                potential.left_precision,
+                self.left_precision,
                 left_second,
             )
             - jnp.einsum(
                 '...ij,...ji->...',
-                potential.lower_precision,
+                self.lower_precision,
                 left_right_moment,
             )
             - 0.5
             * jnp.einsum(
                 '...ij,...ij->...',
-                potential.right_precision,
+                self.right_precision,
                 right_second,
             )
             + jnp.einsum(
                 '...i,...i->...',
-                potential.left_information,
+                self.left_information,
                 left_mean,
             )
             + jnp.einsum(
                 '...i,...i->...',
-                potential.right_information,
+                self.right_information,
                 right_mean,
             )
-            + potential.log_constant
+            + self.log_constant
         )
 
     def expected_log_potential_broadcast(self, posterior: PairedGaussian) -> jax.Array:
         """Evaluate all joint moments with receiver batch axes first."""
-        return self.expected_log_potential(posterior.broadcast(self.batch_shape))
+        posterior_batch = posterior.batch_shape
+        potential = self.broadcast(
+            posterior_batch,
+            axis=len(self.batch_shape),
+        )
+        posterior = posterior.broadcast(self.batch_shape)
+        return potential.expected_log_potential(posterior)
 
     def select(self, index) -> typing.Self:
         """Index only batch dimensions, retaining this object type."""

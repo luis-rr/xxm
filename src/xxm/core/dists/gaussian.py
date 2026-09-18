@@ -196,6 +196,8 @@ class Gaussian(typing.NamedTuple):
         self,
         affine: Affine,
     ) -> None:
+        _batch.require_same(self.batch_shape, affine.batch_shape)
+
         if affine.input_shape != (self.variable_dim,):
             raise ValueError(
                 'Gaussian affine transformations require vector-shaped inputs; '
@@ -220,13 +222,9 @@ class Gaussian(typing.NamedTuple):
 
         return jnp.einsum(
             '...oi,...ij,...pj->...op',
-            _batch.align_array(
-                affine.coefficients, affine.batch_shape, self.batch_shape
-            ),
+            affine.coefficients,
             self.covariance,
-            _batch.align_array(
-                affine.coefficients, affine.batch_shape, self.batch_shape
-            ),
+            affine.coefficients,
         )
 
     def affine_variance(
@@ -238,13 +236,9 @@ class Gaussian(typing.NamedTuple):
 
         return jnp.einsum(
             '...oi,...ij,...oj->...o',
-            _batch.align_array(
-                affine.coefficients, affine.batch_shape, self.batch_shape
-            ),
+            affine.coefficients,
             self.covariance,
-            _batch.align_array(
-                affine.coefficients, affine.batch_shape, self.batch_shape
-            ),
+            affine.coefficients,
         )
 
     def affine(
@@ -311,7 +305,10 @@ class Gaussian(typing.NamedTuple):
     ) -> jax.Array:
         r"""
         Expected log density $\mathbb{E}_{u\sim\text{other}}[\log p(u)]$.
+
+        The two Gaussian objects must have aligned batches.
         """
+        _batch.require_same(self.batch_shape, other.batch_shape)
         if other.mean.shape[-1] != self.variable_dim:
             raise ValueError(
                 f'mean must have trailing dimension {self.variable_dim}; '
@@ -328,13 +325,10 @@ class Gaussian(typing.NamedTuple):
                 f'got {other.covariance.shape}'
             )
 
-        batch_shape = other.batch_shape
         mean = other.mean
         covariance = other.covariance
-        model_mean = _batch.align_array(self.mean, self.batch_shape, batch_shape)
-        cholesky = _batch.align_array(
-            jnp.linalg.cholesky(self.covariance), self.batch_shape, batch_shape
-        )
+        model_mean = self.mean
+        cholesky = jnp.linalg.cholesky(self.covariance)
 
         residual = mean - model_mean
 
@@ -560,12 +554,16 @@ class LinearGaussian(typing.NamedTuple):
 
         `input_output_covariance` stores $\operatorname{Cov}_q(u,v)$ with
         trailing shape $(I,O)$; tensor-shaped inputs are flattened.
+
+        The model, input Gaussian, output Gaussian, and cross-covariance must
+        have aligned batches.
         """
         input_mean_flat = self.affine.flatten_input(
             input.mean,
         )
 
         shape = input_mean_flat.shape[:-1]
+        _batch.require_same(self.batch_shape, shape)
         _batch.require_same(shape, input.covariance.shape[:-2])
         _batch.require_same(shape, output.batch_shape)
         if input.covariance.shape[-2:] != (self.input_size, self.input_size):
@@ -578,10 +576,8 @@ class LinearGaussian(typing.NamedTuple):
             raise ValueError(
                 'output and cross covariance must match the conditional dimensions'
             )
-        coefficients = _batch.align_array(
-            self.affine.coefficients_flat, self.batch_shape, shape
-        )
-        bias = _batch.align_array(self.affine.bias, self.batch_shape, shape)
+        coefficients = self.affine.coefficients_flat
+        bias = self.affine.bias
 
         residual_mean = (
             output.mean
@@ -651,16 +647,26 @@ class LinearGaussian(typing.NamedTuple):
         """
         # Gaussian input means may retain the conditional's tensor input shape.
         input = Gaussian(self.affine.flatten_input(input.mean), input.covariance)
+        query_shape = input.batch_shape
+        _batch.require_same(query_shape, output.batch_shape)
+        _batch.require_same(query_shape, input_output_covariance.shape[:-2])
+
+        model = self.broadcast(
+            query_shape,
+            axis=len(self.batch_shape),
+        )
         input = input.broadcast(self.batch_shape)
+        output = output.broadcast(self.batch_shape)
+        input_output_covariance = jnp.broadcast_to(
+            input_output_covariance,
+            self.batch_shape + input_output_covariance.shape,
+        )
         if self.input_ndim != 1:
             input = input._replace(mean=self.affine.unflatten_input(input.mean))
-        return self.expected_log_prob(
+        return model.expected_log_prob(
             input,
-            output.broadcast(self.batch_shape),
-            jnp.broadcast_to(
-                input_output_covariance,
-                self.batch_shape + input_output_covariance.shape,
-            ),
+            output,
+            input_output_covariance,
         )
 
     def squeeze(self, axis=None) -> typing.Self:
