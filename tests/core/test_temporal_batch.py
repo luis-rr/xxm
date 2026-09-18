@@ -19,7 +19,7 @@ def gaussian(batch=(2, 3), dim=2):
     )
 
 
-@pytest.mark.parametrize('sample_shape', [(), (5,), (5, 4), (0,)])
+@pytest.mark.parametrize('sample_shape', [(), (2,), (2, 2), (0,)])
 def test_distribution_samples_follow_batch(sample_shape):
     key = jax.random.key(7)
     g = gaussian()

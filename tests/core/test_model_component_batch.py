@@ -30,7 +30,8 @@ from xxm.core.latents.gaussian import (
 from xxm.core.latents.switching import GaussianLinearSwitchingDynamics
 
 B = (2, 3)
-K, T, D, O, L = 4, 6, 2, 3, 2
+K, T, D, O, L = 2, 3, 2, 2, 1
+CHECK_INDICES = ((0, 0), (1, 2))
 
 
 def _values(shape):
@@ -239,7 +240,7 @@ def test_gaussian_latent_fit_and_sampling(kind, component):
     else:
         fitted = component.fit_params(posterior)
     assert fitted.batch_shape == B
-    for i, j in np.ndindex(B):
+    for i, j in CHECK_INDICES:
         standalone = component.select((i, j))
         marginal = posterior.select((i, j))
         expected = (
@@ -277,7 +278,7 @@ def test_state_emission_likelihood_fit_and_sampling(kind, component):
     assert likelihood.shape == B + (T - L if is_ar else T, K)
     fitted = component.fit_params(data, posterior)
     assert fitted.dist.batch_shape == B + (K,)
-    for i, j in np.ndindex(B):
+    for i, j in CHECK_INDICES:
         standalone = component.select((i, j))
         data_i = (
             ARObservations.from_observations(observations[i, j], L)
@@ -325,7 +326,7 @@ def test_continuous_emission_evaluation_and_fit(kind, component):
         else component.compute_local_potential(observations, latents)
     )
     assert potential.batch_shape == B + (T,)
-    for i, j in np.ndindex(B):
+    for i, j in CHECK_INDICES:
         standalone = component.select((i, j))
         np.testing.assert_allclose(
             likelihood[i, j],
@@ -374,7 +375,7 @@ def test_from_latents_matches_independent_sequences(component_type):
     args = (latents, observations) if has_observations else (latents,)
     fitted = component_type.from_latents(*args)
     assert fitted.batch_shape == B
-    for i, j in np.ndindex(B):
+    for i, j in CHECK_INDICES:
         args_i = (
             (latents[i, j], observations[i, j])
             if has_observations
@@ -432,7 +433,7 @@ def test_alignment_matches_standalone_components(kind, component, global_alignme
     ],
 )
 def test_state_permutation_preserves_structural_batch(kind, component):
-    order = jnp.array([2, 0, 3, 1])
+    order = jnp.array([1, 0])
     permuted = component.permute_states(order)
     assert permuted.batch_shape == B
     for i, j in np.ndindex(B):

@@ -7,180 +7,240 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from xxm import arhmm, hmm, lds, slds
 from xxm.arhmm.inference import infer_exact as infer_arhmm
-from xxm.arhmm.init import init_gaussian_via_kmeans as initialize_arhmm_gaussian
-from xxm.arhmm.init import init_poisson_via_kmeans as initialize_arhmm_poisson
 from xxm.arhmm.learning import em_step as arhmm_em_step
-from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS
+from xxm.core.optim.newton import OptimParams
 from xxm.hmm.inference import infer_exact as infer_hmm
-from xxm.hmm.init import (
-    init_gaussian_via_kmeans,
-    init_poisson_via_kmeans,
-)
 from xxm.hmm.learning import em_step as hmm_em_step
 from xxm.lds.inference import infer_exact as infer_lds
 from xxm.lds.inference import infer_laplace as infer_lds_laplace
-from xxm.lds.init import init_gaussian_via_pca as initialize_lds_gaussian
-from xxm.lds.init import init_poisson_via_pca as initialize_lds_poisson
 from xxm.lds.learning import em_step as lds_em_step
 from xxm.lds.learning import laplace_em_step as lds_laplace_em_step
 from xxm.slds.inference import infer_laplace as infer_slds_laplace
 from xxm.slds.inference import infer_variational as infer_slds
-from xxm.slds.init import init_gaussian_via_pca as initialize_slds_gaussian
-from xxm.slds.init import init_poisson_via_pca as initialize_slds_poisson
 from xxm.slds.learning import laplace_em_step as slds_laplace_em_step
 from xxm.slds.learning import variational_em_step as slds_variational_em_step
 
 
 class ModelCase(typing.NamedTuple):
     name: str
-    initialize: Callable
+    make_model: Callable
     infer: Callable
     infer_kwargs: dict
     em_step: Callable
     observations: jax.Array
-    init_kwargs: dict
 
 
 GAUSSIAN_OBSERVATIONS = jnp.array(
     [
-        [0.0, 0.1],
-        [0.2, 0.0],
-        [1.0, 1.1],
-        [0.9, 1.0],
-        [0.1, 0.2],
-        [1.1, 0.9],
+        [0.0],
+        [0.5],
+        [-0.25],
+        [0.25],
     ]
 )
 
-AR_GAUSSIAN_OBSERVATIONS = jnp.array(
-    [
-        [0.0, 0.1],
-        [0.2, 0.0],
-        [1.0, 1.1],
-        [0.9, 1.0],
-        [0.1, 0.2],
-        [1.1, 0.9],
-        [0.0, 0.1],
-        [0.2, 0.0],
-        [1.0, 1.1],
-        [0.9, 1.0],
-        [0.1, 0.2],
-        [1.1, 0.9],
-    ]
+# Constant unit counts keep the Poisson M-step well conditioned and make the
+# intercept-only model an exact optimum. The integration test is about wiring,
+# finiteness, and JAX compatibility, not optimizer convergence speed.
+POISSON_OBSERVATIONS = jnp.ones((4, 1), dtype=jnp.float32)
+
+INITIAL_PROBS = jnp.array([0.6, 0.4])
+TRANSITION_PROBS = jnp.array([[0.8, 0.2], [0.2, 0.8]])
+
+# Laplace inference only needs a couple of Newton iterations here. Dedicated
+# optimizer tests cover convergence behavior in detail.
+FAST_LAPLACE_PARAMS = OptimParams(
+    max_iter=2,
+    tol=1e-4,
+    max_line_search_iters=2,
 )
 
-POISSON_OBSERVATIONS = jnp.array(
-    [
-        [0, 1],
-        [1, 0],
-        [2, 1],
-        [3, 2],
-        [1, 1],
-        [2, 3],
-    ],
-    dtype=jnp.float32,
-)
+
+def _hmm_gaussian():
+    return hmm.GaussianHMM.from_params(
+        initial_probs=INITIAL_PROBS,
+        transition_probs=TRANSITION_PROBS,
+        emission_means=jnp.array([[0.0], [0.5]]),
+        emission_covariances=jnp.array([[[1.0]], [[1.0]]]),
+    )._model
+
+
+def _hmm_poisson():
+    return hmm.PoissonHMM.from_params(
+        initial_probs=INITIAL_PROBS,
+        transition_probs=TRANSITION_PROBS,
+        emission_log_rates=jnp.zeros((2, 1)),
+    )._model
+
+
+def _arhmm_gaussian():
+    return arhmm.GaussianARHMM.from_params(
+        initial_probs=INITIAL_PROBS,
+        transition_probs=TRANSITION_PROBS,
+        emission_coefficients=jnp.array([[[[0.2]]], [[[-0.1]]]]),
+        emission_bias=jnp.zeros((2, 1)),
+        emission_covariances=jnp.array([[[1.0]], [[1.0]]]),
+    )._model
+
+
+def _arhmm_poisson():
+    return arhmm.PoissonARHMM.from_params(
+        initial_probs=INITIAL_PROBS,
+        transition_probs=TRANSITION_PROBS,
+        emission_coefficients=jnp.zeros((2, 1, 1, 1)),
+        emission_bias=jnp.zeros((2, 1)),
+    )._model
+
+
+def _lds_gaussian():
+    return lds.GaussianLDS.from_params(
+        initial_mean=jnp.array([0.0]),
+        initial_covariance=jnp.array([[1.0]]),
+        dynamics_coefficients=jnp.array([[0.8]]),
+        dynamics_bias=jnp.array([0.0]),
+        dynamics_covariance=jnp.array([[0.5]]),
+        emission_coefficients=jnp.array([[1.0]]),
+        emission_bias=jnp.array([0.0]),
+        emission_covariance=jnp.array([[1.0]]),
+    )._model
+
+
+def _lds_poisson():
+    return lds.PoissonLDS.from_params(
+        initial_mean=jnp.array([0.0]),
+        initial_covariance=jnp.array([[1.0]]),
+        dynamics_coefficients=jnp.array([[0.8]]),
+        dynamics_bias=jnp.array([0.0]),
+        dynamics_covariance=jnp.array([[0.5]]),
+        emission_coefficients=jnp.zeros((1, 1)),
+        emission_bias=jnp.zeros(1),
+    )._model
+
+
+def _slds_gaussian():
+    return slds.GaussianSLDS.from_params(
+        initial_probs=INITIAL_PROBS,
+        transition_probs=TRANSITION_PROBS,
+        latent_initial_means=jnp.array([[0.0], [0.5]]),
+        latent_initial_covariances=jnp.array([[[1.0]], [[1.0]]]),
+        dynamics_coefficients=jnp.array([[[0.8]], [[0.2]]]),
+        dynamics_bias=jnp.zeros((2, 1)),
+        dynamics_covariances=jnp.array([[[0.5]], [[0.5]]]),
+        emission_coefficients=jnp.array([[1.0]]),
+        emission_bias=jnp.zeros(1),
+        emission_covariance=jnp.array([[1.0]]),
+    )._model
+
+
+def _slds_poisson():
+    return slds.PoissonSLDS.from_params(
+        initial_probs=INITIAL_PROBS,
+        transition_probs=TRANSITION_PROBS,
+        latent_initial_means=jnp.array([[0.0], [0.5]]),
+        latent_initial_covariances=jnp.array([[[1.0]], [[1.0]]]),
+        dynamics_coefficients=jnp.array([[[0.8]], [[0.2]]]),
+        dynamics_bias=jnp.zeros((2, 1)),
+        dynamics_covariances=jnp.array([[[0.5]], [[0.5]]]),
+        emission_coefficients=jnp.zeros((1, 1)),
+        emission_bias=jnp.zeros(1),
+    )._model
 
 
 MODEL_CASES = [
     ModelCase(
         name='hmm-gaussian',
-        initialize=init_gaussian_via_kmeans,
+        make_model=_hmm_gaussian,
         infer=infer_hmm,
         infer_kwargs={},
         em_step=hmm_em_step,
         observations=GAUSSIAN_OBSERVATIONS,
-        init_kwargs={'num_states': 2, 'key': jax.random.key(0)},
     ),
     ModelCase(
         name='hmm-poisson',
-        initialize=init_poisson_via_kmeans,
+        make_model=_hmm_poisson,
         infer=infer_hmm,
         infer_kwargs={},
         em_step=hmm_em_step,
         observations=POISSON_OBSERVATIONS,
-        init_kwargs={'num_states': 2, 'key': jax.random.key(0)},
     ),
     ModelCase(
         name='arhmm-gaussian',
-        initialize=initialize_arhmm_gaussian,
+        make_model=_arhmm_gaussian,
         infer=infer_arhmm,
         infer_kwargs={},
         em_step=arhmm_em_step,
-        observations=AR_GAUSSIAN_OBSERVATIONS,
-        init_kwargs={'num_states': 2, 'num_lags': 1, 'key': jax.random.key(0)},
+        observations=GAUSSIAN_OBSERVATIONS,
     ),
     ModelCase(
         name='arhmm-poisson',
-        initialize=initialize_arhmm_poisson,
+        make_model=_arhmm_poisson,
         infer=infer_arhmm,
         infer_kwargs={},
         em_step=arhmm_em_step,
         observations=POISSON_OBSERVATIONS,
-        init_kwargs={'num_states': 2, 'num_lags': 1, 'key': jax.random.key(0)},
     ),
     ModelCase(
         name='lds-gaussian',
-        initialize=initialize_lds_gaussian,
+        make_model=_lds_gaussian,
         infer=infer_lds,
         infer_kwargs={},
         em_step=lds_em_step,
         observations=GAUSSIAN_OBSERVATIONS,
-        init_kwargs={'latent_dim': 1},
     ),
     ModelCase(
         name='lds-poisson',
-        initialize=initialize_lds_poisson,
+        make_model=_lds_poisson,
         infer=infer_lds_laplace,
-        infer_kwargs={'params': DEFAULT_OPTIM_PARAMS},
+        infer_kwargs={'params': FAST_LAPLACE_PARAMS},
         em_step=partial(
             lds_laplace_em_step,
-            params=DEFAULT_OPTIM_PARAMS,
+            params=FAST_LAPLACE_PARAMS,
         ),
         observations=POISSON_OBSERVATIONS,
-        init_kwargs={'latent_dim': 1},
     ),
     ModelCase(
         name='slds-gaussian',
-        initialize=initialize_slds_gaussian,
+        make_model=_slds_gaussian,
         infer=infer_slds,
         infer_kwargs={
-            'num_iters': 2,
+            'num_iters': 1,
             'initial_latents': jnp.zeros((GAUSSIAN_OBSERVATIONS.shape[0], 1)),
         },
         em_step=partial(
             slds_variational_em_step,
-            num_inference_iters=2,
+            num_inference_iters=1,
         ),
         observations=GAUSSIAN_OBSERVATIONS,
-        init_kwargs={
-            'num_states': 2,
-            'latent_dim': 1,
-            'key': jax.random.key(0),
-        },
     ),
     ModelCase(
         name='slds-poisson',
-        initialize=initialize_slds_poisson,
+        make_model=_slds_poisson,
         infer=infer_slds_laplace,
         infer_kwargs={
-            'num_iters': 2,
+            'num_iters': 1,
             'initial_latents': jnp.zeros((POISSON_OBSERVATIONS.shape[0], 1)),
-            'params': DEFAULT_OPTIM_PARAMS,
+            'params': FAST_LAPLACE_PARAMS,
         },
         em_step=partial(
             slds_laplace_em_step,
-            params=DEFAULT_OPTIM_PARAMS,
-            num_inference_iters=2,
+            params=FAST_LAPLACE_PARAMS,
+            num_inference_iters=1,
         ),
         observations=POISSON_OBSERVATIONS,
-        init_kwargs={
-            'num_states': 2,
-            'latent_dim': 1,
-            'key': jax.random.key(0),
-        },
     ),
+]
+
+# JIT compilation is intentionally representative rather than exhaustive.
+# Family-specific and low-level tests separately exercise Gaussian/Poisson
+# fitting and inference kernels.
+JIT_CASES = [
+    MODEL_CASES[0],  # exact discrete EM
+    MODEL_CASES[3],  # AR + Poisson Newton M-step
+    MODEL_CASES[5],  # continuous Laplace EM
+    MODEL_CASES[6],  # switching variational EM
+    MODEL_CASES[7],  # switching Laplace EM
 ]
 
 
@@ -196,11 +256,7 @@ def assert_tree_finite(tree):
     ids=lambda case: case.name,
 )
 def test_one_em_step(case):
-    model = case.initialize(
-        observations=case.observations,
-        **case.init_kwargs,
-    )
-
+    model = case.make_model()
     inferred = case.infer(
         model,
         case.observations,
@@ -215,20 +271,17 @@ def test_one_em_step(case):
 
 @pytest.mark.parametrize(
     'case',
-    MODEL_CASES,
+    JIT_CASES,
     ids=lambda case: case.name,
 )
-def test_one_em_step_is_jittable(case):
-    model = case.initialize(
-        observations=case.observations,
-        **case.init_kwargs,
-    )
-
+def test_representative_em_steps_are_jittable(case):
+    model = case.make_model()
     inferred = case.infer(
         model,
         case.observations,
         **case.infer_kwargs,
     )
+
     eager = case.em_step(inferred, case.observations)
     jitted = jax.jit(case.em_step)(
         inferred,

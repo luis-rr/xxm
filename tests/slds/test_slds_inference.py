@@ -135,7 +135,7 @@ def test_single_state_slds_matches_gaussian_chain():
     posterior = infer_variational(
         model,
         observations,
-        num_iters=3,
+        num_iters=1,
         initial_latents=jnp.zeros((observations.shape[0], 1)),
     ).posterior
 

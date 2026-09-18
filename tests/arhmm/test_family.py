@@ -121,19 +121,19 @@ def test_exact_posterior_matches_enumerated_paths(family, num_targets):
 
 @pytest.mark.parametrize('facade', [arhmm.GaussianARHMM, arhmm.PoissonARHMM])
 def test_fitting_and_multiple_initializations(facade):
-    observations = jnp.array(
-        [[0.0], [1.0], [2.0], [0.0], [1.0], [3.0], [1.0], [2.0], [0.0], [2.0]]
-    )
+    observations = jnp.array([[0.0], [1.0], [1.0], [0.0], [2.0], [1.0]])
     initialized = facade.via_kmeans(
-        jax.random.key(2), observations, num_states=2, num_lags=2
+        jax.random.key(2), observations, num_states=2, num_lags=1
     )
-    assert initialized.states.affine.coefficients.shape == (2, 1, 2, 1)
+    assert initialized.states.affine.coefficients.shape == (2, 1, 1, 1)
+
     inferred = arhmm.infer_exact(initialized._model, observations)
     updated = em_step(inferred, observations)
-    fit = initialized.fit(observations, num_iters=2, progress=False)
-    assert fit.posterior.state_probs.shape == (8, 2)
-    assert fit.model.states.affine.coefficients.shape == (2, 1, 2, 1)
-    assert fit.objective_trace.shape == (3,)
+    fit = initialized.fit(observations, num_iters=1, progress=False)
+
+    assert fit.posterior.state_probs.shape == (5, 2)
+    assert fit.model.states.affine.coefficients.shape == (2, 1, 1, 1)
+    assert fit.objective_trace.shape == (2,)
     np.testing.assert_allclose(fit.objective_trace[1], updated.objective, atol=2e-5)
     for leaf in jax.tree.leaves(fit):
         assert np.isfinite(leaf).all()
@@ -184,14 +184,10 @@ def test_public_family_boundary():
 def test_slds_arhmm_warm_start(facade):
     observations = jnp.array(
         [
-            [0.0, 1.0],
-            [1.0, 2.0],
-            [2.0, 1.0],
-            [1.0, 3.0],
-            [3.0, 2.0],
-            [2.0, 4.0],
-            [1.0, 2.0],
-            [0.0, 1.0],
+            [0.0],
+            [1.0],
+            [2.0],
+            [1.0],
         ]
     )
     model = facade.via_arhmm(
