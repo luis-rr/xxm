@@ -7,7 +7,6 @@ from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import poisson as poisson_fit
-from xxm.core.optim.loop import unstack_states
 
 from .core import Model
 
@@ -92,24 +91,6 @@ def init_gaussian_via_pca(
     )
 
 
-def init_gaussian_via_pca_many(
-    observations: jax.Array,
-    latent_dim: int,
-    covariance_floors: jax.Array | None = None,
-) -> tuple[Model[GaussianEmissions], ...]:
-    """Initialize multiple LDS models from PCA latent projections."""
-
-    stacked = jax.vmap(
-        lambda covariance_floor: init_gaussian_via_pca(
-            observations,
-            latent_dim,
-            covariance_floor,
-        )
-    )(covariance_floors)
-
-    return unstack_states(stacked)
-
-
 def init_poisson_via_pca(
     observations: jax.Array,
     latent_dim: int,
@@ -142,23 +123,3 @@ def init_poisson_via_pca(
             observations=observations,
         ),
     )
-
-
-def init_poisson_via_pca_many(
-    observations: jax.Array,
-    latent_dim: int,
-    covariance_floors: jax.Array | None = None,
-    count_floor: float = poisson_fit.DEFAULT_COUNT_FLOOR,
-) -> tuple[Model[PoissonEmissions], ...]:
-    """Initialize multiple LDS models from PCA latent projections."""
-
-    stacked = jax.vmap(
-        lambda covariance_floor: init_poisson_via_pca(
-            observations,
-            latent_dim,
-            covariance_floor,
-            count_floor=count_floor,
-        )
-    )(covariance_floors)
-
-    return unstack_states(stacked)

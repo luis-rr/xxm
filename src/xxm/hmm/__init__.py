@@ -6,7 +6,7 @@ from .init import (
     init_gaussian_via_kmeans,
     init_poisson_via_kmeans,
 )
-from .learning import fit_em, fit_em_many
+from .learning import fit_em
 from .model import (
     GaussianHMM,
     PoissonHMM,
@@ -17,7 +17,6 @@ __all__ = [
     'PoissonHMM',
     'Posterior',
     'fit_em',
-    'fit_em_many',
     'infer_exact',
     'init_gaussian_via_kmeans',
     'init_poisson_via_kmeans',

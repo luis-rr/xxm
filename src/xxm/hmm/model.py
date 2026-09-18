@@ -15,7 +15,7 @@ from xxm.core.emissions.discrete import (
     GaussianEmissions,
     PoissonEmissions,
 )
-from xxm.core.inference import Fitted, FittedCollection, Inferred
+from xxm.core.inference import Fitted, Inferred
 from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
@@ -28,20 +28,12 @@ from .init import (
     init_gaussian_via_kmeans,
     init_poisson_via_kmeans,
 )
-from .learning import fit_em, fit_em_many
+from .learning import fit_em
 
 _infer_exact_jit = jax.jit(infer_exact)
 
 _fit_em_jit = jax.jit(
     fit_em,
-    static_argnames=(
-        'num_iters',
-        'progress',
-    ),
-)
-
-_fit_em_many_jit = jax.jit(
-    fit_em_many,
     static_argnames=(
         'num_iters',
         'progress',
@@ -204,29 +196,6 @@ class GaussianHMM:
             objective_trace=fit.objective_trace,
         )
 
-    @classmethod
-    def fit_many(
-        cls,
-        models: tuple[typing.Self, ...],
-        observations: jax.Array,
-        *,
-        num_iters: int,
-        progress: bool | str = 'Multi-EM',
-    ) -> FittedCollection[typing.Self, Posterior]:
-        """Fit multiple HMM initializations to the same observations by EM."""
-        fit = _fit_em_many_jit(
-            tuple(model._model for model in models),
-            observations,
-            num_iters=num_iters,
-            progress=progress,
-        )
-
-        return FittedCollection(
-            models=tuple(cls(state.model) for state in fit.states),
-            posteriors=tuple(state.posterior for state in fit.states),
-            objective_traces=fit.objective_traces,
-        )
-
 
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, eq=False)
@@ -362,27 +331,4 @@ class PoissonHMM:
             model=self.__class__(fit.state.model),
             posterior=fit.state.posterior,
             objective_trace=fit.objective_trace,
-        )
-
-    @classmethod
-    def fit_many(
-        cls,
-        models: tuple[typing.Self, ...],
-        observations: jax.Array,
-        *,
-        num_iters: int,
-        progress: bool | str = 'Multi-EM',
-    ) -> FittedCollection[typing.Self, Posterior]:
-        """Fit multiple HMM initializations to the same observations by EM."""
-        fit = fit_em_many(
-            tuple(model._model for model in models),
-            observations,
-            num_iters=num_iters,
-            progress=progress,
-        )
-
-        return FittedCollection(
-            models=tuple(cls(state.model) for state in fit.states),
-            posteriors=tuple(state.posterior for state in fit.states),
-            objective_traces=fit.objective_traces,
         )

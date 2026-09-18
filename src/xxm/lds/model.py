@@ -15,7 +15,7 @@ from xxm.core.emissions.continuous import (
     GaussianEmissions,
     PoissonEmissions,
 )
-from xxm.core.inference import Fitted, FittedCollection, Inferred
+from xxm.core.inference import Fitted, Inferred
 from xxm.core.latents.gaussian import (
     GaussianInitial,
     GaussianLinearDynamics,
@@ -30,15 +30,11 @@ from .inference import (
 )
 from .init import (
     init_gaussian_via_pca,
-    init_gaussian_via_pca_many,
     init_poisson_via_pca,
-    init_poisson_via_pca_many,
 )
 from .learning import (
     fit_em,
-    fit_em_many,
     fit_laplace_em,
-    fit_laplace_em_many,
 )
 
 _infer_exact_jit = jax.jit(infer_exact)
@@ -53,24 +49,9 @@ _fit_em_jit = jax.jit(
     ),
 )
 
-_fit_em_many_jit = jax.jit(
-    fit_em_many,
-    static_argnames=(
-        'num_iters',
-        'progress',
-    ),
-)
 
 _fit_laplace_em_jit = jax.jit(
     fit_laplace_em,
-    static_argnames=(
-        'num_iters',
-        'progress',
-    ),
-)
-
-_fit_laplace_em_many_jit = jax.jit(
-    fit_laplace_em_many,
     static_argnames=(
         'num_iters',
         'progress',
@@ -191,23 +172,6 @@ class GaussianLDS:
 
         return cls(model)
 
-    @classmethod
-    def via_pca_many(
-        cls,
-        observations: jax.Array,
-        latent_dim: int,
-        *,
-        covariance_floors: jax.Array,
-    ) -> tuple[typing.Self, ...]:
-        """Construct one Gaussian LDS for each requested covariance floor."""
-        models = init_gaussian_via_pca_many(
-            observations=observations,
-            latent_dim=latent_dim,
-            covariance_floors=covariance_floors,
-        )
-
-        return tuple(cls(model) for model in models)
-
     def sample(self, key: jax.Array, num_steps: int) -> tuple[jax.Array, jax.Array]:
         r"""Sample latent states $x_{0:T-1}$ and observations $y_{0:T-1}$."""
         return self._model.sample(
@@ -247,29 +211,6 @@ class GaussianLDS:
             model=self.__class__(fit.state.model),
             posterior=fit.state.posterior,
             objective_trace=fit.objective_trace,
-        )
-
-    @classmethod
-    def fit_many(
-        cls,
-        models: tuple[typing.Self, ...],
-        observations: jax.Array,
-        *,
-        num_iters: int,
-        progress: bool | str = 'Multi-EM',
-    ) -> FittedCollection[typing.Self, Posterior]:
-        """Fit multiple LDS initializations to the same observations by EM."""
-        fit = _fit_em_many_jit(
-            tuple(model._model for model in models),
-            observations,
-            num_iters=num_iters,
-            progress=progress,
-        )
-
-        return FittedCollection(
-            models=tuple(cls(state.model) for state in fit.states),
-            posteriors=tuple(state.posterior for state in fit.states),
-            objective_traces=fit.objective_traces,
         )
 
     def latent_mean(self, posterior: Posterior) -> jax.Array:
@@ -372,23 +313,6 @@ class PoissonLDS:
 
         return cls(model)
 
-    @classmethod
-    def via_pca_many(
-        cls,
-        observations: jax.Array,
-        latent_dim: int,
-        *,
-        covariance_floors: jax.Array,
-    ) -> tuple[typing.Self, ...]:
-        """Construct one Poisson LDS for each requested covariance floor."""
-        models = init_poisson_via_pca_many(
-            observations=observations,
-            latent_dim=latent_dim,
-            covariance_floors=covariance_floors,
-        )
-
-        return tuple(cls(model) for model in models)
-
     def sample(self, key: jax.Array, num_steps: int) -> tuple[jax.Array, jax.Array]:
         r"""Sample latent states $x_{0:T-1}$ and observations $y_{0:T-1}$."""
         return self._model.sample(
@@ -440,31 +364,6 @@ class PoissonLDS:
             model=self.__class__(fit.state.model),
             posterior=fit.state.posterior,
             objective_trace=fit.objective_trace,
-        )
-
-    @classmethod
-    def fit_many(
-        cls,
-        models: tuple[typing.Self, ...],
-        observations: jax.Array,
-        *,
-        num_iters: int,
-        progress: bool | str = 'Multi-Laplace EM',
-        laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
-    ) -> FittedCollection[typing.Self, Posterior]:
-        """Fit multiple Poisson LDS initializations with Laplace EM."""
-        fit = _fit_laplace_em_many_jit(
-            tuple(model._model for model in models),
-            observations,
-            num_iters=num_iters,
-            progress=progress,
-            laplace_params=laplace_params,
-        )
-
-        return FittedCollection(
-            models=tuple(cls(state.model) for state in fit.states),
-            posteriors=tuple(state.posterior for state in fit.states),
-            objective_traces=fit.objective_traces,
         )
 
     def latent_mean(self, posterior: Posterior) -> jax.Array:

@@ -138,15 +138,6 @@ def test_fitting_and_multiple_initializations(facade):
     for leaf in jax.tree.leaves(fit):
         assert np.isfinite(leaf).all()
 
-    multiple = facade.fit_many(
-        (initialized, initialized), observations, num_iters=2, progress=False
-    )
-    np.testing.assert_allclose(
-        multiple.objective_traces,
-        np.broadcast_to(fit.objective_trace, (2, 3)),
-        atol=2e-5,
-    )
-
 
 @pytest.mark.parametrize('family', ['gaussian', 'poisson'])
 def test_continuation_uses_chronological_history(family):

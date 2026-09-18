@@ -123,43 +123,27 @@ def plot_seq_2d_comparison(
     return axs[0]
 
 
-def plot_fit_progress(objective, *, name='Log Likelihood', title='', **kwargs):
+def plot_fit_progress(
+    objective, *, name='Log Likelihood', title='', figsize=(6, 6), **kwargs
+):
     """Plot an objective and its iteration-to-iteration changes."""
     values = np.asarray(objective)
     if values.ndim != 1 or not values.size:
         raise ValueError(
             f'expected nonempty objective with shape (T,), got {values.shape}'
         )
-    return plot_fit_progress_many(values[None], name=name, title=title, **kwargs)
+    objectives = values[None]
 
-
-def plot_fit_progress_many(
-    objectives,
-    highlight_idx=None,
-    *,
-    name='Log Likelihood',
-    title='',
-    figsize=(6, 6),
-    **kwargs,
-):
-    """Plot objective arrays with shape (runs, iterations), optionally highlighting one."""
     values = np.asarray(objectives)
-    if values.ndim != 2 or not all(values.shape):
-        raise ValueError(
-            f'expected objectives with shape (runs, iterations), got {values.shape}'
-        )
-    if highlight_idx is not None and not 0 <= highlight_idx < len(values):
-        raise ValueError(f'highlight_idx must be in [0, {len(values)})')
+
     _, axs = plt.subplots(2, 1, figsize=figsize, sharex=True, squeeze=False)
+
     for ax, traces in zip(axs[:, 0], (values.T, np.diff(values, axis=1).T)):
         if traces.shape[0]:
             plot.plot_traces_1d(
                 ax, traces, **(dict[str, Any](linewidth=0.7, alpha=0.6) | kwargs)
             )
-            if highlight_idx is not None:
-                plot.plot_traces_1d(
-                    ax, traces[:, highlight_idx, None], color=plot.TRUE_COLOR
-                )
+
         ax.set_xlabel('iteration')
     axs[0, 0].set(ylabel=name, title=title)
     axs[1, 0].set_ylabel('change in ' + name)

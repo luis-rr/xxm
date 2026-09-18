@@ -123,10 +123,3 @@ def test_dynamics_grids(figure_backend):
     assert left.get_clim() == (5, 10)
     assert norm.vmin is None and norm.vmax is None
     assert len(axs[0, 0].figure.axes) == 3
-
-
-def test_fit_progress(figure_backend):
-    assert models.plot_fit_progress([1.0]).shape == (2,)
-    axs = models.plot_fit_progress_many([[1.0, 3.0, 4.0]], highlight_idx=0)
-    assert axs.shape == (2,)
-    np.testing.assert_array_equal(axs[1].lines[0].get_ydata(), [2, 1])

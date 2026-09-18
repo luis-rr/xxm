@@ -9,8 +9,7 @@ from xxm.core.chains.gaussian import (
 )
 from xxm.core.emissions.continuous import LaplaceEmissionsT, QuadraticEmissionsT
 from xxm.core.inference import Inferred
-from xxm.core.optim.loop import Fit, FitCollection
-from xxm.core.optim.loop import fit_many as _fit_many
+from xxm.core.optim.loop import Fit
 from xxm.core.optim.loop import fit_one as _fit_one
 from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
 
@@ -94,39 +93,6 @@ def fit_em(
     )
 
 
-def fit_em_many(
-    models: tuple[
-        Model[QuadraticEmissionsT],
-        ...,
-    ],
-    observations: jax.Array,
-    num_iters: int,
-    progress: bool | str = 'Multi-EM',
-) -> FitCollection[
-    Inferred[
-        Model[QuadraticEmissionsT],
-        Posterior,
-    ]
-]:
-    """Fit multiple quadratic-emission LDS initializations by exact EM."""
-
-    inferred = tuple(
-        infer_exact(
-            model,
-            observations,
-        )
-        for model in models
-    )
-
-    return _fit_many(
-        inferred,
-        observations,
-        num_iters=num_iters,
-        step=em_step,
-        progress=progress,
-    )
-
-
 def fit_laplace_em(
     model: Model[LaplaceEmissionsT],
     observations: jax.Array,
@@ -148,45 +114,6 @@ def fit_laplace_em(
     )
 
     return _fit_one(
-        inferred,
-        observations,
-        num_iters=num_iters,
-        step=lambda inferred, observations: laplace_em_step(
-            inferred,
-            observations,
-            params=laplace_params,
-        ),
-        progress=progress,
-    )
-
-
-def fit_laplace_em_many(
-    models: tuple[
-        Model[LaplaceEmissionsT],
-        ...,
-    ],
-    observations: jax.Array,
-    num_iters: int,
-    laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
-    progress: bool | str = 'Multi-Laplace EM',
-) -> FitCollection[
-    Inferred[
-        Model[LaplaceEmissionsT],
-        Posterior,
-    ]
-]:
-    """Fit multiple nonconjugate LDS initializations with Laplace EM."""
-
-    inferred = tuple(
-        infer_laplace(
-            model,
-            observations,
-            params=laplace_params,
-        )
-        for model in models
-    )
-
-    return _fit_many(
         inferred,
         observations,
         num_iters=num_iters,
