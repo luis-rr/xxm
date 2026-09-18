@@ -439,3 +439,81 @@ def test_paired_moment_match_preserves_positive_definiteness():
 
     # Moment matching should preserve positive definiteness.
     assert jnp.isfinite(jnp.linalg.cholesky(fit.covariance)).all()
+
+
+@pytest.mark.parametrize(
+    'batch, query, weighted',
+    [
+        ((2, 3), (), False),
+        ((2, 3), (), True),
+        ((), (3,), True),
+        ((2, 3), (2, 1), True),
+    ],
+)
+@pytest.mark.parametrize('paired', [False, True])
+def test_moment_matching_preserves_structural_and_query_batches(
+    batch, query, weighted, paired
+):
+    shape = batch + (4,)
+    means = jnp.arange(np.prod(shape) * 2, dtype=float).reshape(shape + (2,)) / 20
+    covariances = jnp.broadcast_to(jnp.array([[2.0, 0.3], [0.3, 1.0]]), shape + (2, 2))
+    distributions = Gaussian(means, covariances)
+    weights = None
+    if weighted:
+        weights = (
+            jnp.arange(np.prod(batch + query + (4,)), dtype=float).reshape(
+                batch + query + (4,)
+            )
+            % 7
+            + 1
+        )
+    if paired:
+        distributions = PairedGaussian(
+            Gaussian(means[..., :1], covariances[..., :1, :1]),
+            Gaussian(means[..., 1:], covariances[..., 1:, 1:]),
+            covariances[..., 1:, :1],
+        )
+        fit = gaussian_fit.paired_from_moment_match
+    else:
+        fit = gaussian_fit.from_moment_match
+    actual = jax.jit(fit)(distributions, weights)
+    normalized = (
+        np.ones(shape) / 4
+        if weights is None
+        else np.asarray(weights) / np.asarray(weights).sum(-1, keepdims=True)
+    )
+    means = np.asarray(means).reshape(batch + (1,) * len(query) + (4, 2))
+    covariance = np.asarray(covariances).reshape(batch + (1,) * len(query) + (4, 2, 2))
+    expected_mean = (normalized[..., None] * means).sum(-2)
+    expected_second = (
+        normalized[..., None, None]
+        * (covariance + means[..., :, None] * means[..., None, :])
+    ).sum(-3)
+    expected_covariance = (
+        expected_second - expected_mean[..., :, None] * expected_mean[..., None, :]
+    )
+    assert actual.batch_shape == batch + query
+    np.testing.assert_allclose(actual.mean, expected_mean, atol=2e-6)
+    np.testing.assert_allclose(actual.covariance, expected_covariance, atol=5e-6)
+
+
+@pytest.mark.parametrize('shape', [(), (4,), (1, 3, 4), (2, 3, 5)])
+def test_moment_matching_rejects_misaligned_weights(shape):
+    distributions = Gaussian(jnp.zeros((2, 3, 4, 1)), jnp.ones((2, 3, 4, 1, 1)))
+    with pytest.raises(ValueError, match='weights'):
+        gaussian_fit.from_moment_match(distributions, jnp.ones(shape))
+
+
+@pytest.mark.parametrize('linear', [False, True])
+@pytest.mark.parametrize('shape', [(4, 1), (3,)])
+def test_grouped_fit_rejects_malformed_assignments(linear, shape):
+    values = jnp.ones((4, 1))
+    assignments = jnp.zeros(shape, dtype=int)
+    options = {'covariance_floor': 0.0}
+    with pytest.raises(ValueError, match='assignments'):
+        if linear:
+            gaussian_fit.linear_from_samples_grouped(
+                values, values, assignments, 2, ridge=1e-5, **options
+            )
+        else:
+            gaussian_fit.from_samples_grouped(values, assignments, 2, **options)

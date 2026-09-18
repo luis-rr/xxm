@@ -3,6 +3,7 @@ import math
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian
@@ -349,3 +350,18 @@ def test_fit_linear_preserves_structured_input_shape():
     )
 
     assert fit.input_shape == (1, 1)
+
+
+@pytest.mark.parametrize('linear', [False, True])
+@pytest.mark.parametrize('shape', [(4, 1), (3,)])
+def test_grouped_fit_rejects_malformed_assignments(linear, shape):
+    values = jnp.ones((4, 1))
+    assignments = jnp.zeros(shape, dtype=int)
+    options = {}
+    with pytest.raises(ValueError, match='assignments'):
+        if linear:
+            poisson_fit.linear_from_samples_grouped(
+                values, values, assignments, 2, ridge=1e-5, **options
+            )
+        else:
+            poisson_fit.from_samples_grouped(values, assignments, 2, **options)

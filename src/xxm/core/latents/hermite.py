@@ -339,7 +339,7 @@ def _coefficient_prior(
 )
 @dataclasses.dataclass(frozen=True)
 class HermiteSpline:
-    r"""Centered spline independently replicated over batch dimensions `*B`.
+    r"""Centered Hermite spline independently replicated over batch dimensions `*B`.
 
     The coefficient prior has batch shape `*B` and event dimension `P * C`,
     where `P` is the number of motifs and `C = J - 1` is the number of free

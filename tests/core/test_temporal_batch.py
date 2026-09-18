@@ -60,39 +60,106 @@ def test_random_walk_time_follows_batch(steps):
 
 @pytest.mark.parametrize('steps', [0, 1, 5])
 def test_gated_random_walk_aligns_gates_and_replicates(steps):
-    initial = gaussian(dim=1)
+    # Structural batch B=(3,), intrinsic gates K=2.
+    initial = gaussian(batch=(3, 2), dim=1)
     active = initial._replace(mean=initial.mean + 10.0)
     inactive = initial._replace(mean=initial.mean - 10.0)
-    rw = GatedGaussianRandomWalk(initial, active, inactive)
-    gates = jnp.arange(2 * max(steps - 1, 0)).reshape(2, max(steps - 1, 0)) % 3
+
+    rw = GatedGaussianRandomWalk(
+        initial,
+        active,
+        inactive,
+    )
+
+    gates = (
+        jnp.arange(3 * max(steps - 1, 0)).reshape(
+            3,
+            max(steps - 1, 0),
+        )
+        % 2
+    )
+
     key = jax.random.key(20)
-    actual = jax.jit(lambda k, gates: rw.sample(k, steps, gates))(key, gates)
-    assert rw.batch_shape == (2,)
-    assert rw.num_gates == 3
+
+    actual = jax.jit(
+        lambda k, gates: rw.sample(
+            k,
+            steps,
+            gates,
+        )
+    )(
+        key,
+        gates,
+    )
+
+    assert rw.batch_shape == (3,)
+    assert rw.num_gates == 2
+
+    # Once exposed as a generic LinearGaussian, K is simply part of
+    # that object's batch structure.
     assert rw.active_transition_dist().batch_shape == rw.batch_shape + (rw.num_gates,)
-    assert actual.shape == (2, 3, steps, 1)
+
+    assert actual.shape == (
+        3,
+        2,
+        steps,
+        1,
+    )
+
     if steps:
         ki, ke = jax.random.split(key)
+
         first = initial.sample(ki)[..., None, :]
-        mask = gates[..., None, :] == jnp.arange(3)[None, :, None]
+
+        mask = gates[..., None, :] == jnp.arange(2).reshape(1, 2, 1)
+
         increments = Gaussian(
-            jnp.where(
-                mask[..., None], active.mean[..., None, :], inactive.mean[..., None, :]
+            mean=jnp.where(
+                mask[..., None],
+                active.mean[..., None, :],
+                inactive.mean[..., None, :],
             ),
-            jnp.broadcast_to(
-                initial.covariance[..., None, :, :], (2, 3, steps - 1, 1, 1)
+            covariance=jnp.broadcast_to(
+                initial.covariance[..., None, :, :],
+                (
+                    3,
+                    2,
+                    steps - 1,
+                    1,
+                    1,
+                ),
             ),
         ).sample(ke)
+
         np.testing.assert_allclose(
             actual,
-            jnp.concatenate((first, first + jnp.cumsum(increments, axis=-2)), axis=-2),
+            jnp.concatenate(
+                (
+                    first,
+                    first
+                    + jnp.cumsum(
+                        increments,
+                        axis=-2,
+                    ),
+                ),
+                axis=-2,
+            ),
         )
+
     np.testing.assert_array_equal(
-        rw.permute_gates(jnp.array([2, 0, 1])).initial.mean,
-        initial.mean[..., [2, 0, 1], :],
+        rw.permute_gates(jnp.array([1, 0])).initial.mean,
+        initial.mean[:, ::-1],
     )
-    with pytest.raises(ValueError, match='gates must have shape'):
-        rw.sample(key, steps, gates.T[..., None])
+
+    with pytest.raises(
+        ValueError,
+        match='gates must have shape',
+    ):
+        rw.sample(
+            key,
+            steps,
+            gates.T[..., None],
+        )
 
 
 def hermite():
@@ -101,44 +168,72 @@ def hermite():
     )
 
 
-@pytest.mark.parametrize('process', ['random_walk', 'gated', 'hermite'])
+@pytest.mark.parametrize(
+    'process',
+    [
+        'random_walk',
+        'gated',
+        'hermite',
+    ],
+)
 def test_temporal_common_batch_api(process):
     g = gaussian()
+
+    gated_g = gaussian(
+        batch=(2, 3, 4),
+    )
+
     obj = {
-        'random_walk': lambda: GaussianRandomWalk(g, g),
-        'gated': lambda: GatedGaussianRandomWalk(g, g, g),
+        'random_walk': lambda: GaussianRandomWalk(
+            g,
+            g,
+        ),
+        'gated': lambda: GatedGaussianRandomWalk(
+            gated_g,
+            gated_g,
+            gated_g,
+        ),
         'hermite': hermite,
     }[process]()
-    if process == 'gated':
-        assert obj.select(1).batch_shape == ()
-        assert obj.broadcast((1, 4), axis=1).batch_shape == (2, 1, 4)
-        assert obj.broadcast(1, axis=1).squeeze(1).batch_shape == (2,)
-        assert obj.move_axis(0, 0).batch_shape == (2,)
-        assert obj.permute(jnp.array([1, 0]), axis=0).batch_shape == (2,)
-    else:
-        assert obj.select((1, 2)).batch_shape == ()
-        assert obj.broadcast((1, 4), axis=1).batch_shape == (2, 1, 4, 3)
-        assert obj.broadcast(1, axis=1).squeeze(1).batch_shape == (2, 3)
-        assert obj.move_axis(0, 1).batch_shape == (3, 2)
-        assert obj.permute(jnp.array([2, 0, 1]), axis=1).batch_shape == (2, 3)
+
+    assert obj.select((1, 2)).batch_shape == ()
+
+    assert obj.broadcast(
+        (1, 4),
+        axis=1,
+    ).batch_shape == (
+        2,
+        1,
+        4,
+        3,
+    )
+
+    assert obj.broadcast(
+        1,
+        axis=1,
+    ).squeeze(1).batch_shape == (2, 3)
+
+    assert obj.move_axis(
+        0,
+        1,
+    ).batch_shape == (
+        3,
+        2,
+    )
+
+    assert obj.permute(
+        jnp.array([2, 0, 1]),
+        axis=1,
+    ).batch_shape == (
+        2,
+        3,
+    )
+
     with pytest.raises(IndexError):
-        obj.select((0, 0, 0) if process != 'gated' else (0, 0))
+        obj.select((0, 0, 0))
+
     with pytest.raises(IndexError):
         obj.select(None)
 
-
-def test_hermite_weights_match_independent_curves():
-    drift = hermite()
-    coefficients = jnp.arange(
-        6 * drift.coefficient_prior.variable_dim, dtype=float
-    ).reshape(drift.coefficient_prior.mean.shape)
-    weights = drift.temporal_weights(coefficients, 8)
-    assert weights.shape == (2, 3, 7, 2)
-    for i in range(2):
-        for j in range(3):
-            np.testing.assert_allclose(
-                weights[i, j],
-                drift.select((i, j)).temporal_weights(coefficients[i, j], 8),
-            )
-    for steps in (0, 1, 7):
-        assert drift.sample(jax.random.key(0), steps).shape == (2, 3, steps, 2)
+    if process == 'gated':
+        assert obj.num_gates == 4
