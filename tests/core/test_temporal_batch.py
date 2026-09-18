@@ -107,12 +107,7 @@ def test_gated_random_walk_aligns_gates_and_replicates(steps):
     # that object's batch structure.
     assert rw.active_transition_dist().batch_shape == rw.batch_shape + (rw.num_gates,)
 
-    assert actual.shape == (
-        3,
-        2,
-        steps,
-        1,
-    )
+    assert actual.shape == (3, steps, 2, 1)
 
     if steps:
         ki, ke = jax.random.split(key)
@@ -139,20 +134,18 @@ def test_gated_random_walk_aligns_gates_and_replicates(steps):
             ),
         ).sample(ke)
 
-        np.testing.assert_allclose(
-            actual,
-            jnp.concatenate(
-                (
-                    first,
-                    first
-                    + jnp.cumsum(
-                        increments,
-                        axis=-2,
-                    ),
+        expected = jnp.concatenate(
+            (
+                first,
+                first
+                + jnp.cumsum(
+                    increments,
+                    axis=-2,
                 ),
-                axis=-2,
             ),
+            axis=-2,
         )
+        np.testing.assert_allclose(actual, jnp.moveaxis(expected, -3, -2))
 
     np.testing.assert_array_equal(
         rw.permute_gates(jnp.array([1, 0])).initial.mean,

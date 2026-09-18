@@ -66,20 +66,23 @@ def _categorical(batch):
     return Categorical(jax.nn.softmax(_values(batch + (K,)), axis=-1))
 
 
-def _discrete_posterior(num_steps=T):
-    probs = jax.nn.softmax(_values(B + (num_steps, K)), axis=-1)
+def _discrete_posterior(batch=B, num_steps=T):
+    probs = jax.nn.softmax(_values(batch + (num_steps, K)), axis=-1)
     return DiscreteChainMarginals(
         probs,
         probs[..., :-1, :, None] * probs[..., 1:, None, :],
     )
 
 
-def _continuous_posterior():
-    means = _values(B + (T, D))
+def _continuous_posterior(batch=B, num_steps=T):
+    means = _values(batch + (num_steps, D))
     return GaussianChainMarginals(
         means,
-        jnp.broadcast_to(0.2 * jnp.eye(D, dtype=means.dtype), B + (T, D, D)),
-        jnp.zeros(B + (T - 1, D, D), dtype=means.dtype),
+        jnp.broadcast_to(
+            0.2 * jnp.eye(D, dtype=means.dtype),
+            batch + (num_steps, D, D),
+        ),
+        jnp.zeros(batch + (num_steps - 1, D, D), dtype=means.dtype),
     )
 
 
@@ -236,6 +239,23 @@ def test_discrete_latent_fit_and_sampling():
     assert chain.state_log_potentials.shape == FIT_B + (T, K)
 
 
+def test_discrete_latent_fit_requires_matching_posterior_batch():
+    posterior = _discrete_posterior(batch=(4,), num_steps=2)
+
+    with pytest.raises(ValueError, match='batch shapes must match'):
+        CategoricalInitial(_categorical(B)).fit_params(posterior)
+
+    with pytest.raises(ValueError, match='batch shapes must match'):
+        CategoricalTransitions(_categorical(B + (K,))).fit_params(posterior)
+
+    matched = _discrete_posterior(batch=B, num_steps=2)
+    assert CategoricalInitial(_categorical(B)).fit_params(matched).batch_shape == B
+    assert (
+        CategoricalTransitions(_categorical(B + (K,))).fit_params(matched).batch_shape
+        == B
+    )
+
+
 @pytest.mark.parametrize('kind', ['gaussian_initial', 'gaussian_dynamics', 'switching'])
 def test_gaussian_latent_sampling_and_potentials(kind, component):
     # Parameter fitting is exercised by the owning model/statistics tests and by
@@ -257,6 +277,20 @@ def test_gaussian_latent_sampling_and_potentials(kind, component):
         np.testing.assert_array_equal(sampled[..., 0, :], initial)
     if kind == 'switching':
         assert component.compute_pair_potentials().batch_shape == FIT_B + (K,)
+
+
+def test_gaussian_latent_fit_requires_matching_posterior_batch():
+    posterior = _continuous_posterior(batch=(4,), num_steps=2)
+
+    with pytest.raises(ValueError, match='batch shapes must match'):
+        GaussianInitial(_gaussian(B)).fit_params(posterior)
+
+    with pytest.raises(ValueError, match='batch shapes must match'):
+        GaussianLinearDynamics(_linear(B)).fit_params(posterior)
+
+    matched = _continuous_posterior(batch=B, num_steps=2)
+    assert GaussianInitial(_gaussian(B)).fit_params(matched).batch_shape == B
+    assert GaussianLinearDynamics(_linear(B)).fit_params(matched).batch_shape == B
 
 
 @pytest.mark.parametrize(
@@ -392,6 +426,8 @@ def test_alignment_matches_standalone_components(kind, component, global_alignme
     if not global_alignment:
         alignment = alignment.broadcast(B)
         alignment = alignment._replace(bias=alignment.bias + 0.1 * _values(B + (D,)))
+    else:
+        alignment = alignment.broadcast(B)
     is_emission = kind.startswith('continuous_')
     aligned = (
         component.compose_input(alignment)
@@ -401,13 +437,32 @@ def test_alignment_matches_standalone_components(kind, component, global_alignme
     assert aligned.batch_shape == B
     for i, j in np.ndindex(B):
         standalone = component.select((i, j))
-        alignment_i = alignment if global_alignment else alignment.select((i, j))
+        alignment_i = alignment.select((i, j))
         expected = (
             standalone.compose_input(alignment_i)
             if is_emission
             else standalone.align(alignment_i)
         )
         _assert_tree_close(aligned.select((i, j)), expected)
+
+    @pytest.mark.parametrize(
+        'kind',
+        [
+            'gaussian_initial',
+            'gaussian_dynamics',
+            'state_gaussian',
+            'switching',
+            'continuous_gaussian',
+            'continuous_poisson',
+        ],
+    )
+    def test_batched_alignment_requires_explicit_alignment_batch(kind, component):
+        alignment = Affine(jnp.eye(D), jnp.zeros(D))
+        with pytest.raises(ValueError, match='batch shapes must match'):
+            if kind.startswith('continuous_'):
+                component.compose_input(alignment)
+            else:
+                component.align(alignment)
 
 
 @pytest.mark.parametrize(

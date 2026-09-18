@@ -236,7 +236,7 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
     The gated process has `K` intrinsic gates. Each parameter Gaussian has
     batch shape `(*B, K)` and event dimension `D`; the final Gaussian batch
     axis is the gate dimension owned by this wrapper. Samples have shape
-    `(*B, K, T, D)`.
+    `(*B, T, K, D)`.
 
     For each gate $k$,
 
@@ -371,7 +371,7 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
         num_steps: int,
         gates: jax.Array,
     ) -> jax.Array:
-        """Sample `(*B, K, T, D)` values with gates shaped `(*B, T - 1)`."""
+        """Sample `(*B, T, K, D)` values with gates shaped `(*B, T - 1)`."""
         if num_steps < 0:
             raise ValueError('num_steps must be non-negative')
 
@@ -390,8 +390,8 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
             return jnp.zeros(
                 batch_shape
                 + (
-                    num_gates,
                     0,
+                    num_gates,
                     variable_dim,
                 ),
                 dtype=self.dtype,
@@ -404,7 +404,7 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
         )[..., None, :]
 
         if num_steps == 1:
-            return initial
+            return jnp.moveaxis(initial, -3, -2)
 
         # (*B, K, 1)
         gate_indices = jnp.arange(
@@ -442,13 +442,15 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
             axis=-2,
         )
 
-        return jnp.concatenate(
+        samples = jnp.concatenate(
             (
                 initial,
                 subsequent,
             ),
             axis=-2,
         )
+
+        return jnp.moveaxis(samples, -3, -2)
 
     def reorient_variables(
         self,

@@ -152,13 +152,15 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
 
     def align(self, alignment: Affine) -> typing.Self:
         """Express the latent dynamics in aligned coordinates."""
-        if alignment.batch_shape == ():
-            aligned = alignment.broadcast(self.dist.batch_shape)
-        else:
-            assert alignment.batch_shape == self.batch_shape
-            aligned = alignment.broadcast(
-                (self.num_states,), axis=len(self.batch_shape)
-            )
+        _batch.require_same(
+            alignment.batch_shape,
+            self.batch_shape,
+        )
+
+        aligned = alignment.broadcast(
+            (self.num_states,),
+            axis=len(self.batch_shape),
+        )
         inverse = aligned.inverse()
 
         return self._replace(

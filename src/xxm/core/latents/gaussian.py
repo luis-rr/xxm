@@ -44,6 +44,11 @@ class GaussianInitial(typing.NamedTuple):
     ) -> typing.Self:
         r"""Fit the initial Gaussian from the posterior moments of $x_0$."""
 
+        _batch.require_same(
+            self.batch_shape,
+            posterior.means.shape[:-2],
+        )
+
         reference = gaussian_fit.from_moment_match(
             Gaussian(
                 mean=posterior.means,
@@ -72,11 +77,14 @@ class GaussianInitial(typing.NamedTuple):
         r"""
         Express the initial distribution in coordinates $x' = f(x)$ defined by `alignment`.
         """
-        if alignment.batch_shape == ():
-            alignment = alignment.broadcast(self.batch_shape)
-        else:
-            _batch.require_same(alignment.batch_shape, self.batch_shape)
-        return self._replace(dist=self.dist.affine(alignment))
+        _batch.require_same(
+            alignment.batch_shape,
+            self.batch_shape,
+        )
+
+        return self._replace(
+            dist=self.dist.affine(alignment),
+        )
 
     @classmethod
     def from_latents(
@@ -134,6 +142,11 @@ class GaussianLinearDynamics(typing.NamedTuple):
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
     ) -> typing.Self:
         r"""Fit dynamics from posterior pair marginals via moment matching."""
+
+        _batch.require_same(
+            self.batch_shape,
+            posterior.means.shape[:-2],
+        )
 
         paired = gaussian_fit.paired_from_moment_match(
             posterior.paired_marginals(),
@@ -202,10 +215,11 @@ class GaussianLinearDynamics(typing.NamedTuple):
         """
         Express the dynamics in coordinates $x' = f(x)$ defined by `alignment`.
         """
-        if alignment.batch_shape == ():
-            alignment = alignment.broadcast(self.batch_shape)
-        else:
-            assert alignment.batch_shape == self.batch_shape
+        _batch.require_same(
+            alignment.batch_shape,
+            self.batch_shape,
+        )
+
         inverse = alignment.inverse()
 
         return self._replace(
@@ -305,13 +319,14 @@ class StateConditionedGaussian(typing.NamedTuple):
         """
         Express the conditional distributions in coordinates $x' = f(x)$.
         """
-        if alignment.batch_shape == ():
-            aligned = alignment.broadcast(self.dist.batch_shape)
-        else:
-            _batch.require_same(alignment.batch_shape, self.batch_shape)
-            aligned = alignment.broadcast(
-                (self.num_states,),
-                axis=len(self.batch_shape),
-            )
+        _batch.require_same(
+            alignment.batch_shape,
+            self.batch_shape,
+        )
+
+        aligned = alignment.broadcast(
+            (self.num_states,),
+            axis=len(self.batch_shape),
+        )
 
         return self._replace(dist=self.dist.affine(aligned))

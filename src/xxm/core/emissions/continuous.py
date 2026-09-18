@@ -223,10 +223,11 @@ class GaussianEmissions(typing.NamedTuple):
         alignment: Affine,
     ) -> typing.Self:
         """Express the emissions in aligned latent coordinates."""
-        if alignment.batch_shape == ():
-            alignment = alignment.broadcast(self.batch_shape)
-        else:
-            assert alignment.batch_shape == self.batch_shape
+        _batch.require_same(
+            alignment.batch_shape,
+            self.batch_shape,
+        )
+
         return self._replace(
             dist=self.dist.compose_input(
                 alignment.inverse(),
@@ -425,10 +426,11 @@ class PoissonEmissions(typing.NamedTuple):
         alignment: Affine,
     ) -> typing.Self:
         """Express the emissions in aligned latent coordinates."""
-        if alignment.batch_shape == ():
-            alignment = alignment.broadcast(self.batch_shape)
-        else:
-            assert alignment.batch_shape == self.batch_shape
+        _batch.require_same(
+            alignment.batch_shape,
+            self.batch_shape,
+        )
+
         return self._replace(
             dist=self.dist.compose_input(
                 alignment.inverse(),
