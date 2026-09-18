@@ -1,4 +1,4 @@
-"""Categorical distributions over finite discrete states."""
+"""Categorical distributions over finite categories."""
 
 import typing
 

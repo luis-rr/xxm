@@ -99,9 +99,9 @@ def _normalize_weights(
 
 
 def _center_samples(
-    values: jax.Array,  # (T, N)
+    values: jax.Array,  # (S, N)
     mean: jax.Array,  # (..., N)
-) -> jax.Array:  # (..., T, N)
+) -> jax.Array:  # (..., S, N)
     """Center samples around one or more means."""
     batch_ndim = mean.ndim - 1
 
@@ -111,8 +111,8 @@ def _center_samples(
 
 
 def _from_samples_normalized(
-    values: jax.Array,  # (T, N)
-    weights: jax.Array,  # (..., T)
+    values: jax.Array,  # (S, N)
+    weights: jax.Array,  # (..., S)
 ) -> Gaussian:
     """Fit a Gaussian using already-normalized weights."""
     mean = jnp.einsum(
@@ -149,7 +149,7 @@ def _from_samples_normalized(
 
 
 def from_samples(
-    values: jax.Array,  # (T, N)
+    values: jax.Array,  # (S, N)
     *,
     covariance_floor: float,
 ) -> Gaussian:
@@ -181,8 +181,8 @@ def from_samples(
 
 
 def from_samples_weighted(
-    values: jax.Array,  # (T, N)
-    weights: jax.Array,  # (..., T)
+    values: jax.Array,  # (S, N)
+    weights: jax.Array,  # (..., S)
     *,
     covariance_floor: float,
 ) -> Gaussian:
@@ -215,21 +215,34 @@ def from_samples_weighted(
 
 
 def from_samples_grouped(
-    values: jax.Array,  # (T, N)
-    assignments: jax.Array,  # (T,)
+    values: jax.Array,  # (S, N)
+    assignments: jax.Array,  # (S,)
     num_groups: int,
     *,
     covariance_floor: float,
 ) -> Gaussian:
     """Fit one Gaussian to each group of assigned values."""
-    weights = jax.nn.one_hot(
-        assignments,
-        num_groups,
-        dtype=jnp.result_type(
-            values,
-            jnp.float32,
+    num_samples = values.shape[0]
+    if assignments.ndim != 1:
+        raise ValueError('assignments must have shape (S,)')
+    if assignments.shape[0] != num_samples:
+        raise ValueError(
+            'assignments must contain one entry per sample; '
+            f'expected {num_samples}, got {assignments.shape[0]}'
+        )
+
+    weights = jnp.moveaxis(
+        jax.nn.one_hot(
+            assignments,
+            num_groups,
+            dtype=jnp.result_type(
+                values,
+                jnp.float32,
+            ),
         ),
-    ).T
+        -1,
+        0,
+    )
 
     return from_samples_weighted(
         values=values,
@@ -238,34 +251,46 @@ def from_samples_grouped(
     )
 
 
+def _normalize_moment_weights(
+    batch_shape: tuple[int, ...],
+    weights: jax.Array | None,
+    dtype: jax.typing.DTypeLike,
+) -> jax.Array:
+    """Align weights with structural batches and normalize the final sample axis."""
+    assert batch_shape
+    structural_shape = batch_shape[:-1]
+    if weights is None:
+        weights = jnp.ones(batch_shape, dtype=dtype)
+    if (
+        weights.ndim < len(batch_shape)
+        or weights.shape[: len(structural_shape)] != structural_shape
+    ):
+        raise ValueError(
+            'weights must have shape (*B, *Q, S) aligned with distributions'
+        )
+    return _normalize_weights(batch_shape[-1], weights, dtype)
+
+
 def _from_moment_match_weighted(
     distributions: Gaussian,
     normalized_weights: jax.Array,
 ) -> Gaussian:
     """Moment-match Gaussian distributions using normalized weights."""
-    result = _from_samples_normalized(
-        values=distributions.mean,
-        weights=normalized_weights,
+    batch_shape = distributions.batch_shape[:-1]
+    num_samples = distributions.batch_shape[-1]
+    query_ndim = normalized_weights.ndim - len(batch_shape) - 1
+    shape = batch_shape + (1,) * query_ndim + (num_samples,)
+    mean = distributions.mean.reshape(shape + (distributions.variable_dim,))
+    covariance = distributions.covariance.reshape(
+        shape + (distributions.variable_dim, distributions.variable_dim)
     )
-
-    covariance = result.covariance + jnp.einsum(
-        '...t,tij->...ij',
-        normalized_weights,
-        distributions.covariance,
-    )
-
-    covariance = 0.5 * (
-        covariance
-        + jnp.swapaxes(
-            covariance,
-            -2,
-            -1,
-        )
-    )
-
-    return result._replace(
-        covariance=covariance,
-    )
+    matched_mean = jnp.sum(normalized_weights[..., :, None] * mean, axis=-2)
+    residuals = mean - matched_mean[..., None, :]
+    covariance = jnp.sum(
+        normalized_weights[..., :, None, None] * covariance, axis=-3
+    ) + jnp.einsum('...s,...si,...sj->...ij', normalized_weights, residuals, residuals)
+    covariance = 0.5 * (covariance + jnp.swapaxes(covariance, -2, -1))
+    return Gaussian(mean=matched_mean, covariance=covariance)
 
 
 def from_moment_match(
@@ -273,13 +298,15 @@ def from_moment_match(
     weights: jax.Array | None = None,
 ) -> Gaussian:
     """
-    Moment-match a sequence of Gaussian distributions.
+    Moment-match Gaussian distributions along the final batch axis.
 
     The returned covariance combines average within-distribution
     covariance with covariance across the distribution means.
-    Weights have shape ``(*B, S)`` and produce a result batched as ``*B``.
+    Distributions have batch shape ``(*B, S)``. Weights have shape
+    ``(*B, *Q, S)`` and the result has batch shape ``(*B, *Q)``.
+    With no weights, the result batch shape is ``*B``.
     """
-    assert len(distributions.batch_shape) == 1
+    assert distributions.batch_shape
 
     dtype = jnp.result_type(
         distributions.dtype,
@@ -289,8 +316,8 @@ def from_moment_match(
 
     distributions = distributions.astype(dtype)
 
-    normalized_weights = _normalize_weights(
-        num_samples=distributions.batch_shape[0],
+    normalized_weights = _normalize_moment_weights(
+        batch_shape=distributions.batch_shape,
         weights=weights,
         dtype=dtype,
     )
@@ -306,13 +333,17 @@ def paired_from_moment_match(
     weights: jax.Array | None = None,
 ) -> PairedGaussian:
     """
-    Moment-match a sequence of paired Gaussian distributions.
+    Moment-match paired Gaussian distributions along the final batch axis.
+
+    Distributions have batch shape ``(*B, S)``; weights may have shape
+    ``(*B, *Q, S)``, producing result batch ``(*B, *Q)``. With no weights,
+    the result batch shape is ``*B``.
 
     The pair is moment-matched jointly to preserve the covariance structure.
     Eigenvalues below floating-point resolution are floored to keep the
     resulting covariance numerically positive definite.
     """
-    assert len(distributions.batch_shape) == 1
+    assert distributions.batch_shape
 
     dtype = jnp.result_type(
         distributions.dtype,
@@ -322,8 +353,8 @@ def paired_from_moment_match(
 
     distributions = distributions.astype(dtype)
 
-    normalized_weights = _normalize_weights(
-        num_samples=distributions.batch_shape[0],
+    normalized_weights = _normalize_moment_weights(
+        batch_shape=distributions.batch_shape,
         weights=weights,
         dtype=dtype,
     )
@@ -395,10 +426,10 @@ def paired_from_moment_match(
 
 
 def paired_from_samples(
-    left: jax.Array,  # (T, L)
-    right: jax.Array,  # (T, R)
+    left: jax.Array,  # (S, L)
+    right: jax.Array,  # (S, R)
     *,
-    weights: jax.Array | None = None,  # (..., T)
+    weights: jax.Array | None = None,  # (..., S)
 ) -> PairedGaussian:
     """Fit a paired Gaussian from aligned left and right samples."""
     assert left.shape[0] == right.shape[0]
@@ -675,8 +706,8 @@ def linear_from_marginals(
 
 
 def linear_from_samples(
-    inputs: jax.Array,  # (T, *input_shape)
-    outputs: jax.Array,  # (T, O)
+    inputs: jax.Array,  # (S, *input_shape)
+    outputs: jax.Array,  # (S, O)
     *,
     ridge: float,
     covariance_floor: float,
@@ -684,7 +715,7 @@ def linear_from_samples(
     """Fit a linear Gaussian model from samples."""
 
     if inputs.ndim < 2:
-        raise ValueError('inputs must have shape (T, *input_shape)')
+        raise ValueError('inputs must have shape (S, *input_shape)')
 
     input_shape = inputs.shape[1:]
 
@@ -704,9 +735,9 @@ def linear_from_samples(
 
 
 def linear_from_samples_weighted(
-    inputs: jax.Array,  # (T, *input_shape)
-    outputs: jax.Array,  # (T, O)
-    weights: jax.Array,  # (..., T)
+    inputs: jax.Array,  # (S, *input_shape)
+    outputs: jax.Array,  # (S, O)
+    weights: jax.Array,  # (..., S)
     *,
     ridge: float,
     covariance_floor: float,
@@ -714,7 +745,7 @@ def linear_from_samples_weighted(
     """Fit one weighted model for each batch entry of ``weights``."""
 
     if inputs.ndim < 2:
-        raise ValueError('inputs must have shape (T, *input_shape)')
+        raise ValueError('inputs must have shape (S, *input_shape)')
 
     input_shape = inputs.shape[1:]
 
@@ -735,9 +766,9 @@ def linear_from_samples_weighted(
 
 
 def linear_from_samples_grouped(
-    inputs: jax.Array,  # (T, *input_shape)
-    outputs: jax.Array,  # (T, O)
-    assignments: jax.Array,  # (T,)
+    inputs: jax.Array,  # (S, *input_shape)
+    outputs: jax.Array,  # (S, O)
+    assignments: jax.Array,  # (S,)
     num_groups: int,
     *,
     ridge: float,
@@ -745,15 +776,28 @@ def linear_from_samples_grouped(
 ) -> LinearGaussian:
     """Fit one linear Gaussian to each assigned group."""
 
-    weights = jax.nn.one_hot(
-        assignments,
-        num_groups,
-        dtype=jnp.result_type(
-            inputs,
-            outputs,
-            jnp.float32,
+    num_samples = inputs.shape[0]
+    if assignments.ndim != 1:
+        raise ValueError('assignments must have shape (S,)')
+    if assignments.shape[0] != num_samples:
+        raise ValueError(
+            'assignments must contain one entry per sample; '
+            f'expected {num_samples}, got {assignments.shape[0]}'
+        )
+
+    weights = jnp.moveaxis(
+        jax.nn.one_hot(
+            assignments,
+            num_groups,
+            dtype=jnp.result_type(
+                inputs,
+                outputs,
+                jnp.float32,
+            ),
         ),
-    ).T  # (K, T)
+        -1,
+        0,
+    )  # (K, S)
 
     return linear_from_samples_weighted(
         inputs=inputs,

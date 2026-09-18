@@ -84,10 +84,10 @@ class _NewtonSearchModel(typing.NamedTuple):
     Quantities held fixed while fitting a linear-Poisson model.
     """
 
-    values: jax.Array  # (T, O)
-    input_means: jax.Array  # (T, I)
-    input_covariances: jax.Array | None  # (T, I, I)
-    weights: jax.Array  # (T,)
+    values: jax.Array  # (S, O)
+    input_means: jax.Array  # (S, I)
+    input_covariances: jax.Array | None  # (S, I, I)
+    weights: jax.Array  # (S,)
     ridge: jax.Array  # scalar
 
     def _expected_rates(self, params: _NewtonSearchParams) -> jax.Array:
@@ -263,8 +263,8 @@ def from_samples(
 
 
 def from_samples_weighted(
-    values: jax.Array,  # (T, N)
-    weights: jax.Array,  # (..., T)
+    values: jax.Array,  # (S, N)
+    weights: jax.Array,  # (..., S)
 ) -> Poisson:
     """Fit one weighted Poisson model per batch entry of ``weights``."""
     if weights.shape[-1] != values.shape[0]:
@@ -290,16 +290,29 @@ def from_samples_weighted(
 
 
 def from_samples_grouped(
-    values: jax.Array,  # (T, N)
-    assignments: jax.Array,  # (T,)
+    values: jax.Array,  # (S, N)
+    assignments: jax.Array,  # (S,)
     num_groups: int,
 ) -> Poisson:  # K-batched
     """Fit one distribution to each group of assigned values."""
-    weights = jax.nn.one_hot(
-        assignments,
-        num_groups,
-        dtype=jnp.result_type(values, jnp.float32),
-    ).T  # (K, T)
+    num_samples = values.shape[0]
+    if assignments.ndim != 1:
+        raise ValueError('assignments must have shape (S,)')
+    if assignments.shape[0] != num_samples:
+        raise ValueError(
+            'assignments must contain one entry per sample; '
+            f'expected {num_samples}, got {assignments.shape[0]}'
+        )
+
+    weights = jnp.moveaxis(
+        jax.nn.one_hot(
+            assignments,
+            num_groups,
+            dtype=jnp.result_type(values, jnp.float32),
+        ),
+        -1,
+        0,
+    )  # (K, S)
 
     return from_samples_weighted(
         values=values,
@@ -310,7 +323,7 @@ def from_samples_grouped(
 def _initial_affine(
     inputs: jax.Array,  # (S, I)
     outputs: jax.Array,  # (S, O)
-    weights: jax.Array | None = None,  # (..., T)
+    weights: jax.Array | None = None,  # (..., S)
 ) -> Affine:
     """Initialize with zero coefficients and empirical output log rates."""
     dtype = jnp.result_type(
@@ -605,9 +618,9 @@ def _linear_from_batched_marginals(
 
 
 def linear_from_marginals(
-    inputs: Gaussian,  # T-batched
-    outputs: jax.Array,  # (T, O)
-    weights: jax.Array | None = None,  # (..., T)
+    inputs: Gaussian,  # S-batched
+    outputs: jax.Array,  # (S, O)
+    weights: jax.Array | None = None,  # (..., S)
     initial_affine: Affine | None = None,
     max_iter: int = 20,
     tol: float = 1e-6,
@@ -682,14 +695,14 @@ def _prepare_pair_inputs(
 ) -> tuple[jax.Array, tuple[int, ...], Affine | None]:
     """Flatten paired deterministic inputs for numerical optimization."""
     if inputs.ndim < 2:
-        raise ValueError('inputs must have shape (T, *input_shape)')
+        raise ValueError('inputs must have shape (S, *input_shape)')
 
     input_shape = inputs.shape[1:]
 
     flat_inputs = inputs.reshape(
         inputs.shape[0],
         -1,
-    )  # (T, input_size)
+    )  # (S, input_size)
 
     if initial_affine is not None:
         if initial_affine.input_shape != input_shape:
@@ -704,8 +717,8 @@ def _prepare_pair_inputs(
 
 
 def linear_from_samples(
-    inputs: jax.Array,  # (T, *input_shape)
-    outputs: jax.Array,  # (T, O)
+    inputs: jax.Array,  # (S, *input_shape)
+    outputs: jax.Array,  # (S, O)
     initial_affine: Affine | None = None,
     max_iter: int = 20,
     tol: float = 1e-6,
@@ -746,9 +759,9 @@ def linear_from_samples(
 
 
 def linear_from_samples_weighted(
-    inputs: jax.Array,  # (T, *input_shape)
-    outputs: jax.Array,  # (T, O)
-    weights: jax.Array,  # (..., T)
+    inputs: jax.Array,  # (S, *input_shape)
+    outputs: jax.Array,  # (S, O)
+    weights: jax.Array,  # (..., S)
     initial_affine: Affine | None = None,
     max_iter: int = 20,
     tol: float = 1e-6,
@@ -796,9 +809,9 @@ def linear_from_samples_weighted(
 
 
 def linear_from_samples_grouped(
-    inputs: jax.Array,  # (T, *input_shape)
-    outputs: jax.Array,  # (T, O)
-    assignments: jax.Array,  # (T,)
+    inputs: jax.Array,  # (S, *input_shape)
+    outputs: jax.Array,  # (S, O)
+    assignments: jax.Array,  # (S,)
     num_groups: int,
     initial_affine: Affine | None = None,
     max_iter: int = 20,
@@ -809,15 +822,28 @@ def linear_from_samples_grouped(
 ) -> LinearPoisson:
     """Fit one model to each assigned group."""
 
-    weights = jax.nn.one_hot(
-        assignments,
-        num_groups,
-        dtype=jnp.result_type(
-            inputs,
-            outputs,
-            jnp.float32,
+    num_samples = inputs.shape[0]
+    if assignments.ndim != 1:
+        raise ValueError('assignments must have shape (S,)')
+    if assignments.shape[0] != num_samples:
+        raise ValueError(
+            'assignments must contain one entry per sample; '
+            f'expected {num_samples}, got {assignments.shape[0]}'
+        )
+
+    weights = jnp.moveaxis(
+        jax.nn.one_hot(
+            assignments,
+            num_groups,
+            dtype=jnp.result_type(
+                inputs,
+                outputs,
+                jnp.float32,
+            ),
         ),
-    ).T
+        -1,
+        0,
+    )
 
     return linear_from_samples_weighted(
         inputs=inputs,

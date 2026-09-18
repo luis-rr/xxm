@@ -1,4 +1,4 @@
-"""Optimization utilities for categorical state weights."""
+"""Categorical fitting utilities and low-weight batch filtering."""
 
 import typing
 
@@ -57,7 +57,7 @@ def _from_counts(
     return Categorical(probs=probs)
 
 
-def filter_valid_states(
+def filter_valid_batches(
     fitted: PyTreeT,
     current: PyTreeT,
     weights: jax.Array,

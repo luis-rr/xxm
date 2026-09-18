@@ -242,7 +242,7 @@ class AREmissions(
         )
 
         return self._replace(
-            dist=categorical_fit.filter_valid_states(
+            dist=categorical_fit.filter_valid_batches(
                 fitted,
                 self.dist,
                 weights,

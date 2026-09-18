@@ -392,13 +392,14 @@ Functions split keys locally and deterministically. Reusing a key for independen
 
 Unless a mathematical object requires otherwise:
 
-* generic structural batch dimensions precede operation-specific axes;
-* temporal mathematical objects use `(*B, T, ...)`;
-* for ordinary unbatched family-level sequence arrays, time is usually the first explicit axis;
-* state may follow time in family-level quantities such as `(T, K)`;
+* structural batch dimensions come first;
+* operation-specific axes follow the structural batch prefix, so temporal values use `(*B, T, ...)` and generic samples use `(*B, S, ...)` where applicable;
+* semantic axes such as state, category, motif, variable, input, and output dimensions are determined by the abstraction that owns them;
 * variable and output dimensions are trailing axes;
 * distribution batch dimensions precede event dimensions;
 * matrices use trailing `(output_dim, input_dim)` or `(variable_dim, variable_dim)` axes.
+
+Sequential algorithms may internally move time to the leading axis for `scan` or related JAX operations, but public values remain batch-major.
 
 Shape comments are encouraged where they make non-obvious tensor algebra easier to inspect.
 

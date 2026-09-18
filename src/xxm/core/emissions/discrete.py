@@ -114,7 +114,7 @@ class GaussianEmissions(typing.NamedTuple):
         )
 
         return self._replace(
-            dist=categorical_fit.filter_valid_states(
+            dist=categorical_fit.filter_valid_batches(
                 fitted,
                 self.dist,
                 weights,
@@ -178,7 +178,7 @@ class PoissonEmissions(typing.NamedTuple):
         )
 
         return self._replace(
-            dist=categorical_fit.filter_valid_states(
+            dist=categorical_fit.filter_valid_batches(
                 fitted,
                 self.dist,
                 weights,
