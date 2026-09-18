@@ -5,6 +5,7 @@ import typing
 import jax
 import jax.numpy as jnp
 
+from xxm.core import _batch
 from xxm.core.affine import Affine
 from xxm.core.chains.gaussian import (
     GaussianPairPotential,
@@ -22,12 +23,39 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
     Consequently the first transition uses $z[1]$; $z[0]$ indexes the initial distribution.
     """
 
-    dist: LinearGaussian  # K-batched, input dimension D, output dimension D
+    dist: LinearGaussian  # underlying batch (*B, K); K is the intrinsic state axis
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        assert self.dist.batch_shape
+        return self.dist.batch_shape[:-1]
+
+    def select(self, index) -> typing.Self:
+        index = _batch.selection(index, len(self.batch_shape))
+        return self._replace(dist=self.dist.select(index + (slice(None),)))
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        shape, axis = _batch.insertion(shape, axis, len(self.batch_shape))
+        return self._replace(dist=self.dist.broadcast(shape, axis=axis))
+
+    def squeeze(self, axis=None) -> typing.Self:
+        axes = _batch.squeeze_axes(self.batch_shape, axis)
+        return self._replace(dist=self.dist.squeeze(axes))
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        axis = _batch.axis_index(axis, len(self.batch_shape))
+        return self._replace(dist=self.dist.permute(permutation, axis=axis))
+
+    def move_axis(self, source: int, destination: int) -> typing.Self:
+        source = _batch.axis_index(source, len(self.batch_shape))
+        destination = _batch.axis_index(destination, len(self.batch_shape))
+        return self._replace(dist=self.dist.move_axis(source, destination))
 
     @property
     def num_states(self) -> int:
         """Number of discrete states $K$."""
-        return self.dist.covariance.shape[0]
+        assert self.dist.batch_shape
+        return self.dist.batch_shape[-1]
 
     def compute_pair_potentials(self) -> GaussianPairPotential:
         """Return one Gaussian transition potential per discrete state."""
@@ -50,34 +78,13 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         their current parameters.
         """
 
-        if discrete.state_probs.ndim != 2:
-            raise ValueError(
-                'GaussianLinearSwitchingDynamics.fit_params expects an unbatched posterior '
-                'with state_probs shape (T, K)'
-            )
-        if continuous.means.ndim != 2:
-            raise ValueError(
-                'GaussianLinearSwitchingDynamics.fit_params expects an unbatched posterior '
-                'with means shape (T, D)'
-            )
-        if continuous.covariances.ndim != 3:
-            raise ValueError(
-                'GaussianLinearSwitchingDynamics.fit_params expects an unbatched posterior '
-                'with covariances shape (T, D, D)'
-            )
-        if continuous.cross_covariances.ndim != 3:
-            raise ValueError(
-                'GaussianLinearSwitchingDynamics.fit_params expects an unbatched posterior '
-                'with cross_covariances shape (T - 1, D, D)'
-            )
-
-        weights = jnp.moveaxis(discrete.state_probs[..., 1:, :], -1, 0)
-        # (K, T - 1)
+        weights = jnp.moveaxis(discrete.state_probs[..., 1:, :], -1, -2)
+        # (*B, K, T - 1)
 
         paired = gaussian_fit.paired_from_moment_match(
             continuous.paired_marginals(),
             weights=weights,
-        )  # K-batched
+        )  # batch (*B, K)
 
         fitted = gaussian_fit.linear_from_paired(
             paired,
@@ -97,7 +104,10 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         self, key: jax.Array, previous: jax.Array, state: jax.Array
     ) -> jax.Array:
         """Sample the next latent using the state being entered."""
-        return self.dist.select(state).sample(key, previous)
+        conditional = _batch.take_along_last_batch(
+            self.dist, self.dist.batch_shape, state
+        )
+        return conditional.sample(key, previous)
 
     def sample(
         self, key: jax.Array, initial_latent: jax.Array, states: jax.Array
@@ -120,15 +130,16 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         _, subsequent_latents = jax.lax.scan(
             step,
             (initial_latent, key),
-            states,
+            jnp.moveaxis(states, -1, 0),
         )
 
+        subsequent_latents = jnp.moveaxis(subsequent_latents, 0, -2)
         return jnp.concatenate(
             [
-                initial_latent[None],
+                initial_latent[..., None, :],
                 subsequent_latents,
             ],
-            axis=0,
+            axis=-2,
         )
 
     def permute_states(self, permutation: jax.Array) -> typing.Self:
@@ -136,17 +147,20 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         Relabel discrete-state-indexed dynamics by permutation.
         """
         return self._replace(
-            dist=self.dist.select(permutation),
+            dist=self.dist.permute(permutation, axis=-1),
         )
 
     def align(self, alignment: Affine) -> typing.Self:
         """Express the latent dynamics in aligned coordinates."""
-        inverse = alignment.inverse()
+        if alignment.batch_shape == ():
+            aligned = alignment.broadcast(self.dist.batch_shape)
+        else:
+            assert alignment.batch_shape == self.batch_shape
+            aligned = alignment.broadcast(
+                (self.num_states,), axis=len(self.batch_shape)
+            )
+        inverse = aligned.inverse()
 
         return self._replace(
-            dist=(
-                self.dist.compose_input(
-                    inverse.broadcast(self.dist.batch_shape)
-                ).compose_output(alignment.broadcast(self.dist.batch_shape))
-            ),
+            dist=(self.dist.compose_input(inverse).compose_output(aligned)),
         )

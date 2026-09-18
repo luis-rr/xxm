@@ -79,6 +79,8 @@ where `*B` is the complete `batch_shape`.
 
 Batch dimensions are structural but semantically anonymous in generic core code. Model-family code may assign meaning to particular batch axes, such as discrete state, but that meaning should not leak into otherwise generic core objects.
 
+A reusable core wrapper may reserve trailing batch axes of an underlying generic mathematical object as intrinsic semantic dimensions. For example, a state-conditioned wrapper with structural batch `*B` stores a generic distribution batched as `(*B, K)`, while exposing only `*B` as its own `batch_shape` and treating `K` as its intrinsic state axis. Generic wrapper batch operations act only on `*B`; state-specific operations are explicitly named, such as `conditional` and `permute_states`.
+
 Operation-specific dimensions follow the object's batch dimensions. In particular, samples and temporal values use the conventions
 
 ```text

@@ -5,6 +5,7 @@ import typing
 import jax
 from jax import numpy as jnp
 
+from xxm.core import _batch
 from xxm.core.affine import Affine
 from xxm.core.chains.gaussian import GaussianPotential
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
@@ -15,7 +16,26 @@ from xxm.core.posteriors import ContinuousPosterior
 class GaussianInitial(typing.NamedTuple):
     r"""Initial distribution $p(x_0)$ for continuous latent state."""
 
-    dist: Gaussian  # no batch
+    dist: Gaussian  # structural batch *B
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        return self.dist.batch_shape
+
+    def select(self, index) -> typing.Self:
+        return self._replace(dist=self.dist.select(index))
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        return self._replace(dist=self.dist.broadcast(shape, axis=axis))
+
+    def squeeze(self, axis=None) -> typing.Self:
+        return self._replace(dist=self.dist.squeeze(axis))
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        return self._replace(dist=self.dist.permute(permutation, axis=axis))
+
+    def move_axis(self, source: int, destination: int) -> typing.Self:
+        return self._replace(dist=self.dist.move_axis(source, destination))
 
     def fit_params(
         self,
@@ -23,17 +43,6 @@ class GaussianInitial(typing.NamedTuple):
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
     ) -> typing.Self:
         r"""Fit the initial Gaussian from the posterior moments of $x_0$."""
-
-        if posterior.means.ndim != 2:
-            raise ValueError(
-                'GaussianInitial.fit_params expects an unbatched posterior '
-                'with means shape (T, D)'
-            )
-        if posterior.covariances.ndim != 3:
-            raise ValueError(
-                'GaussianInitial.fit_params expects an unbatched posterior '
-                'with covariances shape (T, D, D)'
-            )
 
         reference = gaussian_fit.from_moment_match(
             Gaussian(
@@ -63,6 +72,7 @@ class GaussianInitial(typing.NamedTuple):
         r"""
         Express the initial distribution in coordinates $x' = f(x)$ defined by `alignment`.
         """
+        assert alignment.batch_shape in ((), self.batch_shape)
         return self._replace(dist=self.dist.affine(alignment))
 
     @classmethod
@@ -73,14 +83,18 @@ class GaussianInitial(typing.NamedTuple):
     ) -> typing.Self:
         """Estimate an initial Gaussian from a known latent trajectory."""
 
-        reference = gaussian_fit.from_samples(
-            latents,
-            covariance_floor=covariance_floor,
-        )
+        batch_shape = latents.shape[:-2]
+        flat = _batch.flatten_batch(latents, batch_shape)
+        flat_reference = jax.vmap(
+            lambda values: gaussian_fit.from_samples(
+                values, covariance_floor=covariance_floor
+            )
+        )(flat)
+        reference = _batch.unflatten_batch(flat_reference, batch_shape)
 
         return cls(
             Gaussian(
-                mean=latents[0],
+                mean=latents[..., 0, :],
                 covariance=reference.covariance,
             )
         )
@@ -89,7 +103,26 @@ class GaussianInitial(typing.NamedTuple):
 class GaussianLinearDynamics(typing.NamedTuple):
     r"""Linear-Gaussian dynamics $x_t|x_{t-1} \sim \mathcal{N}(Ax_{t-1}+b, Q)$."""
 
-    dist: LinearGaussian  # no batch
+    dist: LinearGaussian  # structural batch *B
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        return self.dist.batch_shape
+
+    def select(self, index) -> typing.Self:
+        return self._replace(dist=self.dist.select(index))
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        return self._replace(dist=self.dist.broadcast(shape, axis=axis))
+
+    def squeeze(self, axis=None) -> typing.Self:
+        return self._replace(dist=self.dist.squeeze(axis))
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        return self._replace(dist=self.dist.permute(permutation, axis=axis))
+
+    def move_axis(self, source: int, destination: int) -> typing.Self:
+        return self._replace(dist=self.dist.move_axis(source, destination))
 
     def fit_params(
         self,
@@ -98,22 +131,6 @@ class GaussianLinearDynamics(typing.NamedTuple):
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
     ) -> typing.Self:
         r"""Fit dynamics from posterior pair marginals via moment matching."""
-
-        if posterior.means.ndim != 2:
-            raise ValueError(
-                'GaussianLinearDynamics.fit_params expects an unbatched posterior '
-                'with means shape (T, D)'
-            )
-        if posterior.covariances.ndim != 3:
-            raise ValueError(
-                'GaussianLinearDynamics.fit_params expects an unbatched posterior '
-                'with covariances shape (T, D, D)'
-            )
-        if posterior.cross_covariances.ndim != 3:
-            raise ValueError(
-                'GaussianLinearDynamics.fit_params expects an unbatched posterior '
-                'with cross_covariances shape (T - 1, D, D)'
-            )
 
         paired = gaussian_fit.paired_from_moment_match(
             posterior.paired_marginals(),
@@ -182,14 +199,14 @@ class GaussianLinearDynamics(typing.NamedTuple):
         """
         Express the dynamics in coordinates $x' = f(x)$ defined by `alignment`.
         """
+        if alignment.batch_shape == ():
+            alignment = alignment.broadcast(self.batch_shape)
+        else:
+            assert alignment.batch_shape == self.batch_shape
         inverse = alignment.inverse()
 
         return self._replace(
-            dist=(
-                self.dist.compose_input(
-                    inverse.broadcast(self.dist.batch_shape)
-                ).compose_output(alignment.broadcast(self.dist.batch_shape))
-            ),
+            dist=(self.dist.compose_input(inverse).compose_output(alignment)),
         )
 
     @classmethod
@@ -200,14 +217,17 @@ class GaussianLinearDynamics(typing.NamedTuple):
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     ) -> typing.Self:
         """Fit linear dynamics to a known latent trajectory."""
-        model = gaussian_fit.linear_from_samples(
-            latents[:-1],
-            latents[1:],
-            ridge=ridge,
-            covariance_floor=covariance_floor,
-        )
-
-        return cls(model)
+        batch_shape = latents.shape[:-2]
+        flat = _batch.flatten_batch(latents, batch_shape)
+        flat_model = jax.vmap(
+            lambda values: gaussian_fit.linear_from_samples(
+                values[:-1],
+                values[1:],
+                ridge=ridge,
+                covariance_floor=covariance_floor,
+            )
+        )(flat)
+        return cls(_batch.unflatten_batch(flat_model, batch_shape))
 
 
 class StateConditionedGaussian(typing.NamedTuple):
@@ -217,19 +237,46 @@ class StateConditionedGaussian(typing.NamedTuple):
     $$x \mid z=k \sim \mathcal{N}(\mu_k,\Sigma_k).$$
     """
 
-    dist: Gaussian  # K-batched
+    dist: Gaussian  # underlying batch (*B, K); K is the intrinsic state axis
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        assert self.dist.batch_shape
+        return self.dist.batch_shape[:-1]
+
+    def select(self, index) -> typing.Self:
+        index = _batch.selection(index, len(self.batch_shape))
+        return self._replace(dist=self.dist.select(index + (slice(None),)))
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        shape, axis = _batch.insertion(shape, axis, len(self.batch_shape))
+        return self._replace(dist=self.dist.broadcast(shape, axis=axis))
+
+    def squeeze(self, axis=None) -> typing.Self:
+        axes = _batch.squeeze_axes(self.batch_shape, axis)
+        return self._replace(dist=self.dist.squeeze(axes))
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        axis = _batch.axis_index(axis, len(self.batch_shape))
+        return self._replace(dist=self.dist.permute(permutation, axis=axis))
+
+    def move_axis(self, source: int, destination: int) -> typing.Self:
+        source = _batch.axis_index(source, len(self.batch_shape))
+        destination = _batch.axis_index(destination, len(self.batch_shape))
+        return self._replace(dist=self.dist.move_axis(source, destination))
 
     @property
     def num_states(self) -> int:
         """Number of discrete states $K$."""
-        return self.dist.batch_shape[0]
+        assert self.dist.batch_shape
+        return self.dist.batch_shape[-1]
 
     def conditional(
         self,
         state: jax.Array,
     ) -> Gaussian:
         """Gaussian distribution conditional on the given state."""
-        return self.dist.select(state)
+        return _batch.take_along_last_batch(self.dist, self.dist.batch_shape, state)
 
     def compute_potentials(self) -> GaussianPotential:
         """Return one Gaussian potential per discrete state."""
@@ -249,10 +296,11 @@ class StateConditionedGaussian(typing.NamedTuple):
         """
         Relabel state-conditioned Gaussian distributions.
         """
-        return self._replace(dist=self.dist.select(permutation))
+        return self._replace(dist=self.dist.permute(permutation, axis=-1))
 
     def align(self, alignment: Affine) -> typing.Self:
         """
         Express the conditional distributions in coordinates $x' = f(x)$.
         """
+        assert alignment.batch_shape in ((), self.batch_shape)
         return self._replace(dist=self.dist.affine(alignment))

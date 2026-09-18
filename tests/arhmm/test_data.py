@@ -31,8 +31,19 @@ def test_prepared_rows_preserve_lag_and_target_order(num_lags):
 
 @pytest.mark.parametrize(
     'shape,num_lags',
-    [((5,), 1), ((2, 5, 1), 1), ((5, 1), 0), ((5, 1), -1), ((2, 1), 2), ((1, 1), 2)],
+    [((5,), 1), ((5, 1), 0), ((5, 1), -1), ((2, 1), 2), ((1, 1), 2)],
 )
 def test_invalid_observation_structure(shape, num_lags):
     with pytest.raises(ValueError):
         ARObservations.from_observations(jnp.zeros(shape), num_lags)
+
+
+def test_prepared_rows_preserve_structural_batch():
+    observations = jnp.arange(72.0).reshape(2, 3, 6, 2)
+    data = ARObservations.from_observations(observations, num_lags=2)
+    assert data.predictors.shape == (2, 3, 4, 2, 2)
+    assert (data.num_steps, data.num_lags, data.output_dim) == (4, 2, 2)
+    np.testing.assert_array_equal(data.targets, observations[..., 2:, :])
+    for i, j in np.ndindex(2, 3):
+        standalone = ARObservations.from_observations(observations[i, j], 2)
+        np.testing.assert_array_equal(data.predictors[i, j], standalone.predictors)

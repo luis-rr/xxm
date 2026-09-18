@@ -1,9 +1,56 @@
 """Private array helpers for structural batch axes and aligned queries."""
 
+import math
 import operator
 
 import jax
 import jax.numpy as jnp
+
+
+def flatten_batch(tree, batch_shape: tuple[int, ...]):
+    """Flatten a shared structural batch prefix to one leading axis."""
+    size = math.prod(batch_shape)
+    ndim = len(batch_shape)
+
+    def flatten(values):
+        assert values.shape[:ndim] == batch_shape
+        return values.reshape((size,) + values.shape[ndim:])
+
+    return jax.tree.map(flatten, tree)
+
+
+def unflatten_batch(tree, batch_shape: tuple[int, ...]):
+    """Restore a flattened leading batch axis to `batch_shape`."""
+    size = math.prod(batch_shape)
+
+    def unflatten(values):
+        assert values.shape[0] == size
+        return values.reshape(batch_shape + values.shape[1:])
+
+    return jax.tree.map(unflatten, tree)
+
+
+def take_along_last_batch(tree, batch_shape, indices):
+    """Select the final batch axis independently for aligned `(*B, *Q)` indices."""
+    assert batch_shape
+    prefix = batch_shape[:-1]
+    assert indices.shape[: len(prefix)] == prefix
+    assert jnp.issubdtype(indices.dtype, jnp.integer)
+    query_shape = indices.shape[len(prefix) :]
+    selected_axis = len(prefix) + len(query_shape)
+
+    def take(values):
+        assert values.shape[: len(batch_shape)] == batch_shape
+        intrinsic_shape = values.shape[len(batch_shape) :]
+        expanded = broadcast_array(values, query_shape, axis=len(prefix))
+        gather = indices.reshape(indices.shape + (1,) + (1,) * len(intrinsic_shape))
+        gather = jnp.broadcast_to(gather, indices.shape + (1,) + intrinsic_shape)
+        return jnp.squeeze(
+            jnp.take_along_axis(expanded, gather, axis=selected_axis),
+            axis=selected_axis,
+        )
+
+    return jax.tree.map(take, tree)
 
 
 def axis_index(axis: int, ndim: int) -> int:

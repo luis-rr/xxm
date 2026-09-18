@@ -5,6 +5,7 @@ import typing
 import jax
 import jax.numpy as jnp
 
+from xxm.core import _batch
 from xxm.core.chains.discrete import DiscreteChain
 from xxm.core.dists.categorical import Categorical
 from xxm.core.optim import categorical as categorical_fit
@@ -20,12 +21,13 @@ def homogeneous_chain(
     num_states = initial.num_states
     return DiscreteChain(
         initial_probs=initial.dist.probs,
-        transition_probs=jnp.broadcast_to(
+        transition_probs=_batch.broadcast_array(
             transitions.dist.probs,
-            (num_steps - 1, num_states, num_states),
+            (num_steps - 1,),
+            axis=len(transitions.batch_shape),
         ),
         state_log_potentials=jnp.zeros(
-            (num_steps, num_states),
+            initial.batch_shape + (num_steps, num_states),
             dtype=initial.dist.probs.dtype,
         ),
     )
@@ -34,7 +36,26 @@ def homogeneous_chain(
 class CategoricalInitial(typing.NamedTuple):
     r"""Initial distribution $p(z_0)$ for discrete latent state."""
 
-    dist: Categorical  # no batch
+    dist: Categorical  # structural batch *B
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        return self.dist.batch_shape
+
+    def select(self, index) -> typing.Self:
+        return self._replace(dist=self.dist.select(index))
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        return self._replace(dist=self.dist.broadcast(shape, axis=axis))
+
+    def squeeze(self, axis=None) -> typing.Self:
+        return self._replace(dist=self.dist.squeeze(axis))
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        return self._replace(dist=self.dist.permute(permutation, axis=axis))
+
+    def move_axis(self, source: int, destination: int) -> typing.Self:
+        return self._replace(dist=self.dist.move_axis(source, destination))
 
     @property
     def num_states(self) -> int:
@@ -58,12 +79,6 @@ class CategoricalInitial(typing.NamedTuple):
     ) -> typing.Self:
         r"""Fit initial distribution from posterior marginals $\gamma_0(k)$."""
 
-        if posterior.state_probs.ndim != 2:
-            raise ValueError(
-                'CategoricalInitial.fit_params expects an unbatched posterior '
-                'with state_probs shape (T, K)'
-            )
-
         return self._replace(
             dist=categorical_fit.from_counts(
                 posterior.state_probs[..., 0, :],
@@ -75,19 +90,47 @@ class CategoricalInitial(typing.NamedTuple):
 class CategoricalTransitions(typing.NamedTuple):
     r"""Stationary transition probabilities for discrete latent states.
 
-    `dist.probs[i,j]` stores $P(i,j)=p(z_{t+1}=j\mid z_t=i)$.
+    `dist.probs[...,i,j]` stores $P(i,j)=p(z_{t+1}=j\mid z_t=i)$.
     """
 
-    dist: Categorical  # K-batched
+    dist: Categorical  # underlying batch (*B, K); K is the previous state axis
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        assert self.dist.batch_shape
+        return self.dist.batch_shape[:-1]
+
+    def select(self, index) -> typing.Self:
+        index = _batch.selection(index, len(self.batch_shape))
+        return self._replace(dist=self.dist.select(index + (slice(None),)))
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        shape, axis = _batch.insertion(shape, axis, len(self.batch_shape))
+        return self._replace(dist=self.dist.broadcast(shape, axis=axis))
+
+    def squeeze(self, axis=None) -> typing.Self:
+        axes = _batch.squeeze_axes(self.batch_shape, axis)
+        return self._replace(dist=self.dist.squeeze(axes))
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        axis = _batch.axis_index(axis, len(self.batch_shape))
+        return self._replace(dist=self.dist.permute(permutation, axis=axis))
+
+    def move_axis(self, source: int, destination: int) -> typing.Self:
+        source = _batch.axis_index(source, len(self.batch_shape))
+        destination = _batch.axis_index(destination, len(self.batch_shape))
+        return self._replace(dist=self.dist.move_axis(source, destination))
 
     @property
     def num_states(self) -> int:
         """Number of discrete states $K$."""
+        assert self.dist.batch_shape
+        assert self.dist.batch_shape[-1] == self.dist.num_categories
         return self.dist.num_categories
 
     def conditional(self, previous: jax.Array) -> Categorical:
         """Conditional distribution $p(z_t|z_{t-1})$ for next state."""
-        return self.dist.select(previous)
+        return _batch.take_along_last_batch(self.dist, self.dist.batch_shape, previous)
 
     def sample_next(self, key: jax.Array, previous: jax.Array) -> jax.Array:
         """Sample next state conditional on previous state."""
@@ -116,18 +159,19 @@ class CategoricalTransitions(typing.NamedTuple):
             length=num_steps - 1,
         )
 
+        subsequent_states = jnp.moveaxis(subsequent_states, 0, -1)
         return jnp.concatenate(
             [
-                initial_state[None],
+                initial_state[..., None],
                 subsequent_states,
             ],
-            axis=0,
+            axis=-1,
         )
 
     def permute_states(self, permutation: jax.Array) -> 'CategoricalTransitions':
         """Relabel states by permutation."""
         return self._replace(
-            dist=self.dist.select(permutation).permute_categories(permutation)
+            dist=self.dist.permute(permutation, axis=-1).permute_categories(permutation)
         )
 
     def fit_params(
@@ -137,18 +181,7 @@ class CategoricalTransitions(typing.NamedTuple):
     ) -> typing.Self:
         r"""Fit transition probabilities from posterior pair marginals $\xi_t(i,j)$."""
 
-        if posterior.state_probs.ndim != 2:
-            raise ValueError(
-                'CategoricalTransitions.fit_params expects an unbatched posterior '
-                'with state_probs shape (T, K)'
-            )
-        if posterior.pair_probs.ndim != 3:
-            raise ValueError(
-                'CategoricalTransitions.fit_params expects an unbatched posterior '
-                'with pair_probs shape (T - 1, K, K)'
-            )
-
-        expected_transitions = posterior.pair_probs.sum(axis=-3)  # (K, K)
+        expected_transitions = posterior.pair_probs.sum(axis=-3)  # (*B, K, K)
 
         return self._replace(
             dist=categorical_fit.from_counts(

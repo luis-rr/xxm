@@ -20,6 +20,7 @@ import typing
 import jax
 import jax.numpy as jnp
 
+from xxm.core import _batch
 from xxm.core.chains.discrete import DiscretePotential
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
@@ -83,7 +84,7 @@ class AREmissions(
     The conditional model maps predictors of shape $(L,D_y)$ to outputs of
     shape $(D_y,)$. Predictors are ordered from most recent to oldest,
     ``(y[t-1], ..., y[t-L])``. For an affine conditional model, coefficients
-    therefore have shape $(K,D_y,L,D_y)$.
+    therefore have shape $(*B,K,D_y,L,D_y)$.
 
     Likelihood and fitting methods receive prepared autoregressive rows.
     Posterior index $r$ corresponds to `data.targets[r]`, or raw observation
@@ -94,12 +95,39 @@ class AREmissions(
     to most recent.
     """
 
-    dist: ConditionalDistT  # K-batched, input shape (L, N)
+    dist: ConditionalDistT  # underlying batch (*B, K); input shape (L, D_y)
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        assert self.dist.batch_shape
+        return self.dist.batch_shape[:-1]
+
+    def select(self, index) -> typing.Self:
+        index = _batch.selection(index, len(self.batch_shape))
+        return self._replace(dist=self.dist.select(index + (slice(None),)))
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        shape, axis = _batch.insertion(shape, axis, len(self.batch_shape))
+        return self._replace(dist=self.dist.broadcast(shape, axis=axis))
+
+    def squeeze(self, axis=None) -> typing.Self:
+        axes = _batch.squeeze_axes(self.batch_shape, axis)
+        return self._replace(dist=self.dist.squeeze(axes))
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        axis = _batch.axis_index(axis, len(self.batch_shape))
+        return self._replace(dist=self.dist.permute(permutation, axis=axis))
+
+    def move_axis(self, source: int, destination: int) -> typing.Self:
+        source = _batch.axis_index(source, len(self.batch_shape))
+        destination = _batch.axis_index(destination, len(self.batch_shape))
+        return self._replace(dist=self.dist.move_axis(source, destination))
 
     @property
     def num_states(self) -> int:
         """Number of discrete states $K$."""
-        return self.dist.batch_shape[0]
+        assert self.dist.batch_shape
+        return self.dist.batch_shape[-1]
 
     @property
     def output_dim(self) -> int:
@@ -149,18 +177,16 @@ class AREmissions(
         predictors: jax.Array,
     ) -> Gaussian | Poisson:
         """Conditional distribution for each modeled time point and state."""
-        values = jnp.broadcast_to(
-            predictors[..., None, :, :],
-            predictors.shape[:-2] + (self.num_states,) + predictors.shape[-2:],
-        )
-        return self.dist.broadcast(predictors.shape[:-2]).conditional(
-            values
-        )  # (T-L, K)
+        values = _batch.broadcast_array(
+            predictors, (self.num_states,), axis=len(self.batch_shape)
+        )  # (*B, K, T-L, L, D_y)
+        conditional = self.dist.conditional(values)
+        return conditional.move_axis(len(self.batch_shape), -1)  # (*B, T-L, K)
 
     def log_likelihoods(
         self,
         data: ARObservations,
-    ) -> jax.Array:  # (T-L, K)
+    ) -> jax.Array:  # (*B, T-L, K)
         """Emission log likelihoods conditional on the initial history."""
         conditional = self.conditional(
             data.predictors,
@@ -190,29 +216,28 @@ class AREmissions(
     ) -> typing.Self:
         """Fit AR parameters conditional on the initial observation history."""
 
-        if posterior.state_probs.ndim != 2:
-            raise ValueError(
-                'AREmissions.fit_params expects an unbatched posterior '
-                'with state_probs shape (T, K)'
+        batch_shape = self.batch_shape
+
+        def fit_one(predictors_i, targets_i, state_probs_i, current_i):
+            weights = jnp.moveaxis(state_probs_i, -1, 0)  # (K, T-L)
+            fitted = _fit_ar_model(
+                dist=current_i,
+                inputs=predictors_i,
+                outputs=targets_i,
+                weights=weights,
+                ridge=ridge,
+                covariance_floor=covariance_floor,
             )
+            return categorical_fit.filter_valid_batches(fitted, current_i, weights)
 
-        weights = jnp.moveaxis(posterior.state_probs, -1, 0)  # (K, T-L)
-
-        fitted = _fit_ar_model(
-            dist=self.dist,
-            inputs=data.predictors,
-            outputs=data.targets,
-            weights=weights,
-            ridge=ridge,
-            covariance_floor=covariance_floor,
+        flat_fitted = jax.vmap(fit_one)(
+            _batch.flatten_batch(data.predictors, batch_shape),
+            _batch.flatten_batch(data.targets, batch_shape),
+            _batch.flatten_batch(posterior.state_probs, batch_shape),
+            _batch.flatten_batch(self.dist, batch_shape),
         )
-
         return self._replace(
-            dist=categorical_fit.filter_valid_batches(
-                fitted,
-                self.dist,
-                weights,
-            ),
+            dist=_batch.unflatten_batch(flat_fitted, batch_shape),
         )
 
     def permute_states(
@@ -221,7 +246,7 @@ class AREmissions(
     ) -> typing.Self:
         """Relabel state-specific autoregressive emission parameters."""
         return self._replace(
-            dist=self.dist.select(permutation),
+            dist=self.dist.permute(permutation, axis=-1),
         )
 
     def sample_continuation(
@@ -233,30 +258,32 @@ class AREmissions(
         """
         Sample a continuation conditional on an explicit observation history.
 
-        `initial_history` has shape $(L,D_y)$ and is chronological, from
+        `initial_history` has shape $(*B,L,D_y)$ and is chronological, from
         oldest to most recent. Only newly generated observations are returned.
         """
-        if initial_history.shape != (
+        expected_history_shape = self.batch_shape + (
             self.num_lags,
             self.output_dim,
-        ):
+        )
+        if initial_history.shape != expected_history_shape:
             raise ValueError(
                 'initial_history must have shape '
-                f'({self.num_lags}, {self.output_dim}); '
+                f'{expected_history_shape}; '
                 f'got {initial_history.shape}'
             )
 
         # Conditional predictors are ordered most recent to oldest.
-        history = initial_history[::-1]
+        history = initial_history[..., ::-1, :]
 
         def step(carry, state):
             history, key = carry
 
             key, key_observation = jax.random.split(key)
 
-            conditional = self.dist.select(state).conditional(
-                history,
+            selected = _batch.take_along_last_batch(
+                self.dist, self.dist.batch_shape, state
             )
+            conditional = selected.conditional(history)
 
             observation = conditional.sample(
                 key_observation,
@@ -264,10 +291,10 @@ class AREmissions(
 
             history = jnp.concatenate(
                 [
-                    observation[None, :],
-                    history[:-1],
+                    observation[..., None, :],
+                    history[..., :-1, :],
                 ],
-                axis=0,
+                axis=-2,
             )
 
             return (history, key), observation
@@ -275,10 +302,10 @@ class AREmissions(
         _, observations = jax.lax.scan(
             step,
             (history, key),
-            states,
+            jnp.moveaxis(states, -1, 0),
         )
 
-        return observations
+        return jnp.moveaxis(observations, 0, -2)
 
     def sample(
         self,
@@ -292,7 +319,8 @@ class AREmissions(
         an assumption about the stationary distribution of the AR process.
         """
         initial_history = jnp.zeros(
-            (
+            self.batch_shape
+            + (
                 self.num_lags,
                 self.output_dim,
             ),

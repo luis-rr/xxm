@@ -7,6 +7,7 @@ import typing
 import jax
 from jax import numpy as jnp
 
+from xxm.core import _batch
 from xxm.core.affine import Affine
 from xxm.core.chains.gaussian import GaussianChainMarginals, GaussianPotential
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
@@ -18,6 +19,19 @@ from xxm.core.posteriors import ContinuousPosterior
 
 class Emissions(typing.Protocol):
     """Protocol for emission models over continuous latents."""
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]: ...
+
+    def select(self, index) -> typing.Self: ...
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self: ...
+
+    def squeeze(self, axis=None) -> typing.Self: ...
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self: ...
+
+    def move_axis(self, source: int, destination: int) -> typing.Self: ...
 
     def sample(self, key, latents) -> jax.Array:
         """Sample observations conditional on latent values."""
@@ -113,20 +127,39 @@ class GaussianEmissions(typing.NamedTuple):
     and `dist.covariance` stores $R$.
     """
 
-    dist: LinearGaussian  # no batch
+    dist: LinearGaussian  # structural batch *B
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        return self.dist.batch_shape
+
+    def select(self, index) -> typing.Self:
+        return self._replace(dist=self.dist.select(index))
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        return self._replace(dist=self.dist.broadcast(shape, axis=axis))
+
+    def squeeze(self, axis=None) -> typing.Self:
+        return self._replace(dist=self.dist.squeeze(axis))
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        return self._replace(dist=self.dist.permute(permutation, axis=axis))
+
+    def move_axis(self, source: int, destination: int) -> typing.Self:
+        return self._replace(dist=self.dist.move_axis(source, destination))
 
     def conditional(
         self,
-        latents: jax.Array,  # (..., D)
+        latents: jax.Array,  # (*B, *Q, D)
     ) -> Gaussian:
         """Conditional distribution $p(y|x)$ at deterministic latent."""
         return self.dist.conditional(latents)
 
     def log_likelihood(
         self,
-        observations: jax.Array,  # (T, N)
-        latents: jax.Array,  # (T, D)
-    ) -> jax.Array:  # ()
+        observations: jax.Array,  # (*B, T, O)
+        latents: jax.Array,  # (*B, T, D)
+    ) -> jax.Array:  # (*B,)
         """Compute the total conditional log likelihood."""
         return jnp.sum(self.conditional(latents).log_prob(observations), axis=-1)
 
@@ -143,8 +176,8 @@ class GaussianEmissions(typing.NamedTuple):
     def sample(
         self,
         key: jax.Array,
-        latents: jax.Array,  # (..., D)
-    ) -> jax.Array:  # (..., N)
+        latents: jax.Array,  # (*B, *Q, D)
+    ) -> jax.Array:  # (*B, *Q, O)
         """Sample observations conditional on latent values."""
         return self.conditional(latents).sample(key)
 
@@ -157,27 +190,26 @@ class GaussianEmissions(typing.NamedTuple):
     ) -> typing.Self:
         """Fit emission parameters from Gaussian latent marginals."""
 
-        if posterior.means.ndim != 2:
-            raise ValueError(
-                'GaussianEmissions.fit_params expects an unbatched posterior '
-                'with means shape (T, D)'
-            )
-        if posterior.covariances.ndim != 3:
-            raise ValueError(
-                'GaussianEmissions.fit_params expects an unbatched posterior '
-                'with covariances shape (T, D, D)'
-            )
+        batch_shape = self.batch_shape
 
-        return self._replace(
-            dist=gaussian_fit.linear_from_marginals(
+        def fit_one(observations_i, means_i, covariances_i):
+            return gaussian_fit.linear_from_marginals(
                 inputs=Gaussian(
-                    mean=posterior.means,
-                    covariance=posterior.covariances,
+                    mean=means_i,
+                    covariance=covariances_i,
                 ),
-                outputs=observations,
+                outputs=observations_i,
                 ridge=ridge,
                 covariance_floor=covariance_floor,
-            ),
+            )
+
+        flat_fitted = jax.vmap(fit_one)(
+            _batch.flatten_batch(observations, batch_shape),
+            _batch.flatten_batch(posterior.means, batch_shape),
+            _batch.flatten_batch(posterior.covariances, batch_shape),
+        )
+        return self._replace(
+            dist=_batch.unflatten_batch(flat_fitted, batch_shape),
         )
 
     def observation_mean(self, posterior: ContinuousPosterior) -> jax.Array:
@@ -191,6 +223,10 @@ class GaussianEmissions(typing.NamedTuple):
         alignment: Affine,
     ) -> typing.Self:
         """Express the emissions in aligned latent coordinates."""
+        if alignment.batch_shape == ():
+            alignment = alignment.broadcast(self.batch_shape)
+        else:
+            assert alignment.batch_shape == self.batch_shape
         return self._replace(
             dist=self.dist.compose_input(
                 alignment.inverse(),
@@ -206,14 +242,20 @@ class GaussianEmissions(typing.NamedTuple):
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     ) -> typing.Self:
         """Fit Gaussian emissions to a known latent trajectory."""
-        model = gaussian_fit.linear_from_samples(
-            latents,
-            observations,
-            ridge=ridge,
-            covariance_floor=covariance_floor,
+        batch_shape = latents.shape[:-2]
+        flat_model = jax.vmap(
+            lambda latents_i, observations_i: gaussian_fit.linear_from_samples(
+                latents_i,
+                observations_i,
+                ridge=ridge,
+                covariance_floor=covariance_floor,
+            )
+        )(
+            _batch.flatten_batch(latents, batch_shape),
+            _batch.flatten_batch(observations, batch_shape),
         )
 
-        return cls(model)
+        return cls(_batch.unflatten_batch(flat_model, batch_shape))
 
     def invert(
         self,
@@ -234,27 +276,46 @@ class PoissonEmissions(typing.NamedTuple):
     `dist.affine.coefficients` stores $C$ and `dist.affine.bias` stores $d$.
     """
 
-    dist: LinearPoisson  # no batch
+    dist: LinearPoisson  # structural batch *B
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        return self.dist.batch_shape
+
+    def select(self, index) -> typing.Self:
+        return self._replace(dist=self.dist.select(index))
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        return self._replace(dist=self.dist.broadcast(shape, axis=axis))
+
+    def squeeze(self, axis=None) -> typing.Self:
+        return self._replace(dist=self.dist.squeeze(axis))
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        return self._replace(dist=self.dist.permute(permutation, axis=axis))
+
+    def move_axis(self, source: int, destination: int) -> typing.Self:
+        return self._replace(dist=self.dist.move_axis(source, destination))
 
     def conditional(
         self,
-        latents: jax.Array,  # (..., D)
+        latents: jax.Array,  # (*B, *Q, D)
     ) -> Poisson:
         """Conditional observation distribution given latent values."""
         return self.dist.conditional(latents)
 
     def rates(
         self,
-        latents: jax.Array,  # (..., D)
-    ) -> jax.Array:  # (..., N)
+        latents: jax.Array,  # (*B, *Q, D)
+    ) -> jax.Array:  # (*B, *Q, O)
         """Compute conditional Poisson rates."""
         return self.conditional(latents).rates
 
     def log_likelihood(
         self,
-        observations: jax.Array,  # (T, N)
-        latents: jax.Array,  # (T, D)
-    ) -> jax.Array:  # ()
+        observations: jax.Array,  # (*B, T, O)
+        latents: jax.Array,  # (*B, T, D)
+    ) -> jax.Array:  # (*B,)
         """Compute the total conditional log likelihood."""
         return jnp.sum(self.conditional(latents).log_prob(observations), axis=-1)
 
@@ -278,23 +339,23 @@ class PoissonEmissions(typing.NamedTuple):
 
     def compute_local_potential(
         self,
-        observations: jax.Array,  # (T, N)
-        latents: jax.Array,  # (T, D)
+        observations: jax.Array,  # (*B, T, O)
+        latents: jax.Array,  # (*B, T, D)
     ) -> GaussianPotential:
         """Construct a quadratic approximation of the log likelihood around `latents`."""
-        coefficients = self.dist.affine.coefficients  # (N, D)
+        coefficients = self.dist.affine.coefficients  # (*B, O, D)
 
         conditional = self.conditional(latents)
-        rates = conditional.rates  # (T, N)
+        rates = conditional.rates  # (*B, T, O)
 
-        gradient = (observations - rates) @ coefficients  # (T, D)
+        gradient = (observations - rates) @ coefficients  # (*B, T, D)
 
         precision = jnp.einsum(
-            'tn,ni,nj->tij',
+            '...tn,...ni,...nj->...tij',
             rates,
             coefficients,
             coefficients,
-        )  # (T, D, D)
+        )  # (*B, T, D, D)
 
         return GaussianPotential.from_local_quadratic(
             point=latents,
@@ -306,42 +367,38 @@ class PoissonEmissions(typing.NamedTuple):
     def sample(
         self,
         key: jax.Array,
-        latents: jax.Array,  # (..., D)
-    ) -> jax.Array:  # (..., N)
+        latents: jax.Array,  # (*B, *Q, D)
+    ) -> jax.Array:  # (*B, *Q, O)
         """Sample observations conditional on latent values."""
         return self.conditional(latents).sample(key)
 
     def fit_params(
         self,
-        observations: jax.Array,  # (T, N)
-        posterior: ContinuousPosterior,  # (T, D)
+        observations: jax.Array,  # (*B, T, O)
+        posterior: ContinuousPosterior,  # (*B, T, D)
         ridge=poisson_fit.DEFAULT_RIDGE,
     ) -> typing.Self:
         """Fit the emission parameters from Gaussian latent marginals."""
 
-        if posterior.means.ndim != 2:
-            raise ValueError(
-                'PoissonEmissions.fit_params expects an unbatched posterior '
-                'with means shape (T, D)'
-            )
-        if posterior.covariances.ndim != 3:
-            raise ValueError(
-                'PoissonEmissions.fit_params expects an unbatched posterior '
-                'with covariances shape (T, D, D)'
+        batch_shape = self.batch_shape
+
+        def fit_one(observations_i, means_i, covariances_i, initial_affine_i):
+            return poisson_fit.linear_from_marginals(
+                outputs=observations_i,
+                inputs=Gaussian(mean=means_i, covariance=covariances_i),
+                initial_affine=initial_affine_i,
+                ridge=ridge,
             )
 
-        model = poisson_fit.linear_from_marginals(
-            outputs=observations,
-            inputs=Gaussian(
-                mean=posterior.means,
-                covariance=posterior.covariances,
-            ),
-            initial_affine=self.dist.affine,
-            ridge=ridge,
+        flat_fitted = jax.vmap(fit_one)(
+            _batch.flatten_batch(observations, batch_shape),
+            _batch.flatten_batch(posterior.means, batch_shape),
+            _batch.flatten_batch(posterior.covariances, batch_shape),
+            _batch.flatten_batch(self.dist.affine, batch_shape),
         )
 
         return self._replace(
-            dist=model,
+            dist=_batch.unflatten_batch(flat_fitted, batch_shape),
         )
 
     def observation_mean(self, posterior: ContinuousPosterior) -> jax.Array:
@@ -358,6 +415,10 @@ class PoissonEmissions(typing.NamedTuple):
         alignment: Affine,
     ) -> typing.Self:
         """Express the emissions in aligned latent coordinates."""
+        if alignment.batch_shape == ():
+            alignment = alignment.broadcast(self.batch_shape)
+        else:
+            assert alignment.batch_shape == self.batch_shape
         return self._replace(
             dist=self.dist.compose_input(
                 alignment.inverse(),
@@ -373,31 +434,33 @@ class PoissonEmissions(typing.NamedTuple):
     ) -> typing.Self:
         """Fit Poisson emissions to a known latent trajectory."""
 
-        observation_dim = observations.shape[1]
-        latent_dim = latents.shape[1]
+        batch_shape = latents.shape[:-2]
 
-        # Sensible intercept-only starting point.
-        mean_rates = jnp.maximum(
-            jnp.mean(observations, axis=0),
-            1e-6,
+        def fit_one(latents_i, observations_i):
+            observation_dim = observations_i.shape[-1]
+            latent_dim = latents_i.shape[-1]
+
+            # Intercept-only starting point for each independent sequence.
+            mean_rates = jnp.maximum(jnp.mean(observations_i, axis=0), 1e-6)
+            initial_affine = Affine(
+                coefficients=jnp.zeros(
+                    (observation_dim, latent_dim), dtype=latents_i.dtype
+                ),
+                bias=jnp.log(mean_rates),
+            )
+            return poisson_fit.linear_from_samples(
+                outputs=observations_i,
+                inputs=latents_i,
+                initial_affine=initial_affine,
+                ridge=ridge,
+            )
+
+        flat_model = jax.vmap(fit_one)(
+            _batch.flatten_batch(latents, batch_shape),
+            _batch.flatten_batch(observations, batch_shape),
         )
 
-        initial_affine = Affine(
-            coefficients=jnp.zeros(
-                (observation_dim, latent_dim),
-                dtype=latents.dtype,
-            ),
-            bias=jnp.log(mean_rates),
-        )
-
-        model = poisson_fit.linear_from_samples(
-            outputs=observations,
-            inputs=latents,
-            initial_affine=initial_affine,
-            ridge=ridge,
-        )
-
-        return cls(model)
+        return cls(_batch.unflatten_batch(flat_model, batch_shape))
 
     def invert(
         self,
