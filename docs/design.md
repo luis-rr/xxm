@@ -152,6 +152,10 @@ Sequential algorithms may internally move, flatten, or vectorize axes for effici
 
 Posterior and marginal objects produced by core inference follow the same rules as other core mathematical objects: their batch axes remain generic, and model-family code is responsible for interpreting them.
 
+### Timing
+
+In sequential models, quantities indexed by time $t$ are interpreted as belonging to the state being entered at that time. In particular, LDS dynamics use the convention $x_t \mid x_{t-1}, u_t$, so `inputs[t]` affects the transition from `x[t-1]` into `x[t]`; `inputs[0]` is therefore a boundary value unused by autonomous initial-state dynamics, while `inputs[1:]` align with the $T-1$ latent transitions. The same incoming-state convention should be used consistently for other time-indexed latent variables or controls whenever possible.
+
 
 ### Repository structure
 
