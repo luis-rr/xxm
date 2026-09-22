@@ -1374,6 +1374,39 @@ class GaussianChainMarginals(typing.NamedTuple):
         joint_dim = self.num_steps * self.variable_dim
         return 0.5 * (joint_dim * (1.0 + jnp.log(2.0 * jnp.pi)) + joint_log_det)
 
+    def affine(self, affine: Affine) -> typing.Self:
+        """Push posterior marginals through a batch-aligned affine map."""
+        _batch.require_same(self.batch_shape, affine.batch_shape)
+
+        if affine.input_shape != (self.variable_dim,):
+            raise ValueError(
+                'affine input dimension must match the posterior variable dimension'
+            )
+
+        coefficients = affine.coefficients
+        means = (
+            jnp.einsum('...oi,...ti->...to', coefficients, self.means)
+            + affine.bias[..., None, :]
+        )
+        covariances = jnp.einsum(
+            '...oi,...tij,...pj->...top',
+            coefficients,
+            self.covariances,
+            coefficients,
+        )
+        cross_covariances = jnp.einsum(
+            '...oi,...tij,...pj->...top',
+            coefficients,
+            self.cross_covariances,
+            coefficients,
+        )
+
+        return self.__class__(
+            means=means,
+            covariances=covariances,
+            cross_covariances=cross_covariances,
+        )
+
     def select(self, index) -> typing.Self:
         """Index only batch dimensions, retaining this object type."""
         index = _batch.selection(index, len(self.batch_shape))
