@@ -1,14 +1,9 @@
-"""Categorical fitting utilities and low-weight batch filtering."""
-
-import typing
+"""Categorical fitting utilities."""
 
 import jax
 import jax.numpy as jnp
 
 from xxm.core.dists.categorical import Categorical
-
-PyTreeT = typing.TypeVar('PyTreeT')
-
 
 DEFAULT_PSEUDOCOUNT = 1e-8
 
@@ -55,59 +50,3 @@ def _from_counts(
     probs = valid_counts / valid_total
 
     return Categorical(probs=probs)
-
-
-def filter_valid_batches(
-    fitted: PyTreeT,
-    current: PyTreeT,
-    weights: jax.Array,
-    *,
-    min_expected_count: float = 1.0,
-) -> PyTreeT:
-    """
-    Keep current parameters for fitted batches with insufficient weight.
-
-    Weights have shape `(*B, S)` and all PyTree leaves begin with `*B`.
-    """
-    if weights.ndim < 1:
-        raise ValueError('weights must have shape (*B, S)')
-
-    expected_counts = jnp.sum(
-        weights,
-        axis=-1,
-    )
-
-    valid = expected_counts >= min_expected_count
-
-    def select(
-        fitted_leaf: jax.Array,
-        current_leaf: jax.Array,
-    ) -> jax.Array:
-        if (
-            fitted_leaf.shape[: valid.ndim] != valid.shape
-            or current_leaf.shape[: valid.ndim] != valid.shape
-        ):
-            raise ValueError(
-                f'parameter leaves must begin with fitted batch shape {valid.shape}'
-            )
-        if fitted_leaf.shape != current_leaf.shape:
-            raise ValueError(
-                'fitted and current parameter leaves must have equal shapes'
-            )
-
-        mask = valid.reshape(valid.shape + (1,) * (fitted_leaf.ndim - valid.ndim))
-
-        return jnp.where(
-            mask,
-            fitted_leaf,
-            current_leaf,
-        )
-
-    return typing.cast(
-        PyTreeT,
-        jax.tree.map(
-            select,
-            fitted,
-            current,
-        ),
-    )

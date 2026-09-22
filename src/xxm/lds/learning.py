@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import jax
-
-from xxm.core.chains.gaussian import (
-    GaussianChainMarginals as Posterior,
-)
+from xxm.core.chains.gaussian import GaussianChainMarginals as Posterior
+from xxm.core.data import Sequences
 from xxm.core.emissions.continuous import LaplaceEmissionsT, QuadraticEmissionsT
 from xxm.core.inference import Inferred
 from xxm.core.optim.loop import Fit
@@ -22,21 +19,20 @@ def em_step(
         Model[QuadraticEmissionsT],
         Posterior,
     ],
-    observations: jax.Array,
+    data: Sequences,
 ) -> Inferred[
     Model[QuadraticEmissionsT],
     Posterior,
 ]:
-    """Perform one exact EM update."""
-
+    """Perform one pooled exact EM update across independent sequences."""
     model = inferred.model.fit_params(
-        observations,
+        data,
         inferred.posterior,
     )
 
     return infer_exact(
         model,
-        observations,
+        data,
     )
 
 
@@ -45,22 +41,21 @@ def laplace_em_step(
         Model[LaplaceEmissionsT],
         Posterior,
     ],
-    observations: jax.Array,
+    data: Sequences,
     params: OptimParams,
 ) -> Inferred[
     Model[LaplaceEmissionsT],
     Posterior,
 ]:
-    """Perform one warm-started Laplace EM update."""
-
+    """Perform one warm-started pooled Laplace EM update."""
     model = inferred.model.fit_params(
-        observations,
+        data,
         inferred.posterior,
     )
 
     return infer_laplace(
         model,
-        observations,
+        data,
         initial_latents=inferred.posterior.means,
         params=params,
     )
@@ -68,7 +63,7 @@ def laplace_em_step(
 
 def fit_em(
     model: Model[QuadraticEmissionsT],
-    observations: jax.Array,
+    data: Sequences,
     num_iters: int,
     progress: bool | str = 'EM',
 ) -> Fit[
@@ -77,16 +72,15 @@ def fit_em(
         Posterior,
     ]
 ]:
-    """Fit a quadratic-emission LDS by exact expectation-maximization."""
-
+    """Fit a quadratic-emission LDS by pooled exact EM."""
     inferred = infer_exact(
         model,
-        observations,
+        data,
     )
 
     return _fit_one(
         inferred,
-        observations,
+        data,
         num_iters=num_iters,
         step=em_step,
         progress=progress,
@@ -95,7 +89,7 @@ def fit_em(
 
 def fit_laplace_em(
     model: Model[LaplaceEmissionsT],
-    observations: jax.Array,
+    data: Sequences,
     num_iters: int,
     progress: bool | str = 'Laplace EM',
     laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
@@ -105,21 +99,20 @@ def fit_laplace_em(
         Posterior,
     ]
 ]:
-    """Fit a nonconjugate LDS with Laplace-approximated EM."""
-
+    """Fit a nonconjugate LDS with pooled Laplace-approximated EM."""
     inferred = infer_laplace(
         model,
-        observations,
+        data,
         params=laplace_params,
     )
 
     return _fit_one(
         inferred,
-        observations,
+        data,
         num_iters=num_iters,
-        step=lambda inferred, observations: laplace_em_step(
+        step=lambda inferred, data: laplace_em_step(
             inferred,
-            observations,
+            data,
             params=laplace_params,
         ),
         progress=progress,

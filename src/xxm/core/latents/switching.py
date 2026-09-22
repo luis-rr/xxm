@@ -11,8 +11,8 @@ from xxm.core.chains.gaussian import (
     GaussianPairPotential,
 )
 from xxm.core.dists.gaussian import LinearGaussian
-from xxm.core.optim import categorical as categorical_fit
 from xxm.core.optim import gaussian as gaussian_fit
+from xxm.core.optim._batch import filter_valid_batches
 from xxm.core.posteriors import ContinuousPosterior, DiscretePosterior
 
 
@@ -93,10 +93,11 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         )
 
         return self._replace(
-            dist=categorical_fit.filter_valid_batches(
+            dist=filter_valid_batches(
                 fitted,
                 self.dist,
                 weights,
+                min_expected_count=1.0,
             ),
         )
 

@@ -1,27 +1,14 @@
-import typing
-
 import jax
 import numpy as np
 from jax import numpy as jnp
 
 from xxm.core.affine import Affine
+from xxm.core.chains.gaussian import GaussianChainMarginals
+from xxm.core.data import WeightedObservations
 from xxm.core.dists.gaussian import LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
 from xxm.core.optim import gaussian as gaussian_fit
-
-
-class MockPosterior(typing.NamedTuple):
-    means: jax.Array
-    covariances: jax.Array
-
-    def raw_second_moments(self) -> jax.Array:
-        return self.covariances + jnp.einsum(
-            'ti,tj->tij',
-            self.means,
-            self.means,
-        )
-
 
 # ---------------------------------------------------------------------
 # Gaussian
@@ -44,7 +31,9 @@ def test_gaussian_potential_matches_known_value():
         ),
     )
 
-    potential = emissions.compute_potential(jnp.array([[2.0, 3.0]]))
+    potential = emissions.compute_potential(
+        WeightedObservations.from_sequence(jnp.array([[2.0, 3.0]]))
+    )
 
     expected_precision = jnp.array(
         [
@@ -85,7 +74,7 @@ def test_gaussian_log_likelihood_matches_known_value():
     )
 
     value = emissions.log_likelihood(
-        observations=jnp.array([[1.0, 0.0]]),
+        observations=WeightedObservations.from_sequence(jnp.array([[1.0, 0.0]])),
         latents=jnp.array([[1.0, -1.0]]),
     )
 
@@ -119,9 +108,10 @@ def test_gaussian_fit_recovers_known_parameters():
 
     observations = 2.0 * latents + 1.0 + residuals
 
-    posterior = MockPosterior(
+    posterior = GaussianChainMarginals(
         means=latents,
         covariances=jnp.zeros((6, 1, 1)),
+        cross_covariances=jnp.zeros((5, 1, 1)),
     )
 
     emissions = GaussianEmissions(
@@ -131,7 +121,9 @@ def test_gaussian_fit_recovers_known_parameters():
         ),
     )
 
-    fitted = emissions.fit_params(observations, posterior)  # type: ignore
+    fitted = emissions.fit_params(
+        WeightedObservations.from_sequence(observations), posterior
+    )
 
     expected_coefficient = 2.0 / (1.0 + gaussian_fit.DEFAULT_RIDGE)
 
@@ -187,7 +179,9 @@ def test_gaussian_emissions_potential_has_one_factor_per_observation():
         ]
     )
 
-    potential = emissions.compute_potential(observations)
+    potential = emissions.compute_potential(
+        WeightedObservations.from_sequence(observations)
+    )
 
     # For R = 4 and C = 2:
     #
@@ -253,7 +247,7 @@ def test_poisson_log_likelihood_matches_known_scalar_value():
     )
 
     value = emissions.log_likelihood(
-        observations=jnp.array([[2.0]]),
+        observations=WeightedObservations.from_sequence(jnp.array([[2.0]])),
         latents=jnp.array([[0.0]]),
     )
 
@@ -274,7 +268,7 @@ def test_poisson_log_likelihood_handles_zero_count():
     )
 
     value = emissions.log_likelihood(
-        observations=jnp.array([[0.0]]),
+        observations=WeightedObservations.from_sequence(jnp.array([[0.0]])),
         latents=jnp.array([[0.0]]),
     )
 
@@ -288,7 +282,7 @@ def test_poisson_local_potential_matches_value_gradient_and_hessian():
         ),
     )
 
-    observations = jnp.array([[3.0]])
+    observations = WeightedObservations.from_sequence(jnp.array([[3.0]]))
     reference = jnp.array([[0.5]])
 
     potential = emissions.compute_local_potential(
@@ -338,9 +332,10 @@ def test_poisson_fit_recovers_known_parameters():
 
     observations = true_emissions.rates(latents)
 
-    posterior = MockPosterior(
+    posterior = GaussianChainMarginals(
         means=latents,
         covariances=jnp.zeros((latents.shape[0], 1, 1)),
+        cross_covariances=jnp.zeros((latents.shape[0] - 1, 1, 1)),
     )
 
     initial_emissions = PoissonEmissions(
@@ -349,7 +344,9 @@ def test_poisson_fit_recovers_known_parameters():
         ),
     )
 
-    fitted = initial_emissions.fit_params(observations, posterior)  # type: ignore
+    fitted = initial_emissions.fit_params(
+        WeightedObservations.from_sequence(observations), posterior
+    )
 
     np.testing.assert_allclose(
         fitted.dist.affine.coefficients,
@@ -393,11 +390,12 @@ def test_gaussian_methods_are_jittable():
         ),
     )
 
-    observations = jnp.ones((3, 2))
+    observations = WeightedObservations.from_sequence(jnp.ones((3, 2)))
     latents = jnp.zeros((3, 2))
-    posterior = MockPosterior(
+    posterior = GaussianChainMarginals(
         means=latents,
         covariances=jnp.broadcast_to(jnp.eye(2), (3, 2, 2)),
+        cross_covariances=jnp.zeros((2, 2, 2)),
     )
 
     jax.jit(emissions.compute_potential)(observations)
@@ -413,11 +411,12 @@ def test_poisson_methods_are_jittable():
         ),
     )
 
-    observations = jnp.ones((3, 2))
+    observations = WeightedObservations.from_sequence(jnp.ones((3, 2)))
     latents = jnp.zeros((3, 2))
-    posterior = MockPosterior(
+    posterior = GaussianChainMarginals(
         means=latents,
         covariances=jnp.broadcast_to(jnp.eye(2), (3, 2, 2)),
+        cross_covariances=jnp.zeros((2, 2, 2)),
     )
 
     jax.jit(emissions.rates)(latents)

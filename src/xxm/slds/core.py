@@ -11,6 +11,7 @@ from xxm.core.chains.discrete import DiscreteChainMarginals
 from xxm.core.chains.gaussian import (
     GaussianChainMarginals,
 )
+from xxm.core.data import WeightedObservations
 from xxm.core.emissions.continuous import EmissionsT
 from xxm.core.latents.discrete import CategoricalInitial, CategoricalTransitions
 from xxm.core.latents.gaussian import StateConditionedGaussian
@@ -81,7 +82,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
                 continuous=posterior.continuous,
             ),
             emissions=self.emissions.fit_params(
-                observations,
+                WeightedObservations.from_sequence(observations),
                 posterior.continuous,
             ),
         )

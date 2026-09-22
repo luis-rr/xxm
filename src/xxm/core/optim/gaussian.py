@@ -328,6 +328,79 @@ def from_moment_match(
     )
 
 
+def paired_from_paired_covariates(
+    paired: PairedGaussian,
+    covariates: jax.Array,
+    *,
+    weights: jax.Array | None = None,
+) -> PairedGaussian:
+    """
+    Moment-match a Gaussian pair with deterministic left-side covariates.
+
+    The returned left variable is `[paired.left, covariates]` and the right
+    variable is `paired.right`.
+    """
+    matched = paired_from_moment_match(
+        paired,
+        weights=weights,
+    )
+
+    left_covariates = paired_from_left_marginals(
+        paired.left,
+        covariates,
+        weights=weights,
+    )
+
+    right_covariates = paired_from_left_marginals(
+        paired.right,
+        covariates,
+        weights=weights,
+    )
+
+    left = Gaussian(
+        mean=left_covariates.mean,
+        covariance=left_covariates.covariance,
+    )
+
+    cross_covariance = jnp.concatenate(
+        [
+            matched.cross_covariance,
+            jnp.swapaxes(right_covariates.cross_covariance, -1, -2),
+        ],
+        axis=-1,
+    )
+
+    return PairedGaussian(
+        left=left,
+        right=matched.right,
+        cross_covariance=cross_covariance,
+    )
+
+
+def linear_from_paired_covariates(
+    paired: PairedGaussian,
+    covariates: jax.Array,
+    *,
+    weights: jax.Array | None = None,
+    ridge: float,
+    covariance_floor: float,
+) -> LinearGaussian:
+    """
+    Fit a linear Gaussian using uncertain inputs and deterministic covariates.
+    """
+    paired = paired_from_paired_covariates(
+        paired,
+        covariates,
+        weights=weights,
+    )
+
+    return linear_from_paired(
+        paired,
+        ridge=ridge,
+        covariance_floor=covariance_floor,
+    )
+
+
 def paired_from_moment_match(
     distributions: PairedGaussian,
     weights: jax.Array | None = None,

@@ -4,6 +4,7 @@ import numpy as np
 
 from xxm.core.affine import Affine
 from xxm.core.chains.gaussian import GaussianChain
+from xxm.core.data import WeightedObservations
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.emissions.continuous import GaussianEmissions
@@ -149,7 +150,9 @@ def test_single_state_slds_matches_gaussian_chain():
         .broadcast(observations.shape[0] - 1)
         .weighted_sum(state_probs[1:], axis=1)
     )
-    observation_potential = model.emissions.compute_potential(observations)
+    observation_potential = model.emissions.compute_potential(
+        WeightedObservations.from_sequence(observations)
+    )
 
     expected, _ = (
         GaussianChain.from_pair_potentials(

@@ -9,9 +9,9 @@ from xxm.core import _batch
 from xxm.core.chains.discrete import DiscretePotential
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
-from xxm.core.optim import categorical as categorical_fit
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import poisson as poisson_fit
+from xxm.core.optim._batch import filter_valid_batches
 from xxm.core.posteriors import DiscretePosterior
 
 
@@ -142,15 +142,19 @@ class GaussianEmissions(typing.NamedTuple):
                 weights,
                 covariance_floor=covariance_floor,
             )
-            return categorical_fit.filter_valid_batches(fitted, current_i, weights)
+            return filter_valid_batches(
+                fitted, current_i, weights, min_expected_count=1.0
+            )
 
-        flat_fitted = jax.vmap(fit_one)(
-            _batch.flatten_batch(observations, batch_shape),
-            _batch.flatten_batch(posterior.state_probs, batch_shape),
-            _batch.flatten_batch(self.dist, batch_shape),
+        fitted = _batch.vmap_batch(
+            fit_one,
+            observations,
+            posterior.state_probs,
+            self.dist,
+            batch_shape=batch_shape,
         )
         return self._replace(
-            dist=_batch.unflatten_batch(flat_fitted, batch_shape),
+            dist=fitted,
         )
 
     def sample(self, key: jax.Array, states: jax.Array) -> jax.Array:
@@ -235,15 +239,19 @@ class PoissonEmissions(typing.NamedTuple):
             fitted = poisson_fit.from_samples_weighted(
                 values=observations_i, weights=weights
             )
-            return categorical_fit.filter_valid_batches(fitted, current_i, weights)
+            return filter_valid_batches(
+                fitted, current_i, weights, min_expected_count=1.0
+            )
 
-        flat_fitted = jax.vmap(fit_one)(
-            _batch.flatten_batch(observations, batch_shape),
-            _batch.flatten_batch(posterior.state_probs, batch_shape),
-            _batch.flatten_batch(self.dist, batch_shape),
+        fitted = _batch.vmap_batch(
+            fit_one,
+            observations,
+            posterior.state_probs,
+            self.dist,
+            batch_shape=batch_shape,
         )
         return self._replace(
-            dist=_batch.unflatten_batch(flat_fitted, batch_shape),
+            dist=fitted,
         )
 
     def permute_states(

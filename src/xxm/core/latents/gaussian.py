@@ -8,8 +8,9 @@ from jax import numpy as jnp
 from xxm.core import _batch
 from xxm.core.affine import Affine
 from xxm.core.chains.gaussian import GaussianPotential
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.dists.gaussian import Gaussian, LinearGaussian, PairedGaussian
 from xxm.core.optim import gaussian as gaussian_fit
+from xxm.core.optim._batch import filter_valid_batches
 from xxm.core.posteriors import ContinuousPosterior
 
 
@@ -40,33 +41,67 @@ class GaussianInitial(typing.NamedTuple):
     def fit_params(
         self,
         posterior: ContinuousPosterior,
+        weights: jax.Array,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
     ) -> typing.Self:
-        r"""Fit the initial Gaussian from the posterior moments of $x_0$."""
+        r"""
+        Fit initial-state parameters while preserving the receiver batch prefix.
 
-        _batch.require_same(
+        ``self.batch_shape`` is preserved. Any additional posterior batch axes
+        are independent replicates and are pooled when fitting the initial
+        distribution. ``weights`` contains one validity weight per latent state.
+        """
+        posterior_batch = posterior.batch_shape
+        batch_ndim = len(self.batch_shape)
+
+        if posterior_batch[:batch_ndim] != self.batch_shape:
+            raise ValueError(
+                'posterior batch must begin with the initial-distribution batch shape'
+            )
+
+        if weights.shape != posterior.means.shape[:-1]:
+            raise ValueError('weights must match posterior batch and time dimensions')
+
+        replicate_shape = posterior_batch[batch_ndim:]
+        initial_marginals, initial_weights = _batch.pool_samples(
+            (
+                Gaussian(
+                    mean=posterior.means[..., 0, :],
+                    covariance=posterior.covariances[..., 0, :, :],
+                ),
+                weights[..., 0],
+            ),
             self.batch_shape,
-            posterior.means.shape[:-2],
+            replicate_shape,
+        )
+        initial = gaussian_fit.from_moment_match(
+            initial_marginals, weights=initial_weights
         )
 
+        reference_marginals, reference_weights = _batch.pool_samples(
+            (
+                Gaussian(
+                    mean=posterior.means,
+                    covariance=posterior.covariances,
+                ),
+                weights,
+            ),
+            self.batch_shape,
+            (*replicate_shape, posterior.num_steps),
+        )
         reference = gaussian_fit.from_moment_match(
-            Gaussian(
-                mean=posterior.means,
-                covariance=posterior.covariances,
-            )
+            reference_marginals, weights=reference_weights
         )
 
         covariance = gaussian_fit.add_covariance_floor(
-            posterior.covariances[..., 0, :, :],
+            initial.covariance,
             reference_covariance=reference.covariance,
             covariance_floor=covariance_floor,
         )
 
+        fitted = initial._replace(covariance=covariance)
         return self._replace(
-            dist=Gaussian(
-                mean=posterior.means[..., 0, :],
-                covariance=covariance,
-            )
+            dist=filter_valid_batches(fitted, self.dist, initial_weights)
         )
 
     def sample(self, key: jax.Array) -> jax.Array:
@@ -95,13 +130,13 @@ class GaussianInitial(typing.NamedTuple):
         """Estimate an initial Gaussian from a known latent trajectory."""
 
         batch_shape = latents.shape[:-2]
-        flat = _batch.flatten_batch(latents, batch_shape)
-        flat_reference = jax.vmap(
+        reference = _batch.vmap_batch(
             lambda values: gaussian_fit.from_samples(
                 values, covariance_floor=covariance_floor
-            )
-        )(flat)
-        reference = _batch.unflatten_batch(flat_reference, batch_shape)
+            ),
+            latents,
+            batch_shape=batch_shape,
+        )
 
         return cls(
             Gaussian(
@@ -112,63 +147,275 @@ class GaussianInitial(typing.NamedTuple):
 
 
 class GaussianLinearDynamics(typing.NamedTuple):
-    r"""Linear-Gaussian dynamics $x_t|x_{t-1} \sim \mathcal{N}(Ax_{t-1}+b, Q)$."""
+    r"""
+    Linear-Gaussian latent dynamics.
 
-    dist: LinearGaussian  # structural batch *B
+    $$x_t \mid x_{t-1}, u_t
+    \sim
+    \mathcal{N}(A x_{t-1} + B u_t + b, Q).$$
+
+    The underlying `LinearGaussian` acts on the concatenated predictor
+    `[x_{t-1}, u_t]`, with coefficients `[A, B]`.
+    """
+
+    dist: LinearGaussian
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
         return self.dist.batch_shape
 
     def select(self, index) -> typing.Self:
-        return self._replace(dist=self.dist.select(index))
+        return type(self)(self.dist.select(index))
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
-        return self._replace(dist=self.dist.broadcast(shape, axis=axis))
+        return type(self)(self.dist.broadcast(shape, axis=axis))
 
     def squeeze(self, axis=None) -> typing.Self:
-        return self._replace(dist=self.dist.squeeze(axis))
+        return type(self)(self.dist.squeeze(axis))
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
-        return self._replace(dist=self.dist.permute(permutation, axis=axis))
+        return type(self)(self.dist.permute(permutation, axis=axis))
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
-        return self._replace(dist=self.dist.move_axis(source, destination))
+        return type(self)(self.dist.move_axis(source, destination))
+
+    @property
+    def latent_dim(self) -> int:
+        """Dimension $D_x$ of the latent state."""
+        return self.dist.output_dim
+
+    @property
+    def input_dim(self) -> int:
+        """Dimension $D_u$ of the known dynamics input."""
+        return self.dist.input_size - self.latent_dim
+
+    @property
+    def latent_coefficients(self) -> jax.Array:
+        """Latent transition coefficients $A$."""
+        return self.dist.affine.coefficients_flat[..., :, : self.latent_dim]
+
+    @property
+    def input_coefficients(self) -> jax.Array:
+        """Known-input coefficients $B$."""
+        return self.dist.affine.coefficients_flat[..., :, self.latent_dim :]
+
+    def conditional(
+        self,
+        inputs: jax.Array,
+    ) -> LinearGaussian:
+        r"""
+        Condition the dynamics on known inputs.
+
+        Returns
+
+        $$x_t \mid x_{t-1}
+        \sim
+        \mathcal{N}(A x_{t-1} + B u_t + b, Q).$$
+
+        Query dimensions in `inputs` become batch dimensions of the returned
+        conditional distribution.
+        """
+        if inputs.shape[-1] != self.input_dim:
+            raise ValueError(
+                f'expected input dimension {self.input_dim}, got {inputs.shape[-1]}'
+            )
+
+        input_affine = Affine(
+            coefficients=self.input_coefficients,
+            bias=self.dist.affine.bias,
+        )
+        bias = input_affine.apply(inputs)
+
+        coefficients = _batch.align_array(
+            self.latent_coefficients, self.batch_shape, inputs.shape[:-1]
+        )
+        covariance = _batch.align_array(
+            self.dist.covariance, self.batch_shape, inputs.shape[:-1]
+        )
+
+        return LinearGaussian(
+            affine=Affine(
+                coefficients=coefficients,
+                bias=bias,
+            ),
+            covariance=covariance,
+        )
 
     def fit_params(
         self,
         posterior: ContinuousPosterior,
+        inputs: jax.Array,
+        weights: jax.Array,
         ridge=gaussian_fit.DEFAULT_RIDGE,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
     ) -> typing.Self:
-        r"""Fit dynamics from posterior pair marginals via moment matching."""
+        """
+        Fit dynamics while preserving the receiver batch prefix.
 
-        _batch.require_same(
+        ``self.batch_shape`` is preserved. Any additional posterior batch axes
+        are pooled together with the transition axis. ``inputs`` and ``weights``
+        contain one entry per transition.
+        """
+        posterior_batch = posterior.batch_shape
+        batch_ndim = len(self.batch_shape)
+
+        if posterior_batch[:batch_ndim] != self.batch_shape:
+            raise ValueError('posterior batch must begin with the dynamics batch shape')
+
+        num_transitions = posterior.num_steps - 1
+        expected_inputs_shape = (
+            *posterior_batch,
+            num_transitions,
+            self.input_dim,
+        )
+        expected_weights_shape = (
+            *posterior_batch,
+            num_transitions,
+        )
+
+        if inputs.shape != expected_inputs_shape:
+            raise ValueError(
+                f'inputs must have shape {expected_inputs_shape}; got {inputs.shape}'
+            )
+
+        if weights.shape != expected_weights_shape:
+            raise ValueError(
+                f'weights must have shape {expected_weights_shape}; got {weights.shape}'
+            )
+
+        inputs = jnp.where(
+            weights[..., None] != 0,
+            inputs,
+            jnp.zeros(
+                (),
+                dtype=inputs.dtype,
+            ),
+        )
+
+        sample_shape = (*posterior_batch[batch_ndim:], num_transitions)
+        if 0 in sample_shape:
+            return self
+
+        paired, inputs, weights = _batch.pool_samples(
+            (posterior.paired_marginals(), inputs, weights),
             self.batch_shape,
-            posterior.means.shape[:-2],
+            sample_shape,
         )
 
-        paired = gaussian_fit.paired_from_moment_match(
-            posterior.paired_marginals(),
-        )
-
-        return self._replace(
-            dist=gaussian_fit.linear_from_paired(
-                paired,
+        def fit_one(
+            paired_i: PairedGaussian,
+            inputs_i: jax.Array,
+            weights_i: jax.Array,
+        ) -> LinearGaussian:
+            return gaussian_fit.linear_from_paired_covariates(
+                paired_i,
+                inputs_i,
+                weights=weights_i,
                 ridge=ridge,
                 covariance_floor=covariance_floor,
-            ),
+            )
+
+        fitted = _batch.vmap_batch(
+            fit_one,
+            paired,
+            inputs,
+            weights,
+            batch_shape=self.batch_shape,
+        )
+
+        fitted = filter_valid_batches(fitted, self.dist, weights)
+
+        return type(self)(fitted)
+
+    def validate_trajectory_inputs(self, inputs: jax.Array, num_steps: int) -> None:
+        """Require full trajectory inputs `(*B, T, D_u)` with at least one step.
+
+        The boundary input at time zero is included but unused by dynamics.
+        """
+        if num_steps < 1:
+            raise ValueError('trajectories require at least one time step')
+
+        expected_shape = (*self.batch_shape, num_steps, self.input_dim)
+        if inputs.shape != expected_shape:
+            raise ValueError(
+                f'inputs must have shape {expected_shape}; got {inputs.shape}'
+            )
+
+    def mean_trajectory(
+        self,
+        initial_mean: jax.Array,
+        num_steps: int,
+        *,
+        inputs: jax.Array,
+    ) -> jax.Array:
+        """Roll out transition means, including the initial mean at time zero.
+
+        Inputs have shape `(*B, T, D_u)`; the input at time zero is unused.
+        """
+        self.validate_trajectory_inputs(inputs, num_steps)
+        batch_shape = self.batch_shape
+
+        if initial_mean.shape != (*batch_shape, self.latent_dim):
+            raise ValueError(
+                'initial_mean must match dynamics batch and latent dimensions'
+            )
+
+        time_axis = len(batch_shape)
+        transition_inputs = jnp.moveaxis(
+            inputs[..., 1:, :],
+            time_axis,
+            0,
+        )
+
+        def step(
+            previous: jax.Array,
+            current_inputs: jax.Array,
+        ) -> tuple[jax.Array, jax.Array]:
+            conditional = self.conditional(current_inputs)
+            current = conditional.conditional_mean(previous)
+            return current, current
+
+        _, following = jax.lax.scan(
+            step,
+            initial_mean,
+            transition_inputs,
+        )
+
+        following = jnp.moveaxis(
+            following,
+            0,
+            time_axis,
+        )
+
+        return jnp.concatenate(
+            [
+                jnp.expand_dims(
+                    initial_mean,
+                    axis=time_axis,
+                ),
+                following,
+            ],
+            axis=time_axis,
         )
 
     def sample_next(
         self,
         key: jax.Array,
         previous: jax.Array,
+        inputs: jax.Array,
     ) -> jax.Array:
-        """Sample next latent conditional on previous latent."""
+        """Sample the next latent state conditional on the previous state and input."""
+        predictor = jnp.concatenate(
+            [
+                previous,
+                inputs,
+            ],
+            axis=-1,
+        )
+
         return self.dist.sample(
             key,
-            previous,
+            predictor,
         )
 
     def sample(
@@ -176,75 +423,162 @@ class GaussianLinearDynamics(typing.NamedTuple):
         key: jax.Array,
         initial_latent: jax.Array,
         num_steps: int,
+        *,
+        inputs: jax.Array,
     ) -> jax.Array:
-        """Sample latent trajectories with shape `(*B, T, D)`."""
+        """
+        Sample latent trajectories with shape `(*B, T, D_x)`.
 
-        def step(carry, _):
-            latent, key = carry
+        `inputs[..., t, :]` affects the transition into latent state `t`;
+        `inputs[..., 0, :]` is unused.
+        """
+        self.validate_trajectory_inputs(inputs, num_steps)
 
-            key, sample_key = jax.random.split(key)
-            latent = self.sample_next(
-                sample_key,
-                latent,
-            )
+        time_axis = len(self.batch_shape)
 
-            return (latent, key), latent
-
-        _, subsequent_latents = jax.lax.scan(
-            step,
-            (initial_latent, key),
-            xs=None,
-            length=num_steps - 1,
+        transition_inputs = jnp.moveaxis(
+            inputs[..., 1:, :],
+            time_axis,
+            0,
         )
 
-        subsequent_latents = jnp.moveaxis(
-            subsequent_latents,
+        keys = jax.random.split(
+            key,
+            num_steps - 1,
+        )
+
+        def step(previous, args):
+            step_key, step_inputs = args
+
+            current = self.sample_next(
+                step_key,
+                previous,
+                step_inputs,
+            )
+
+            return current, current
+
+        _, following = jax.lax.scan(
+            step,
+            initial_latent,
+            (
+                keys,
+                transition_inputs,
+            ),
+        )
+
+        following = jnp.moveaxis(
+            following,
             0,
-            -2,
+            time_axis,
         )
 
         return jnp.concatenate(
             [
-                initial_latent[..., None, :],
-                subsequent_latents,
+                jnp.expand_dims(
+                    initial_latent,
+                    axis=time_axis,
+                ),
+                following,
             ],
-            axis=-2,
+            axis=time_axis,
         )
 
     def align(self, alignment: Affine) -> typing.Self:
         """
-        Express the dynamics in coordinates $x' = f(x)$ defined by `alignment`.
+        Express dynamics in coordinates $x' = P x + c$.
+
+        External input coordinates are unchanged.
         """
         _batch.require_same(
             alignment.batch_shape,
             self.batch_shape,
         )
 
-        inverse = alignment.inverse()
+        latent_affine = Affine(
+            coefficients=self.latent_coefficients,
+            bias=self.dist.affine.bias,
+        )
 
-        return self._replace(
-            dist=(self.dist.compose_input(inverse).compose_output(alignment)),
+        aligned_latent = alignment.compose(latent_affine.compose(alignment.inverse()))
+
+        input_coefficients = alignment.coefficients @ self.input_coefficients
+
+        covariance = (
+            alignment.coefficients
+            @ self.dist.covariance
+            @ jnp.swapaxes(
+                alignment.coefficients,
+                -1,
+                -2,
+            )
+        )
+
+        coefficients = jnp.concatenate(
+            [
+                aligned_latent.coefficients,
+                input_coefficients,
+            ],
+            axis=-1,
+        )
+
+        return type(self)(
+            LinearGaussian(
+                affine=Affine(
+                    coefficients=coefficients,
+                    bias=aligned_latent.bias,
+                ),
+                covariance=covariance,
+            )
         )
 
     @classmethod
     def from_latents(
         cls,
         latents: jax.Array,
+        *,
+        inputs: jax.Array,
         ridge=gaussian_fit.DEFAULT_RIDGE,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     ) -> typing.Self:
-        """Fit linear dynamics to a known latent trajectory."""
+        """
+        Fit linear dynamics to known latent trajectories.
+
+        `inputs[..., t, :]` is paired with the transition from
+        `latents[..., t - 1, :]` to `latents[..., t, :]`.
+        """
+        if inputs.shape[:-1] != latents.shape[:-1]:
+            raise ValueError('inputs must align with latent batch and time dimensions')
+
         batch_shape = latents.shape[:-2]
-        flat = _batch.flatten_batch(latents, batch_shape)
-        flat_model = jax.vmap(
-            lambda values: gaussian_fit.linear_from_samples(
-                values[:-1],
-                values[1:],
+
+        def fit_one(
+            latents_i: jax.Array,
+            inputs_i: jax.Array,
+        ) -> LinearGaussian:
+            predictors = jnp.concatenate(
+                [
+                    latents_i[:-1],
+                    inputs_i[1:],
+                ],
+                axis=-1,
+            )
+
+            return gaussian_fit.linear_from_samples(
+                predictors,
+                latents_i[1:],
                 ridge=ridge,
                 covariance_floor=covariance_floor,
             )
-        )(flat)
-        return cls(_batch.unflatten_batch(flat_model, batch_shape))
+
+        fitted = _batch.vmap_batch(
+            fit_one,
+            latents,
+            inputs,
+            batch_shape=batch_shape,
+        )
+
+        return cls(fitted)
 
 
 class StateConditionedGaussian(typing.NamedTuple):
@@ -277,9 +611,12 @@ class StateConditionedGaussian(typing.NamedTuple):
         axis = _batch.axis_index(axis, len(self.batch_shape))
         return self._replace(dist=self.dist.permute(permutation, axis=axis))
 
+        return self._replace(dist=self.dist.permute(permutation, axis=axis))
+
     def move_axis(self, source: int, destination: int) -> typing.Self:
         source = _batch.axis_index(source, len(self.batch_shape))
         destination = _batch.axis_index(destination, len(self.batch_shape))
+
         return self._replace(dist=self.dist.move_axis(source, destination))
 
     @property
@@ -310,15 +647,11 @@ class StateConditionedGaussian(typing.NamedTuple):
         return self.conditional(state).sample(key)
 
     def permute_states(self, permutation: jax.Array) -> typing.Self:
-        """
-        Relabel state-conditioned Gaussian distributions.
-        """
+        """Relabel state-conditioned Gaussian distributions."""
         return self._replace(dist=self.dist.permute(permutation, axis=-1))
 
     def align(self, alignment: Affine) -> typing.Self:
-        """
-        Express the conditional distributions in coordinates $x' = f(x)$.
-        """
+        """Express the conditional distributions in coordinates $x' = f(x)$."""
         _batch.require_same(
             alignment.batch_shape,
             self.batch_shape,

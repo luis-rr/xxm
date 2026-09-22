@@ -17,6 +17,21 @@ class DiscretePosterior(typing.Protocol):
     """
 
     @property
+    def num_steps(self) -> int:
+        r"""Number of time steps $T$."""
+        ...
+
+    @property
+    def num_states(self) -> int:
+        r"""Number of discrete states $K$."""
+        ...
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        r"""Shape of independent batch dimensions (*B)."""
+        ...
+
+    @property
     def state_probs(self) -> jax.Array:  # (*B, T, K)
         r"""State marginals $\gamma_t(k)=q(z_t=k)$."""
         ...
@@ -35,6 +50,21 @@ class ContinuousPosterior(typing.Protocol):
     posterior given observations.
     Independent batch dimensions precede the time and variable dimensions.
     """
+
+    @property
+    def num_steps(self) -> int:
+        r"""Number of time steps $T$."""
+        ...
+
+    @property
+    def variable_dim(self) -> int:
+        r"""Dimension of the variables $D$."""
+        ...
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        r"""Shape of independent batch dimensions (*B)."""
+        ...
 
     @property
     def means(self) -> jax.Array:  # (*B, T, D)

@@ -4,6 +4,9 @@ from xxm.arhmm import (
     GaussianARHMM,
     PoissonARHMM,
 )
+from xxm.core.data import (
+    Sequences,
+)
 from xxm.hmm import (
     GaussianHMM,
     PoissonHMM,
@@ -26,4 +29,5 @@ __all__ = [
     'PoissonHMM',
     'PoissonLDS',
     'PoissonSLDS',
+    'Sequences',
 ]

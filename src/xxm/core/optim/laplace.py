@@ -5,7 +5,11 @@ import typing
 import jax
 from jax import numpy as jnp
 
-from xxm.core.chains.gaussian import GaussianChain, GaussianChainMarginals
+from xxm.core.chains.gaussian import (
+    GaussianChain,
+    GaussianChainMarginals,
+)
+from xxm.core.data import WeightedObservations
 from xxm.core.emissions.continuous import (
     LaplaceEmissions,
     LaplaceEmissionsT,
@@ -54,7 +58,7 @@ class _NewtonSearchModel(
 
     latent_chain: GaussianChain
     emissions: LaplaceEmissionsT
-    observations: jax.Array
+    observations: WeightedObservations
 
     def objective(self, params: _NewtonSearchParams) -> jax.Array:
         """Evaluate the chain log potential plus the observation log likelihood."""
@@ -91,7 +95,7 @@ class _NewtonSearchModel(
 def local_gaussian_approximation(
     chain: GaussianChain,
     emissions: LaplaceEmissions,
-    observations: jax.Array,
+    observations: WeightedObservations,
     latents: jax.Array,
 ) -> tuple[GaussianChainMarginals, jax.Array]:
     """Construct a local Gaussian posterior approximation around `latents`."""
@@ -109,7 +113,7 @@ def local_gaussian_approximation(
 def laplace_inference(
     chain: GaussianChain,
     emissions: LaplaceEmissions,
-    observations: jax.Array,
+    observations: WeightedObservations,
     initial_latents: jax.Array,
     search_params: OptimParams,
 ) -> tuple[GaussianChainMarginals, jax.Array]:

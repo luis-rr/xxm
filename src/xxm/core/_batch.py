@@ -30,6 +30,31 @@ def unflatten_batch(tree, batch_shape: tuple[int, ...]):
     return jax.tree.map(unflatten, tree)
 
 
+def vmap_batch(function, *trees, batch_shape: tuple[int, ...]):
+    """Map an operation over a shared structural batch prefix."""
+    flat = [flatten_batch(tree, batch_shape) for tree in trees]
+    return unflatten_batch(jax.vmap(function)(*flat), batch_shape)
+
+
+def pool_samples(tree, batch_shape: tuple[int, ...], sample_shape: tuple[int, ...]):
+    """Collapse `(*B, *S, *E)` leaves to `(*B, prod(S), *E)`.
+
+    An empty sample shape introduces one sample; zero-length sample axes
+    remain empty. Event dimensions are preserved independently for each leaf.
+    """
+    prefix = batch_shape + sample_shape
+    size = math.prod(sample_shape)
+
+    def pool(values):
+        if values.shape[: len(prefix)] != prefix:
+            raise ValueError(
+                f'expected batch and sample prefix {prefix}, got {values.shape}'
+            )
+        return values.reshape(batch_shape + (size,) + values.shape[len(prefix) :])
+
+    return jax.tree.map(pool, tree)
+
+
 def take_along_last_batch(tree, batch_shape, indices):
     """Select the final batch axis independently for aligned `(*B, *Q)` indices."""
     assert batch_shape

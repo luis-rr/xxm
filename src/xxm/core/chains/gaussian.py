@@ -404,6 +404,26 @@ class GaussianPotential(typing.NamedTuple):
             log_constant=jnp.moveaxis(self.log_constant, source, destination),
         )
 
+    def scale(
+        self,
+        weights: jax.Array,
+    ) -> typing.Self:
+        """
+        Scale each aligned log potential by `weights`.
+
+        A zero weight produces the neutral factor.
+        """
+        if weights.shape != self.batch_shape:
+            raise ValueError('weights must match the potential batch shape')
+
+        weights = weights.astype(self.precision_blocks.dtype)
+
+        return type(self)(
+            precision_blocks=(self.precision_blocks * weights[..., None, None]),
+            information_vectors=(self.information_vectors * weights[..., None]),
+            log_constant=self.log_constant * weights,
+        )
+
 
 class GaussianPairPotential(typing.NamedTuple):
     r"""Pairwise Gaussian potential in canonical form.
@@ -696,6 +716,32 @@ class GaussianPairPotential(typing.NamedTuple):
             left_information=jnp.moveaxis(self.left_information, source, destination),
             right_information=jnp.moveaxis(self.right_information, source, destination),
             log_constant=jnp.moveaxis(self.log_constant, source, destination),
+        )
+
+    def scale(
+        self,
+        weights: jax.Array,
+    ) -> typing.Self:
+        """
+        Scale each aligned pair log potential by `weights`.
+
+        A zero weight produces the neutral factor.
+        """
+        if weights.shape != self.batch_shape:
+            raise ValueError('weights must match the potential batch shape')
+
+        weights = weights.astype(self.left_precision.dtype)
+
+        matrix_weights = weights[..., None, None]
+        vector_weights = weights[..., None]
+
+        return type(self)(
+            left_precision=self.left_precision * matrix_weights,
+            right_precision=self.right_precision * matrix_weights,
+            lower_precision=self.lower_precision * matrix_weights,
+            left_information=self.left_information * vector_weights,
+            right_information=self.right_information * vector_weights,
+            log_constant=self.log_constant * weights,
         )
 
 

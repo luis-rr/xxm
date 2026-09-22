@@ -3,6 +3,7 @@ import numpy as np
 from jax import numpy as jnp
 
 from xxm.core.affine import Affine
+from xxm.core.data import Sequences
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.continuous import PoissonEmissions
@@ -42,19 +43,19 @@ def make_scalar_poisson_model() -> Model[PoissonEmissions]:
 
 
 def test_exact_inference_returns_one_posterior_per_observation():
-    inferred = infer_exact(make_model(), make_observations())
+    inferred = infer_exact(make_model(), Sequences.from_sequence(make_observations()))
     posterior = inferred.posterior
     log_normalizer = inferred.objective
 
-    assert posterior.means.shape == (3, 2)
-    assert posterior.covariances.shape == (3, 2, 2)
-    assert posterior.cross_covariances.shape == (2, 2, 2)
+    assert posterior.means.shape == (1, 3, 2)
+    assert posterior.covariances.shape == (1, 3, 2, 2)
+    assert posterior.cross_covariances.shape == (1, 2, 2, 2)
     assert np.isfinite(log_normalizer)
 
 
 def test_exact_inference_is_jittable():
     model = make_model()
-    observations = make_observations()
+    observations = Sequences.from_sequence(make_observations())
 
     eager = infer_exact(model, observations)
     jitted = jax.jit(infer_exact)(model, observations)
@@ -69,9 +70,11 @@ def test_exact_inference_is_jittable():
 def test_laplace_recovers_known_scalar_map():
     model = make_scalar_poisson_model()
 
-    posterior = infer_laplace(model, jnp.array([[1.0]])).posterior
+    posterior = infer_laplace(
+        model, Sequences.from_sequence(jnp.array([[1.0]]))
+    ).posterior
 
-    np.testing.assert_allclose(posterior.means, [[0.0]], atol=1e-6)
+    np.testing.assert_allclose(posterior.means, [[[0.0]]], atol=1e-6)
 
 
 def test_laplace_newton_steps_do_not_decrease_objective():
@@ -79,15 +82,16 @@ def test_laplace_newton_steps_do_not_decrease_objective():
     observations = jnp.array([[3.0]])
 
     num_steps = observations.shape[0]
+    data = Sequences.from_sequence(observations)
 
     laplace_model = _NewtonSearchModel(
-        latent_chain=to_chain(model=model, num_steps=num_steps),
-        emissions=model.emissions,
-        observations=observations,
+        latent_chain=to_chain(model=model, data=data),
+        emissions=model.emissions.broadcast((1,)),
+        observations=data.weighted_observations(),
     )
 
     initial_params = _NewtonSearchParams(
-        latents=model.compute_prior_means(num_steps),
+        latents=model.compute_prior_means(num_steps, inputs=data.inputs[0])[None],
     )
 
     search = NewtonSearch[_NewtonSearchParams](
@@ -107,4 +111,4 @@ def test_laplace_newton_steps_do_not_decrease_objective():
         state = search._newton_step(state)
         objectives.append(state.objective)
 
-    assert np.all(np.diff(np.asarray(objectives)) >= 0.0)
+    assert np.all(np.diff(np.asarray(objectives), axis=0) >= 0.0)

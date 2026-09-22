@@ -22,6 +22,7 @@ from xxm.core.chains.gaussian import (
 from xxm.core.chains.gaussian import (
     GaussianChainMarginals as ContinuousPosterior,
 )
+from xxm.core.data import WeightedObservations
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.emissions.continuous import (
     EmissionsT,
@@ -48,7 +49,9 @@ class QuadraticContinuousFactors(typing.NamedTuple):
     ) -> typing.Self:
         """Build quadratic observation factors from an SLDS and observations."""
         return cls(
-            observations=model.emissions.compute_potential(observations),
+            observations=model.emissions.compute_potential(
+                WeightedObservations.from_sequence(observations)
+            ),
         )
 
     def infer(
@@ -77,7 +80,7 @@ class LaplaceContinuousFactors(
     """Non-switching non-conjugate observation factors of the SLDS."""
 
     emissions: LaplaceEmissionsT
-    observations: jax.Array
+    observations: WeightedObservations
     search_params: OptimParams
 
     @classmethod
@@ -91,7 +94,7 @@ class LaplaceContinuousFactors(
 
         return cls(
             emissions=model.emissions,
-            observations=observations,
+            observations=WeightedObservations.from_sequence(observations),
             search_params=search_params,
         )
 
@@ -548,7 +551,7 @@ def _laplace_elbo(
     )
 
     expected_observation_log_prob = model.emissions.expected_log_likelihood(
-        observations,
+        WeightedObservations.from_sequence(observations),
         continuous_posterior,
     )
 

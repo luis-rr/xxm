@@ -13,6 +13,7 @@ from xxm.core import _batch
 from xxm.core.affine import Affine
 from xxm.core.chains.discrete import DiscreteChainMarginals
 from xxm.core.chains.gaussian import GaussianChainMarginals
+from xxm.core.data import WeightedObservations
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
@@ -269,28 +270,43 @@ def test_gaussian_latent_sampling_and_potentials(kind, component):
         assert component.sample(key).shape == FIT_B + (D,)
     else:
         initial = posterior.means[..., 0, :]
-        last_arg = (
-            jnp.zeros(FIT_B + (T - 1,), dtype=jnp.int32) if kind == 'switching' else T
-        )
-        sampled = component.sample(key, initial, last_arg)
+        if kind == 'switching':
+            states = jnp.zeros(FIT_B + (T - 1,), dtype=jnp.int32)
+            sampled = component.sample(key, initial, states)
+        else:
+            sampled = component.sample(
+                key, initial, T, inputs=jnp.empty(FIT_B + (T, 0), dtype=initial.dtype)
+            )
         assert sampled.shape == FIT_B + (T, D)
         np.testing.assert_array_equal(sampled[..., 0, :], initial)
     if kind == 'switching':
         assert component.compute_pair_potentials().batch_shape == FIT_B + (K,)
 
 
-def test_gaussian_latent_fit_requires_matching_posterior_batch():
+def test_gaussian_latent_fit_requires_receiver_batch_prefix():
     posterior = _continuous_posterior(batch=(4,), num_steps=2)
 
-    with pytest.raises(ValueError, match='batch shapes must match'):
-        GaussianInitial(_gaussian(B)).fit_params(posterior)
+    with pytest.raises(ValueError, match='posterior batch must begin with'):
+        GaussianInitial(_gaussian(B)).fit_params(posterior, weights=jnp.ones((4, 2)))
 
-    with pytest.raises(ValueError, match='batch shapes must match'):
-        GaussianLinearDynamics(_linear(B)).fit_params(posterior)
+    with pytest.raises(ValueError, match='posterior batch must begin with'):
+        GaussianLinearDynamics(_linear(B)).fit_params(
+            posterior,
+            inputs=jnp.empty((4, 1, 0), dtype=posterior.means.dtype),
+            weights=jnp.ones((4, 1)),
+        )
 
     matched = _continuous_posterior(batch=B, num_steps=2)
-    assert GaussianInitial(_gaussian(B)).fit_params(matched).batch_shape == B
-    assert GaussianLinearDynamics(_linear(B)).fit_params(matched).batch_shape == B
+    fitted_initial = GaussianInitial(_gaussian(B)).fit_params(
+        matched, weights=jnp.ones(B + (2,))
+    )
+    fitted_dynamics = GaussianLinearDynamics(_linear(B)).fit_params(
+        matched,
+        inputs=jnp.empty(B + (1, 0), dtype=matched.means.dtype),
+        weights=jnp.ones(B + (1,)),
+    )
+    assert fitted_initial.batch_shape == B
+    assert fitted_dynamics.batch_shape == B
 
 
 @pytest.mark.parametrize(
@@ -344,28 +360,29 @@ def test_continuous_emission_evaluation(kind, component):
     observations = (
         jnp.arange(math.prod(FIT_B + (T, O))).reshape(FIT_B + (T, O)) % 3
     ).astype(jnp.float32)
-    likelihood = component.log_likelihood(observations, latents)
+    data = WeightedObservations(observations, jnp.ones(FIT_B + (T,), dtype=bool))
+    likelihood = component.log_likelihood(data, latents)
     assert likelihood.shape == FIT_B
     assert component.conditional(latents).batch_shape == FIT_B + (T,)
     assert component.sample(jax.random.key(4), latents).shape == FIT_B + (T, O)
     assert component.invert(observations).shape == FIT_B + (T, D)
     potential = (
-        component.compute_potential(observations)
+        component.compute_potential(data)
         if kind == 'continuous_gaussian'
-        else component.compute_local_potential(observations, latents)
+        else component.compute_local_potential(data, latents)
     )
     assert potential.batch_shape == FIT_B + (T,)
     for index in FIT_INDICES:
         standalone = component.select(index)
         np.testing.assert_allclose(
             likelihood[index],
-            standalone.log_likelihood(observations[index], latents[index]),
+            standalone.log_likelihood(data.select(index), latents[index]),
             atol=2e-5,
         )
         expected_potential = (
-            standalone.compute_potential(observations[index])
+            standalone.compute_potential(data.select(index))
             if kind == 'continuous_gaussian'
-            else standalone.compute_local_potential(observations[index], latents[index])
+            else standalone.compute_local_potential(data.select(index), latents[index])
         )
         _assert_tree_close(potential.select(index), expected_potential)
         _assert_tree_close(
@@ -374,9 +391,9 @@ def test_continuous_emission_evaluation(kind, component):
         )
         if kind == 'continuous_poisson':
             _assert_tree_close(
-                component.expected_log_likelihood(observations, posterior)[index],
+                component.expected_log_likelihood(data, posterior)[index],
                 standalone.expected_log_likelihood(
-                    observations[index], posterior.select(index)
+                    data.select(index), posterior.select(index)
                 ),
             )
 
@@ -398,7 +415,12 @@ def test_from_latents_matches_independent_sequences(component_type):
         continuous.PoissonEmissions,
     )
     args = (latents, observations) if has_observations else (latents,)
-    fitted = component_type.from_latents(*args)
+    kwargs = (
+        {'inputs': jnp.empty(B + (T, 0), dtype=latents.dtype)}
+        if component_type is GaussianLinearDynamics
+        else {}
+    )
+    fitted = component_type.from_latents(*args, **kwargs)
     assert fitted.batch_shape == B
     for i, j in CHECK_INDICES:
         args_i = (
@@ -406,7 +428,10 @@ def test_from_latents_matches_independent_sequences(component_type):
             if has_observations
             else (latents[i, j],)
         )
-        _assert_tree_close(fitted.select((i, j)), component_type.from_latents(*args_i))
+        kwargs_i = {name: values[i, j] for name, values in kwargs.items()}
+        _assert_tree_close(
+            fitted.select((i, j)), component_type.from_latents(*args_i, **kwargs_i)
+        )
 
 
 @pytest.mark.parametrize(
@@ -537,9 +562,13 @@ def test_singleton_state_axis_is_not_squeezed():
 def test_representative_batched_fits_are_jittable():
     posterior = _continuous_posterior()
     dynamics = GaussianLinearDynamics(_linear(B))
+    inputs = jnp.empty(B + (T - 1, 0), dtype=posterior.means.dtype)
+    weights = jnp.ones(B + (T - 1,))
     _assert_tree_close(
-        jax.jit(lambda model, q: model.fit_params(q))(dynamics, posterior),
-        dynamics.fit_params(posterior),
+        jax.jit(lambda model, q, u, w: model.fit_params(q, inputs=u, weights=w))(
+            dynamics, posterior, inputs, weights
+        ),
+        dynamics.fit_params(posterior, inputs=inputs, weights=weights),
     )
     emissions = discrete.GaussianEmissions(_gaussian(B + (K,), O))
     observations = _values(B + (T, O))
