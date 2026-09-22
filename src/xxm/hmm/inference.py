@@ -5,7 +5,7 @@ Exact inference for Hidden Markov Models.
 import jax
 
 from xxm.core.chains.discrete import DiscreteChain as Chain
-from xxm.core.inference import Inferred
+from xxm.core.inference import InferenceState
 from xxm.core.latents.discrete import homogeneous_chain
 
 from .core import Model, Posterior
@@ -23,7 +23,7 @@ def to_chain(
 def infer_exact(
     model: Model,
     observations: jax.Array,
-) -> Inferred[Model, Posterior]:
+) -> InferenceState[Model, Posterior]:
     """Run forward-backward inference: T observations have T latent states."""
 
     observation_potential = model.emissions.compute_potential(
@@ -41,7 +41,7 @@ def infer_exact(
 
     posterior, log_normalizer = posterior_chain.forward_backward()
 
-    return Inferred(
+    return InferenceState(
         model=model,
         posterior=posterior,
         objective=log_normalizer,

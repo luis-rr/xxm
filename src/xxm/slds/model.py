@@ -13,7 +13,7 @@ from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
-from xxm.core.inference import Fitted, Inferred
+from xxm.core.inference import Fitted, InferenceState
 from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
@@ -265,7 +265,7 @@ class GaussianSLDS:
         observations: jax.Array,
         *,
         num_iters: int,
-    ) -> Inferred[typing.Self, Posterior]:
+    ) -> InferenceState[typing.Self, Posterior]:
         """
         Compute a structured mean-field posterior with conjugate updates for $q(x)$,
         returning its ELBO.
@@ -279,7 +279,7 @@ class GaussianSLDS:
             initial_latents=initial_latents,
         )
 
-        return Inferred(
+        return InferenceState(
             model=self.__class__(inferred.model),
             posterior=inferred.posterior,
             objective=inferred.objective,
@@ -506,7 +506,7 @@ class PoissonSLDS:
         *,
         num_iters: int,
         params: OptimParams = DEFAULT_OPTIM_PARAMS,
-    ) -> Inferred[typing.Self, Posterior]:
+    ) -> InferenceState[typing.Self, Posterior]:
         """
         Compute a structured mean-field posterior with Laplace updates for $q(x)$,
         returning its ELBO.
@@ -521,7 +521,7 @@ class PoissonSLDS:
             params=params,
         )
 
-        return Inferred(
+        return InferenceState(
             model=self.__class__(inferred.model),
             posterior=inferred.posterior,
             objective=inferred.objective,

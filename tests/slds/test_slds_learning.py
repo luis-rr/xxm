@@ -7,7 +7,7 @@ from xxm.core.chains.gaussian import GaussianChainMarginals
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.emissions.continuous import GaussianEmissions
-from xxm.core.inference import Inferred
+from xxm.core.inference import InferenceState
 from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
@@ -163,7 +163,7 @@ def test_variational_em_step_returns_finite_objective():
     observations = jnp.array([[0.0], [1.0], [3.0]])
 
     inferred = variational_em_step(
-        Inferred(model=model, posterior=_posterior(), objective=jnp.array(0.0)),
+        InferenceState(model=model, posterior=_posterior(), objective=jnp.array(0.0)),
         observations,
         num_inference_iters=1,
     )

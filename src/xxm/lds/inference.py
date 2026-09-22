@@ -13,7 +13,7 @@ from xxm.core.emissions.continuous import (
     LaplaceEmissionsT,
     QuadraticEmissionsT,
 )
-from xxm.core.inference import Inferred
+from xxm.core.inference import InferenceState
 from xxm.core.optim.laplace import laplace_inference
 from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
 
@@ -82,7 +82,7 @@ def to_chain(
 def infer_exact(
     model: Model[QuadraticEmissionsT],
     data: Sequences,
-) -> Inferred[
+) -> InferenceState[
     Model[QuadraticEmissionsT],
     Posterior,
 ]:
@@ -101,7 +101,7 @@ def infer_exact(
     posterior, log_normalizer = posterior_chain.forward_backward()
     objective = jnp.sum(log_normalizer, axis=-1)
 
-    return Inferred(
+    return InferenceState(
         model=model,
         posterior=posterior,
         objective=objective,
@@ -113,7 +113,7 @@ def infer_laplace(
     data: Sequences,
     initial_latents: jax.Array | None = None,
     params: OptimParams = DEFAULT_OPTIM_PARAMS,
-) -> Inferred[
+) -> InferenceState[
     Model[LaplaceEmissionsT],
     Posterior,
 ]:
@@ -152,7 +152,7 @@ def infer_laplace(
 
     objective = jnp.sum(log_normalizer, axis=-1)
 
-    return Inferred(
+    return InferenceState(
         model=model,
         posterior=posterior,
         objective=objective,

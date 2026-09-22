@@ -9,7 +9,7 @@ ModelT = typing.TypeVar('ModelT')
 PosteriorT = typing.TypeVar('PosteriorT')
 
 
-class Inferred(
+class InferenceState(
     typing.NamedTuple,
     typing.Generic[ModelT, PosteriorT],
 ):

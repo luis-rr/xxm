@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import jax
 
-from xxm.core.inference import Inferred
+from xxm.core.inference import InferenceState
 from xxm.core.optim.loop import Fit
 from xxm.core.optim.loop import fit_one as _fit_one
 
@@ -13,9 +13,9 @@ from .inference import infer_exact
 
 
 def em_step(
-    inferred: Inferred[Model, Posterior],
+    inferred: InferenceState[Model, Posterior],
     observations: jax.Array,
-) -> Inferred[Model, Posterior]:
+) -> InferenceState[Model, Posterior]:
     """Perform one EM update from an existing posterior."""
 
     model = inferred.model.fit_params(
@@ -34,7 +34,7 @@ def fit_em(
     observations: jax.Array,
     num_iters: int,
     progress: bool | str = 'EM',
-) -> Fit[Inferred[Model, Posterior]]:
+) -> Fit[InferenceState[Model, Posterior]]:
     """Fit model via exact expectation-maximization."""
 
     inferred = infer_exact(

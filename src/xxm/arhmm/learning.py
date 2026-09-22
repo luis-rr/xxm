@@ -2,7 +2,7 @@
 
 import jax
 
-from xxm.core.inference import Inferred
+from xxm.core.inference import InferenceState
 from xxm.core.optim.loop import Fit
 from xxm.core.optim.loop import fit_one as _fit_one
 
@@ -13,18 +13,18 @@ from .inference import _infer_prepared
 
 
 def _em_step(
-    inferred: Inferred[Model[ConditionalDistT], Posterior],
+    inferred: InferenceState[Model[ConditionalDistT], Posterior],
     data: ARObservations,
-) -> Inferred[Model[ConditionalDistT], Posterior]:
+) -> InferenceState[Model[ConditionalDistT], Posterior]:
     """Update parameters and infer states using the same aligned rows."""
     model = inferred.model.fit_params(data, inferred.posterior)
     return _infer_prepared(model, data)
 
 
 def em_step(
-    inferred: Inferred[Model[ConditionalDistT], Posterior],
+    inferred: InferenceState[Model[ConditionalDistT], Posterior],
     observations: jax.Array,
-) -> Inferred[Model[ConditionalDistT], Posterior]:
+) -> InferenceState[Model[ConditionalDistT], Posterior]:
     """Perform one exact EM update conditional on the initial history."""
     data = ARObservations.from_observations(observations, inferred.model.num_lags)
     return _em_step(inferred, data)
@@ -35,7 +35,7 @@ def fit_em(
     observations: jax.Array,
     num_iters: int,
     progress: bool | str = 'EM',
-) -> Fit[Inferred[Model[ConditionalDistT], Posterior]]:
+) -> Fit[InferenceState[Model[ConditionalDistT], Posterior]]:
     """Fit via exact EM, preparing autoregressive rows once for the whole fit."""
     data = ARObservations.from_observations(observations, model.num_lags)
     inferred = _infer_prepared(model, data)

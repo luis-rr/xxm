@@ -29,7 +29,7 @@ from xxm.core.emissions.continuous import (
     LaplaceEmissionsT,
     QuadraticEmissionsT,
 )
-from xxm.core.inference import Inferred
+from xxm.core.inference import InferenceState
 from xxm.core.optim.laplace import laplace_inference, local_gaussian_approximation
 from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
 
@@ -351,7 +351,7 @@ def infer_variational(
     observations: jax.Array,
     num_iters: int,
     initial_latents: jax.Array,
-) -> Inferred[Model[QuadraticEmissionsT], Posterior]:
+) -> InferenceState[Model[QuadraticEmissionsT], Posterior]:
     """
     Run structured mean-field inference with conjugate Gaussian updates for $q(x)$.
 
@@ -409,7 +409,7 @@ def infer_variational(
         discrete_prior=inference.discrete.chain,
     )
 
-    return Inferred(
+    return InferenceState(
         model=model,
         posterior=posterior,
         objective=objective,
@@ -574,7 +574,7 @@ def infer_laplace(
     num_iters: int,
     initial_latents: jax.Array,
     params: OptimParams = DEFAULT_OPTIM_PARAMS,
-) -> Inferred[Model[LaplaceEmissionsT], Posterior]:
+) -> InferenceState[Model[LaplaceEmissionsT], Posterior]:
     """
     Run structured mean-field inference with Laplace updates for q(x).
 
@@ -613,7 +613,7 @@ def infer_laplace(
         state,
     )
 
-    return Inferred(
+    return InferenceState(
         model=model,
         posterior=Posterior(
             discrete=state.discrete,

@@ -12,7 +12,7 @@ from xxm.core.affine import Affine
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
-from xxm.core.inference import Fitted, Inferred
+from xxm.core.inference import Fitted, InferenceState
 from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
@@ -247,7 +247,7 @@ class GaussianARHMM:
     def infer(
         self,
         observations: jax.Array,
-    ) -> Inferred[typing.Self, Posterior]:
+    ) -> InferenceState[typing.Self, Posterior]:
         """
         Infer states conditional on the first ``num_lags`` observations.
 
@@ -259,7 +259,7 @@ class GaussianARHMM:
             observations,
         )
 
-        return Inferred(
+        return InferenceState(
             model=self.__class__(inferred.model),
             posterior=inferred.posterior,
             objective=inferred.objective,
@@ -471,7 +471,7 @@ class PoissonARHMM:
             initial_history,
         )
 
-    def infer(self, observations: jax.Array) -> Inferred[typing.Self, Posterior]:
+    def infer(self, observations: jax.Array) -> InferenceState[typing.Self, Posterior]:
         """
         Infer states conditional on the first ``num_lags`` observations.
 
@@ -483,7 +483,7 @@ class PoissonARHMM:
             observations,
         )
 
-        return Inferred(
+        return InferenceState(
             model=self.__class__(inferred.model),
             posterior=inferred.posterior,
             objective=inferred.objective,

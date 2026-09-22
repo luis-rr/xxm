@@ -14,7 +14,7 @@ from xxm.core.data import Sequences
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
-from xxm.core.inference import Fitted, Inferred
+from xxm.core.inference import Fitted, InferenceState
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import poisson as poisson_fit
@@ -301,7 +301,7 @@ class GaussianLDS:
         *,
         inputs: jax.Array | None = None,
         mask: jax.Array | None = None,
-    ) -> Inferred[typing.Self, Posterior]:
+    ) -> InferenceState[typing.Self, Posterior]:
         """Compute the exact posterior for one sequence."""
         inferred = self.infer_sequences(
             Sequences.from_sequence(
@@ -311,7 +311,7 @@ class GaussianLDS:
             )
         )
 
-        return Inferred(
+        return InferenceState(
             model=inferred.model,
             posterior=inferred.posterior.squeeze(axis=-1),
             objective=inferred.objective,
@@ -320,14 +320,14 @@ class GaussianLDS:
     def infer_sequences(
         self,
         data: Sequences,
-    ) -> Inferred[typing.Self, Posterior]:
+    ) -> InferenceState[typing.Self, Posterior]:
         """Compute exact posteriors for independent sequences."""
         inferred = _infer_exact_jit(
             self._model,
             data,
         )
 
-        return Inferred(
+        return InferenceState(
             model=self.__class__(inferred.model),
             posterior=inferred.posterior,
             objective=inferred.objective,
@@ -547,7 +547,7 @@ class PoissonLDS:
         mask: jax.Array | None = None,
         initial_latents: jax.Array | None = None,
         laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
-    ) -> Inferred[typing.Self, Posterior]:
+    ) -> InferenceState[typing.Self, Posterior]:
         """Compute the Laplace posterior for one sequence."""
         if initial_latents is not None:
             initial_latents = jnp.expand_dims(
@@ -565,7 +565,7 @@ class PoissonLDS:
             laplace_params=laplace_params,
         )
 
-        return Inferred(
+        return InferenceState(
             model=inferred.model,
             posterior=inferred.posterior.squeeze(axis=-1),
             objective=inferred.objective,
@@ -577,7 +577,7 @@ class PoissonLDS:
         *,
         initial_latents: jax.Array | None = None,
         laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
-    ) -> Inferred[typing.Self, Posterior]:
+    ) -> InferenceState[typing.Self, Posterior]:
         """Compute Laplace posteriors for independent sequences."""
         inferred = _infer_laplace_jit(
             self._model,
@@ -586,7 +586,7 @@ class PoissonLDS:
             params=laplace_params,
         )
 
-        return Inferred(
+        return InferenceState(
             model=self.__class__(inferred.model),
             posterior=inferred.posterior,
             objective=inferred.objective,

@@ -15,7 +15,7 @@ from xxm.core.emissions.discrete import (
     GaussianEmissions,
     PoissonEmissions,
 )
-from xxm.core.inference import Fitted, Inferred
+from xxm.core.inference import Fitted, InferenceState
 from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
@@ -162,14 +162,14 @@ class GaussianHMM:
     def infer(
         self,
         observations: jax.Array,
-    ) -> Inferred[typing.Self, Posterior]:
+    ) -> InferenceState[typing.Self, Posterior]:
         """Compute the exact posterior over states and the observation log likelihood."""
         inferred = _infer_exact_jit(
             self._model,
             observations,
         )
 
-        return Inferred(
+        return InferenceState(
             model=self.__class__(inferred.model),
             posterior=inferred.posterior,
             objective=inferred.objective,
@@ -299,14 +299,14 @@ class PoissonHMM:
     def infer(
         self,
         observations: jax.Array,
-    ) -> Inferred[typing.Self, Posterior]:
+    ) -> InferenceState[typing.Self, Posterior]:
         """Compute the exact posterior over states and the observation log likelihood."""
         inferred = infer_exact(
             self._model,
             observations,
         )
 
-        return Inferred(
+        return InferenceState(
             model=self.__class__(inferred.model),
             posterior=inferred.posterior,
             objective=inferred.objective,
