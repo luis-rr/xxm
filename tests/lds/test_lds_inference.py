@@ -8,6 +8,7 @@ from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.continuous import PoissonEmissions
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
+from xxm.core.mask import NO_MASK
 from xxm.core.optim.laplace import (
     _NewtonSearchModel,
     _NewtonSearchParams,
@@ -91,6 +92,7 @@ def test_laplace_newton_steps_do_not_decrease_objective():
         latent_chain=to_chain(model=model, data=data),
         emissions=model.emissions,
         observations=data.weighted_observations(),
+        valid=NO_MASK,
     )
 
     initial_params = _NewtonSearchParams(

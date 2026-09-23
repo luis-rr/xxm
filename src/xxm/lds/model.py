@@ -515,7 +515,10 @@ class Inferred(typing.Generic[LDSFacadeT]):
 
     def latent_mean(self) -> Sequences:
         """Return latent means with the source batch shape and lengths."""
-        return Sequences(values=self.posterior.means, lengths=self.data.lengths)
+        return Sequences.from_padded(
+            values=self.posterior.means,
+            lengths=self.data.lengths,
+        )
 
     def observation_mean(self) -> Sequences:
         """Return expected observations, including masked valid steps."""
@@ -529,7 +532,10 @@ class Inferred(typing.Generic[LDSFacadeT]):
 
         values = emissions.observation_mean(self.posterior)
 
-        return Sequences(values=values, lengths=self.data.lengths)
+        return Sequences.from_padded(
+            values=values,
+            lengths=self.data.lengths,
+        )
 
     def align(self, alignment: Affine) -> Inferred[LDSFacadeT]:
         """Transform model and posterior coordinates exactly, without reinference."""

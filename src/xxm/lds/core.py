@@ -173,35 +173,17 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
         valid_transitions = working_data.valid_transitions()
         transition_inputs = working_data.transition_inputs()
-        safe_inputs = jnp.where(
-            valid_transitions[..., None],
-            transition_inputs,
-            jnp.zeros((), dtype=transition_inputs.dtype),
-        )
-        safe_previous = jnp.where(
-            valid_transitions[..., None],
-            latents[..., :-1, :],
-            jnp.zeros((), dtype=latents.dtype),
-        )
-        safe_next = jnp.where(
-            valid_transitions[..., None],
-            latents[..., 1:, :],
-            jnp.zeros((), dtype=latents.dtype),
-        )
+        safe_inputs = valid_transitions.apply(transition_inputs)
+        safe_previous = valid_transitions.apply(latents[..., :-1, :])
+        safe_next = valid_transitions.apply(latents[..., 1:, :])
 
         dynamics = working_model.dynamics.conditional(safe_inputs)
         dynamics = dynamics.conditional(safe_previous)
 
         transition_log_probs = dynamics.log_prob(safe_next)
-        transition_log_probs = jnp.where(
-            valid_transitions,
-            transition_log_probs,
-            jnp.zeros((), dtype=transition_log_probs.dtype),
-        )
-        dynamics_log_prob = jnp.sum(
-            transition_log_probs,
-            axis=-1,
-        )
+        transition_log_probs = valid_transitions.apply(transition_log_probs)
+
+        dynamics_log_prob = jnp.sum(transition_log_probs, axis=-1)
 
         emission_log_prob = working_model.emissions.log_likelihood(
             working_data.weighted_observations(),
@@ -243,12 +225,14 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         return self.__class__(
             initial=self.initial.fit_params(
                 posterior,
-                weights=working_data.valid(),
+                weights=working_data.valid().materialize(working_data.num_steps),
             ),
             dynamics=self.dynamics.fit_params(
                 posterior,
                 inputs=working_data.transition_inputs(),
-                weights=working_data.valid_transitions(),
+                weights=working_data.valid_transitions().materialize(
+                    working_data.num_steps - 1
+                ),
             ),
             emissions=self.emissions.fit_params(
                 working_data.weighted_observations(),

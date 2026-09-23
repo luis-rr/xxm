@@ -8,13 +8,13 @@ from xxm.core.chains.gaussian import GaussianChain as Chain
 from xxm.core.chains.gaussian import GaussianChainMarginals as Posterior
 from xxm.core.chains.gaussian import GaussianPairPotential, GaussianPotential
 from xxm.core.data import Dataset
-from xxm.core.dists.gaussian import Gaussian
 from xxm.core.emissions.continuous import (
     EmissionsT,
     LaplaceEmissionsT,
     QuadraticEmissionsT,
 )
 from xxm.core.inference import InferenceState
+from xxm.core.mask import Mask
 from xxm.core.optim.laplace import laplace_inference
 from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
 
@@ -36,22 +36,17 @@ def _prior_potentials(
     valid_transitions = working_data.valid_transitions()
     transition_inputs = working_data.transition_inputs()
 
-    safe_inputs = jnp.where(
-        valid_transitions[..., None],
-        transition_inputs,
-        jnp.zeros(
-            (),
-            dtype=transition_inputs.dtype,
-        ),
-    )
+    safe_inputs = valid_transitions.apply(transition_inputs)
 
-    transition_dist = working_model.dynamics.conditional(
-        safe_inputs,
-    )
+    transition_dist = working_model.dynamics.conditional(safe_inputs)
 
     pair_potential = GaussianPairPotential.from_linear_conditional(
         transition_dist,
-    ).scale(valid_transitions)
+    )
+
+    pair_potential = pair_potential.scale(
+        valid_transitions.materialize(working_data.num_steps - 1)
+    )
 
     return initial_potential, pair_potential
 
@@ -71,31 +66,29 @@ def to_chain(
         pair_potential,
     )
 
-    valid = data.valid()
+    valid = data.valid().materialize(data.num_steps)
     latent_dim = model.dynamics.latent_dim
+    dtype = model.initial.dist.covariance.dtype
 
-    dummy_mean = jnp.zeros(
-        (*valid.shape, latent_dim),
-        dtype=model.initial.dist.mean.dtype,
-    )
-
-    dummy_covariance = jnp.broadcast_to(
-        jnp.eye(
-            latent_dim,
-            dtype=model.initial.dist.covariance.dtype,
+    stabilizer = GaussianPotential(
+        precision_blocks=jnp.broadcast_to(
+            jnp.eye(latent_dim, dtype=dtype),
+            (*valid.shape, latent_dim, latent_dim),
         ),
-        (*valid.shape, latent_dim, latent_dim),
+        information_vectors=jnp.zeros(
+            (*valid.shape, latent_dim),
+            dtype=dtype,
+        ),
+        log_constant=jnp.zeros(
+            valid.shape,
+            dtype=dtype,
+        ),
     )
 
-    dummy_potential = GaussianPotential.from_moments(
-        Gaussian(
-            mean=dummy_mean,
-            covariance=dummy_covariance,
-        )
-    ).scale(~valid)
+    stabilizer = stabilizer.scale(~valid)
 
     return chain.add_local_potential(
-        dummy_potential,
+        stabilizer,
     )
 
 
@@ -120,7 +113,10 @@ def infer_exact(
         observation_potential,
     )
 
-    posterior, log_normalizer = posterior_chain.forward_backward()
+    posterior, log_normalizer = posterior_chain.forward_backward(
+        valid=working_data.valid(),
+    )
+
     data_axes = tuple(
         range(
             len(model_batch_shape),
@@ -162,8 +158,10 @@ def infer_laplace(
         working_model.dynamics.latent_dim,
     )
 
+    valid: Mask = working_data.valid()
+
     if initial_latents is None:
-        prior, _ = chain.forward_backward()
+        prior, _ = chain.forward_backward(valid)
         latents = prior.means
     else:
         if initial_latents.shape != expected_latent_shape:
@@ -173,12 +171,15 @@ def infer_laplace(
             )
         latents = initial_latents
 
+    latents = valid.apply(latents)
+
     posterior, log_normalizer = laplace_inference(
         chain=chain,
         emissions=working_model.emissions,
         observations=working_data.weighted_observations(),
         initial_latents=latents,
         search_params=params,
+        valid=valid,
     )
 
     data_axes = tuple(

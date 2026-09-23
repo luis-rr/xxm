@@ -20,6 +20,7 @@ import jax.scipy.linalg as jsp_linalg
 from xxm.core import batch
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian, PairedGaussian
+from xxm.core.mask import NO_MASK, Mask
 
 
 def _precision_and_log_det(
@@ -772,42 +773,69 @@ class GaussianChain(typing.NamedTuple):
         """Leading independent-chain dimensions."""
         return self.diagonal_precision_blocks.shape[:-3]
 
-    def forward_backward(self) -> tuple[GaussianChainMarginals, jax.Array]:
-        """Infer each chain independently, preserving the batch prefix."""
+    def forward_backward(
+        self,
+        valid: Mask = NO_MASK,
+    ) -> tuple[GaussianChainMarginals, jax.Array]:
+        """Infer each chain and optionally exclude invalid suffixes from its log normalizer."""
         if self.num_steps < 1:
             raise ValueError('Gaussian chain inference requires at least one time step')
-        batch = self.batch_shape
-        t, d = self.num_steps, self.variable_dim
+
+        batch_shape = self.batch_shape
+        t = self.num_steps
+        d = self.variable_dim
+
+        valid = valid.align_batch(batch_shape)
+
+        batch.require_same(
+            batch_shape,
+            self.log_constant.shape,
+            valid.batch_shape,
+        )
+
         if (
-            self.diagonal_precision_blocks.shape != batch + (t, d, d)
-            or self.lower_precision_blocks.shape != batch + (t - 1, d, d)
-            or self.information_vectors.shape != batch + (t, d)
-            or self.log_constant.shape != batch
+            self.diagonal_precision_blocks.shape != batch_shape + (t, d, d)
+            or self.lower_precision_blocks.shape != batch_shape + (t - 1, d, d)
+            or self.information_vectors.shape != batch_shape + (t, d)
         ):
             raise ValueError(
-                'Gaussian chain fields must have aligned batch, time, and variable dimensions'
+                'Gaussian chain fields must have aligned batch, time, '
+                'and variable dimensions'
             )
-        if not batch:
-            return self._forward_backward_single()
-        n, t, d = math.prod(batch), self.num_steps, self.variable_dim
+
+        if not batch_shape:
+            return self._forward_backward_single(valid)
+
+        n = math.prod(batch_shape)
+
         flat = GaussianChain(
-            diagonal_precision_blocks=self.diagonal_precision_blocks.reshape(
-                n, t, d, d
+            diagonal_precision_blocks=(
+                self.diagonal_precision_blocks.reshape(n, t, d, d)
             ),
-            lower_precision_blocks=self.lower_precision_blocks.reshape(n, t - 1, d, d),
+            lower_precision_blocks=(
+                self.lower_precision_blocks.reshape(n, t - 1, d, d)
+            ),
             information_vectors=self.information_vectors.reshape(n, t, d),
             log_constant=self.log_constant.reshape(n),
         )
+
+        flat_valid = valid.flatten()
+
         posterior, log_normalizer = jax.vmap(GaussianChain._forward_backward_single)(
-            flat
+            flat,
+            flat_valid,
         )
-        return GaussianChainMarginals(
-            means=posterior.means.reshape(batch + (t, d)),
-            covariances=posterior.covariances.reshape(batch + (t, d, d)),
-            cross_covariances=posterior.cross_covariances.reshape(
-                batch + (t - 1, d, d)
+
+        return (
+            GaussianChainMarginals(
+                means=posterior.means.reshape(batch_shape + (t, d)),
+                covariances=posterior.covariances.reshape(batch_shape + (t, d, d)),
+                cross_covariances=(
+                    posterior.cross_covariances.reshape(batch_shape + (t - 1, d, d))
+                ),
             ),
-        ), log_normalizer.reshape(batch)
+            log_normalizer.reshape(batch_shape),
+        )
 
     def select(self, index: batch.SelT) -> typing.Self:
         """Index only batch dimensions, retaining this object type."""
@@ -1107,8 +1135,9 @@ class GaussianChain(typing.NamedTuple):
 
     def _forward_backward_single(
         self,
+        valid: Mask,
     ) -> tuple[GaussianChainMarginals, jax.Array]:
-        """Compute moments and log normalizer for a Gaussian chain."""
+        """Compute moments and a validity-aware log normalizer."""
 
         factorization = self._forward_elimination()
 
@@ -1116,13 +1145,22 @@ class GaussianChain(typing.NamedTuple):
 
         covariances, cross_covariances = factorization.backward_covariances()
 
-        log_det_precision = jnp.sum(
-            jax.vmap(_log_det_from_cholesky)(factorization.precision_cholesky_factors)
+        log_det_terms = jax.vmap(_log_det_from_cholesky)(
+            factorization.precision_cholesky_factors
         )
 
-        quadratic_term = jnp.sum(self.information_vectors * means)
+        quadratic_terms = jnp.sum(self.information_vectors * means, axis=-1)
 
-        total_dimension = self.num_steps * self.variable_dim
+        quadratic_terms = valid.apply(quadratic_terms)
+        quadratic_term = jnp.sum(quadratic_terms)
+
+        log_det_terms = valid.apply(log_det_terms)
+        log_det_precision = jnp.sum(log_det_terms)
+
+        num_valid = valid.num_valid(self.num_steps)
+        num_valid = num_valid.astype(self.diagonal_precision_blocks.dtype)
+
+        total_dimension = num_valid * self.variable_dim
 
         log_normalizer = (
             self.log_constant
@@ -1404,35 +1442,12 @@ class GaussianChainMarginals(typing.NamedTuple):
 
     def entropy(
         self,
-        valid: jax.Array | None = None,
+        valid: Mask = NO_MASK,
     ) -> jax.Array:
         """Entropy per chain, optionally restricted to a valid time prefix."""
         terms = self.entropy_terms()
-
-        if valid is not None:
-            expected_shape = (
-                *self.batch_shape,
-                self.num_steps,
-            )
-
-            if valid.shape != expected_shape:
-                raise ValueError(
-                    f'valid must have shape {expected_shape}; got {valid.shape}'
-                )
-
-            if valid.dtype != jnp.bool_:
-                raise ValueError('valid must have boolean dtype')
-
-            terms = jnp.where(
-                valid,
-                terms,
-                jnp.zeros((), dtype=terms.dtype),
-            )
-
-        return jnp.sum(
-            terms,
-            axis=-1,
-        )
+        terms = valid.apply(terms)
+        return jnp.sum(terms, axis=-1)
 
     def affine(self, affine: Affine) -> typing.Self:
         """Push posterior marginals through a batch-aligned affine map."""

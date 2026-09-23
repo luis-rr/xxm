@@ -169,7 +169,8 @@ def _init_dynamics(
 ) -> GaussianLinearDynamics:
     """Fit controlled dynamics where both PCA endpoint observations are available."""
     observed = data.observation_weights()
-    usable = data.valid_transitions() & observed[..., :-1] & observed[..., 1:]
+
+    usable = data.valid_transitions().apply(observed[..., :-1] & observed[..., 1:])
 
     latent_dim = latents.shape[-1]
     input_dim = data.input_dim

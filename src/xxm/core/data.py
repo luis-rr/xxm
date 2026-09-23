@@ -7,6 +7,7 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core import batch
+from xxm.core.mask import ArbitraryMask, ContiguousMask
 
 
 def _pad_time(values: jax.Array, num_steps: int) -> jax.Array:
@@ -283,35 +284,45 @@ class WeightedObservations(typing.NamedTuple):
 
 
 @jax.tree_util.register_pytree_node_class
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False, init=False)
 class Sequences:
-    """Temporal values `(*B, T, D)` with valid-prefix lengths `(*B,)`.
+    """Temporal values `(*B, T, D)` with contiguous valid prefixes.
 
-    Every batch item is one sequence. Padded tails are storage only; `get`
-    retrieves one cropped sequence on the host.
+    Every batch item is one sequence. `mask` stores valid-prefix lengths in a
+    `ContiguousMask`; padded tails are storage only. The `lengths` property is
+    retained as the compact public view of those prefixes, and `get` retrieves
+    one cropped sequence on the host.
 
     Public construction normalizes arrays and validates lengths on the host.
     Batch transformations and PyTree reconstruction bypass host validation.
     """
 
     values: jax.Array
-    lengths: jax.Array
+    mask: ContiguousMask
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, 'values', jnp.asarray(self.values))
-        object.__setattr__(self, 'lengths', jnp.asarray(self.lengths))
+    def __init__(
+        self,
+        values: jax.Array,
+        mask: ContiguousMask,
+    ) -> None:
+        object.__setattr__(self, 'values', values)
+        object.__setattr__(self, 'mask', mask)
         self.validate()
 
     @classmethod
-    def _unchecked(cls, values: jax.Array, lengths: jax.Array) -> typing.Self:
+    def _unchecked(
+        cls,
+        values: jax.Array,
+        mask: ContiguousMask,
+    ) -> typing.Self:
         """Reconstruct internal temporal values without host validation."""
         instance = object.__new__(cls)
         object.__setattr__(instance, 'values', values)
-        object.__setattr__(instance, 'lengths', lengths)
+        object.__setattr__(instance, 'mask', mask)
         return instance
 
     def tree_flatten(self):
-        return (self.values, self.lengths), None
+        return (self.values, self.mask), None
 
     @classmethod
     def tree_unflatten(cls, auxiliary, children) -> typing.Self:
@@ -325,16 +336,19 @@ class Sequences:
     def num_steps(self) -> int:
         return self.values.shape[-2]
 
+    @property
+    def lengths(self) -> jax.Array:
+        """Valid-prefix lengths `(*B,)`."""
+        return self.mask.lengths
+
     def validate(self) -> None:
-        """Validate shapes and lengths on the host."""
+        """Validate shapes and sequence-prefix lengths on the host."""
         if self.values.ndim < 2:
             raise ValueError('values must have shape (*B, T, D)')
         if self.num_steps < 1:
             raise ValueError('sequences must contain at least one timestep')
-        if self.lengths.shape != self.batch_shape:
-            raise ValueError('lengths must have shape matching batch_shape')
-        if not jnp.issubdtype(self.lengths.dtype, jnp.integer):
-            raise ValueError('lengths must have an integer dtype')
+        if self.mask.batch_shape != self.batch_shape:
+            raise ValueError('mask lengths must have shape matching batch_shape')
         if bool(jnp.any((self.lengths < 1) | (self.lengths > self.num_steps))):
             raise ValueError('lengths must lie between 1 and T')
 
@@ -344,7 +358,10 @@ class Sequences:
         values = jnp.asarray(values)
         if values.ndim != 2:
             raise ValueError('values must have shape (T, D)')
-        return cls.from_padded(values, jnp.asarray(values.shape[0], dtype=jnp.int32))
+        return cls.from_padded(
+            values,
+            jnp.asarray(values.shape[0], dtype=jnp.int32),
+        )
 
     @classmethod
     def from_batch(cls, values: jax.Array) -> typing.Self:
@@ -354,7 +371,11 @@ class Sequences:
             raise ValueError('values must have shape (*B, T, D)')
         return cls.from_padded(
             values,
-            jnp.full(values.shape[:-2], values.shape[-2], dtype=jnp.int32),
+            jnp.full(
+                values.shape[:-2],
+                values.shape[-2],
+                dtype=jnp.int32,
+            ),
         )
 
     @classmethod
@@ -364,7 +385,10 @@ class Sequences:
         lengths: jax.Array,
     ) -> typing.Self:
         """Construct explicitly padded temporal values `(*B, T, D)`."""
-        return cls(values=values, lengths=lengths)
+        return cls(
+            values=values,
+            mask=ContiguousMask(lengths),
+        )
 
     @classmethod
     def from_sequences(
@@ -385,20 +409,33 @@ class Sequences:
         """Pad time and stack matching batches along a new batch axis."""
         if not sequences:
             raise ValueError('sequences must contain at least one item')
+
         batch_shape = sequences[0].batch_shape
         value_dim = sequences[0].values.shape[-1]
+
         for sequence in sequences:
             batch.require_same(batch_shape, sequence.batch_shape)
             if sequence.values.shape[-1] != value_dim:
                 raise ValueError('sequences must share a value dimension')
-        _, axis = batch.insertion((len(sequences),), axis, len(batch_shape))
+
+        _, axis = batch.insertion(
+            (len(sequences),),
+            axis,
+            len(batch_shape),
+        )
         num_steps = max(sequence.num_steps for sequence in sequences)
+
         return cls._unchecked(
             values=jnp.stack(
                 [sequence._pad_to_num_steps(num_steps) for sequence in sequences],
                 axis=axis,
             ),
-            lengths=jnp.stack([sequence.lengths for sequence in sequences], axis=axis),
+            mask=ContiguousMask._unchecked(
+                jnp.stack(
+                    [sequence.lengths for sequence in sequences],
+                    axis=axis,
+                )
+            ),
         )
 
     def _pad_to_num_steps(self, num_steps: int) -> jax.Array:
@@ -411,14 +448,21 @@ class Sequences:
     def select(self, index: batch.SelT) -> typing.Self:
         """Select only batch axes, retaining time and event axes."""
         index = batch.selection(index, len(self.batch_shape))
-        return self._unchecked(self.values[index], self.lengths[index])
+        return self._unchecked(
+            self.values[index],
+            self.mask.select(index),
+        )
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
         """Insert replicated batch dimensions at `axis`."""
-        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
+        shape, axis = batch.insertion(
+            shape,
+            axis,
+            len(self.batch_shape),
+        )
         return self._unchecked(
             batch.broadcast_array(self.values, shape, axis),
-            batch.broadcast_array(self.lengths, shape, axis),
+            self.mask.broadcast(shape, axis),
         )
 
     def squeeze(self, axis=None) -> typing.Self:
@@ -426,16 +470,19 @@ class Sequences:
         axes = batch.squeeze_axes(self.batch_shape, axis)
         return self._unchecked(
             jnp.squeeze(self.values, axis=axes),
-            jnp.squeeze(self.lengths, axis=axes),
+            self.mask.squeeze(axes),
         )
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder entries along one batch axis."""
         axis = batch.axis_index(axis, len(self.batch_shape))
-        permutation = batch.permutation_indices(permutation, self.batch_shape[axis])
+        permutation = batch.permutation_indices(
+            permutation,
+            self.batch_shape[axis],
+        )
         return self._unchecked(
             jnp.take(self.values, permutation, axis=axis),
-            jnp.take(self.lengths, permutation, axis=axis),
+            self.mask.permute(permutation, axis),
         )
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
@@ -444,12 +491,12 @@ class Sequences:
         destination = batch.axis_index(destination, len(self.batch_shape))
         return self._unchecked(
             jnp.moveaxis(self.values, source, destination),
-            jnp.moveaxis(self.lengths, source, destination),
+            self.mask.move_axis(source, destination),
         )
 
-    def valid(self) -> jax.Array:
-        """Valid prefixes `(*B, T)`."""
-        return jnp.arange(self.num_steps) < self.lengths[..., None]
+    def valid(self) -> ContiguousMask:
+        """Contiguous validity mask for these sequences."""
+        return self.mask
 
     def get(self, index: batch.SelT | None = None) -> jax.Array:
         """Retrieve exactly one unpadded `(T_i, D)` array on the host."""
@@ -477,10 +524,10 @@ class Sequences:
 class Dataset:
     """Known observations, inputs, and whole-timestep masks for trajectories.
 
-    Both temporal components share batch shape `*B`, padded time size `T`,
-    and lengths. The boolean mask has shape `(*B, T)` and controls observation
-    likelihoods only. Inputs at `t` affect `x[t-1] -> x[t]`; input zero is unused
-    by an autonomous initial distribution.
+    Both temporal components share batch shape `*B`, padded time size `T`, and
+    contiguous valid prefixes. `mask` is an arbitrary boolean `Mask` controlling
+    observation likelihoods only. Inputs at `t` affect `x[t-1] -> x[t]`; input
+    zero is unused by an autonomous initial distribution.
 
     Public construction validates compatibility, masks, and finite input values
     on the host. Transformations and PyTree reconstruction skip those checks.
@@ -488,10 +535,11 @@ class Dataset:
 
     observations: Sequences
     inputs: Sequences
-    mask: jax.Array
+    mask: ArbitraryMask
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, 'mask', jnp.asarray(self.mask))
+        if not isinstance(self.mask, ArbitraryMask):
+            object.__setattr__(self, 'mask', ArbitraryMask(self.mask))
         self.validate()
 
     @classmethod
@@ -499,7 +547,7 @@ class Dataset:
         cls,
         observations: Sequences,
         inputs: Sequences,
-        mask: jax.Array,
+        mask: ArbitraryMask,
     ) -> typing.Self:
         """Reconstruct internal data without host-side value validation."""
         instance = object.__new__(cls)
@@ -521,6 +569,7 @@ class Dataset:
 
     @property
     def lengths(self) -> jax.Array:
+        """Observation/input valid-prefix lengths `(*B,)`."""
         return self.observations.lengths
 
     @property
@@ -540,7 +589,7 @@ class Dataset:
         return self.observations.values.dtype
 
     def astype(self, dtype: jax.typing.DTypeLike) -> typing.Self:
-        """Cast observations only, preserving inputs, lengths, and masks.
+        """Cast observations only, preserving inputs, prefixes, and masks.
 
         Structural invariants are preserved, but narrowing casts may overflow.
         Finiteness is validated at public construction, not after transformations.
@@ -549,7 +598,7 @@ class Dataset:
         return self._unchecked(
             observations=self.observations._unchecked(
                 values=self.observations.values.astype(dtype),
-                lengths=self.observations.lengths,
+                mask=self.observations.mask,
             ),
             inputs=self.inputs,
             mask=self.mask,
@@ -563,12 +612,13 @@ class Dataset:
             raise ValueError('observations and inputs must share their time dimension')
         if not bool(jnp.all(self.lengths == self.inputs.lengths)):
             raise ValueError('observations and inputs must share their lengths')
-        if self.mask.shape != (*self.batch_shape, self.num_steps):
-            raise ValueError('mask must have shape (*B, T)')
-        if self.mask.dtype != jnp.bool_:
-            raise ValueError('mask must have boolean dtype')
-        if bool(jnp.any(self.mask & ~self.valid())):
+
+        self.mask.validate(self.observations.values)
+
+        valid = self.valid().materialize(self.num_steps)
+        if bool(jnp.any(self.mask.values & ~valid)):
             raise ValueError('mask must be false outside valid sequence prefixes')
+
         if not bool(jnp.all(jnp.isfinite(self.observations.values))):
             raise ValueError('observations must contain only finite values')
         if not bool(jnp.all(jnp.isfinite(self.inputs.values))):
@@ -580,7 +630,7 @@ class Dataset:
         observations: jax.Array,
         *,
         inputs: jax.Array | None = None,
-        mask: jax.Array | None = None,
+        mask: jax.Array | ArbitraryMask | None = None,
     ) -> typing.Self:
         """Construct one unbatched trajectory from `(T, D_y)` observations."""
         sequence = Sequences.from_sequence(observations)
@@ -597,7 +647,7 @@ class Dataset:
         observations: jax.Array,
         *,
         inputs: jax.Array | None = None,
-        mask: jax.Array | None = None,
+        mask: jax.Array | ArbitraryMask | None = None,
     ) -> typing.Self:
         """Construct equal-length trajectories with arbitrary batch shape."""
         sequences = Sequences.from_batch(observations)
@@ -619,12 +669,17 @@ class Dataset:
         """Pad a flat collection of unequal-length observation trajectories."""
         observations = tuple(jnp.asarray(values) for values in observations)
         sequences = Sequences.from_sequences(observations)
+
         padded_inputs = None
         if len(inputs):
             inputs = tuple(jnp.asarray(values) for values in inputs)
             if any(values.ndim != 2 for values in inputs):
                 raise ValueError('each input sequence must have shape (T_i, D_u)')
-            _require_matching_lengths(inputs, observations, name='inputs')
+            _require_matching_lengths(
+                inputs,
+                observations,
+                name='inputs',
+            )
             padded_inputs = Sequences.from_sequences(inputs).values
 
         padded_mask = None
@@ -634,7 +689,11 @@ class Dataset:
                 raise ValueError('each mask sequence must have shape (T_i,)')
             if any(values.dtype != jnp.bool_ for values in mask):
                 raise ValueError('mask must have boolean dtype')
-            _require_matching_lengths(mask, observations, name='mask')
+            _require_matching_lengths(
+                mask,
+                observations,
+                name='mask',
+            )
             padded_mask = jnp.stack(
                 [_pad_time(values, sequences.num_steps) for values in mask],
             )
@@ -653,19 +712,42 @@ class Dataset:
         lengths: jax.Array,
         *,
         inputs: jax.Array | None = None,
-        mask: jax.Array | None = None,
+        mask: jax.Array | ArbitraryMask | None = None,
     ) -> typing.Self:
         """Construct explicitly padded trajectories `(*B, T, D_y)`."""
-        observation_sequences = Sequences.from_padded(observations, lengths)
+        observation_sequences = Sequences.from_padded(
+            observations,
+            lengths,
+        )
+
         if inputs is None:
             inputs = jnp.empty(
                 (*observation_sequences.values.shape[:-1], 0),
                 dtype=observation_sequences.values.dtype,
             )
-        input_sequences = Sequences.from_padded(inputs, observation_sequences.lengths)
+
+        input_sequences = Sequences.from_padded(
+            inputs,
+            observation_sequences.lengths,
+        )
+
         if mask is None:
-            mask = observation_sequences.valid()
-        return cls(observation_sequences, input_sequences, mask)
+            observation_mask = observation_sequences.valid().materialize(
+                observation_sequences.num_steps
+            )
+
+            observation_mask = ArbitraryMask(observation_mask)
+
+        elif isinstance(mask, ArbitraryMask):
+            observation_mask = mask
+        else:
+            observation_mask = ArbitraryMask(mask)
+
+        return cls(
+            observation_sequences,
+            input_sequences,
+            observation_mask,
+        )
 
     @classmethod
     def stack(
@@ -677,22 +759,37 @@ class Dataset:
         """Pad time and stack datasets along a new batch axis."""
         if not datasets:
             raise ValueError('datasets must contain at least one item')
-        _, axis = batch.insertion((len(datasets),), axis, len(datasets[0].batch_shape))
+
+        _, axis = batch.insertion(
+            (len(datasets),),
+            axis,
+            len(datasets[0].batch_shape),
+        )
+
         observations = Sequences.stack(
             [data.observations for data in datasets],
             axis=axis,
         )
-        inputs = Sequences.stack([data.inputs for data in datasets], axis=axis)
+        inputs = Sequences.stack(
+            [data.inputs for data in datasets],
+            axis=axis,
+        )
+
         masks = [
             jnp.pad(
-                data.mask,
+                data.mask.values,
                 ((0, 0),) * len(data.batch_shape)
                 + ((0, observations.num_steps - data.num_steps),),
                 constant_values=False,
             )
             for data in datasets
         ]
-        return cls._unchecked(observations, inputs, jnp.stack(masks, axis=axis))
+
+        return cls._unchecked(
+            observations,
+            inputs,
+            ArbitraryMask._unchecked(jnp.stack(masks, axis=axis)),
+        )
 
     def select(self, index: batch.SelT) -> typing.Self:
         """Select only trajectory batch dimensions."""
@@ -700,16 +797,20 @@ class Dataset:
         return self._unchecked(
             self.observations.select(index),
             self.inputs.select(index),
-            self.mask[index],
+            self.mask.select(index),
         )
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
         """Insert replicated batch dimensions at `axis`."""
-        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
+        shape, axis = batch.insertion(
+            shape,
+            axis,
+            len(self.batch_shape),
+        )
         return self._unchecked(
             self.observations.broadcast(shape, axis),
             self.inputs.broadcast(shape, axis),
-            batch.broadcast_array(self.mask, shape, axis),
+            self.mask.broadcast(shape, axis),
         )
 
     def squeeze(self, axis=None) -> typing.Self:
@@ -718,17 +819,20 @@ class Dataset:
         return self._unchecked(
             self.observations.squeeze(axes),
             self.inputs.squeeze(axes),
-            jnp.squeeze(self.mask, axis=axes),
+            self.mask.squeeze(axes),
         )
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder entries along one batch axis."""
         axis = batch.axis_index(axis, len(self.batch_shape))
-        permutation = batch.permutation_indices(permutation, self.batch_shape[axis])
+        permutation = batch.permutation_indices(
+            permutation,
+            self.batch_shape[axis],
+        )
         return self._unchecked(
             self.observations.permute(permutation, axis),
             self.inputs.permute(permutation, axis),
-            jnp.take(self.mask, permutation, axis=axis),
+            self.mask.permute(permutation, axis),
         )
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
@@ -738,28 +842,33 @@ class Dataset:
         return self._unchecked(
             self.observations.move_axis(source, destination),
             self.inputs.move_axis(source, destination),
-            jnp.moveaxis(self.mask, source, destination),
+            self.mask.move_axis(source, destination),
         )
 
     def unpack(self) -> tuple[jax.Array, ...]:
         """Crop observations in an unbatched or flat dataset on the host."""
         return self.observations.unpack()
 
-    def valid(self) -> jax.Array:
-        """Timesteps belonging to each trajectory."""
+    def valid(self) -> ContiguousMask:
+        """Contiguous timesteps belonging to each trajectory."""
         return self.observations.valid()
 
     def transition_inputs(self) -> jax.Array:
         """Inputs for `x[t-1] -> x[t]`; input zero is unused."""
         return self.inputs.values[..., 1:, :]
 
-    def valid_transitions(self) -> jax.Array:
-        """Valid transitions `x[t] -> x[t+1]`."""
-        return self.valid()[..., 1:]
+    def valid_transitions(self) -> ContiguousMask:
+        """Contiguous mask for valid transitions `x[t] -> x[t+1]`."""
+        return ContiguousMask._unchecked(
+            jnp.maximum(
+                self.lengths - 1,
+                jnp.zeros((), dtype=self.lengths.dtype),
+            )
+        )
 
     def observation_weights(self) -> jax.Array:
-        """Valid timesteps with an available observation."""
-        return self.valid() & self.mask
+        """Boolean weights for valid timesteps with an available observation."""
+        return self.valid().apply(self.mask.values)
 
     def weighted_observations(self) -> WeightedObservations:
         """Observation values with validity-aware weights."""

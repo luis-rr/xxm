@@ -14,6 +14,7 @@ from xxm.core.emissions.continuous import (
     LaplaceEmissions,
     LaplaceEmissionsT,
 )
+from xxm.core.mask import NO_MASK, Mask
 from xxm.core.optim.newton import NewtonSearch, OptimParams
 
 
@@ -59,23 +60,33 @@ class _NewtonSearchModel(
     latent_chain: GaussianChain
     emissions: LaplaceEmissionsT
     observations: WeightedObservations
+    valid: Mask
+
+    def _safe_latents(
+        self,
+        latents: jax.Array,
+    ) -> jax.Array:
+
+        return self.valid.apply(latents)
 
     def objective(self, params: _NewtonSearchParams) -> jax.Array:
         """Evaluate the chain log potential plus the observation log likelihood."""
 
-        return self.latent_chain.log_potential(
-            params.latents
-        ) + self.emissions.log_likelihood(
-            self.observations,
-            params.latents,
-        )
+        latents = self._safe_latents(params.latents)
+
+        latents_potential = self.latent_chain.log_potential(latents)
+        emissions_potential = self.emissions.log_likelihood(self.observations, latents)
+
+        return latents_potential + emissions_potential
 
     def newton_direction(self, params: _NewtonSearchParams) -> _NewtonSearchParams:
         """Compute the Newton direction for the latent trajectory."""
 
+        latents = self._safe_latents(params.latents)
+
         observation_potential = self.emissions.compute_local_potential(
             self.observations,
-            params.latents,
+            latents,
         )
 
         local_posterior_chain = self.latent_chain.add_local_potential(
@@ -84,11 +95,11 @@ class _NewtonSearchModel(
 
         # The mean is also the mode of this local Gaussian approximation.
         # TODO: Use a solver for the mode that avoids computing the full posterior.
-        posterior, _ = local_posterior_chain.forward_backward()
+        posterior, _ = local_posterior_chain.forward_backward(valid=self.valid)
         newton_latents = posterior.means
 
         return _NewtonSearchParams(
-            latents=newton_latents - params.latents,
+            latents=newton_latents - latents,
         )
 
 
@@ -97,6 +108,7 @@ def local_gaussian_approximation(
     emissions: LaplaceEmissions,
     observations: WeightedObservations,
     latents: jax.Array,
+    valid: Mask = NO_MASK,
 ) -> tuple[GaussianChainMarginals, jax.Array]:
     """Construct a local Gaussian posterior approximation around `latents`."""
 
@@ -107,7 +119,9 @@ def local_gaussian_approximation(
 
     posterior_chain = chain.add_local_potential(observation_potential)
 
-    return posterior_chain.forward_backward()
+    return posterior_chain.forward_backward(
+        valid=valid,
+    )
 
 
 def laplace_inference(
@@ -116,6 +130,7 @@ def laplace_inference(
     observations: WeightedObservations,
     initial_latents: jax.Array,
     search_params: OptimParams,
+    valid: Mask = NO_MASK,
 ) -> tuple[GaussianChainMarginals, jax.Array]:
     """
     Approximate normalized latent marginals and the log normalizer by Laplace inference.
@@ -137,6 +152,7 @@ def laplace_inference(
         latent_chain=chain,
         emissions=emissions,
         observations=observations,
+        valid=valid,
     )
 
     initial_params = _NewtonSearchParams(
@@ -155,4 +171,5 @@ def laplace_inference(
         emissions=emissions,
         observations=observations,
         latents=final.params.latents,
+        valid=valid,
     )

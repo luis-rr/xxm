@@ -30,6 +30,7 @@ from xxm.core.emissions.continuous import (
     QuadraticEmissionsT,
 )
 from xxm.core.inference import InferenceState
+from xxm.core.mask import NO_MASK
 from xxm.core.optim.laplace import laplace_inference, local_gaussian_approximation
 from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
 
@@ -116,6 +117,7 @@ class LaplaceContinuousFactors(
             emissions=self.emissions,
             observations=self.observations,
             latents=latents,
+            valid=NO_MASK,
         )
 
     def infer(
