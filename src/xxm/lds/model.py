@@ -10,11 +10,10 @@ from jax import numpy as jnp
 
 from xxm.core.affine import Affine
 from xxm.core.chains.gaussian import GaussianChainMarginals as Posterior
-from xxm.core.data import Sequences
+from xxm.core.data import Dataset, Sequences
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
-from xxm.core.inference import Fitted, InferenceState
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import poisson as poisson_fit
@@ -131,28 +130,6 @@ def _conditioned_dynamics(
     return model.dynamics.conditional(inputs)
 
 
-def _observation_mean(
-    model: Model,
-    posterior: Posterior,
-) -> jax.Array:
-    batch_shape = model.emissions.batch_shape
-    posterior_batch = posterior.batch_shape
-
-    if posterior_batch[: len(batch_shape)] != batch_shape:
-        raise ValueError('posterior batch must begin with the model batch shape')
-
-    replicate_shape = posterior_batch[len(batch_shape) :]
-    emissions = model.emissions
-
-    if replicate_shape:
-        emissions = emissions.broadcast(
-            replicate_shape,
-            axis=len(batch_shape),
-        )
-
-    return emissions.observation_mean(posterior)
-
-
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, eq=False)
 class GaussianLDS:
@@ -167,6 +144,10 @@ class GaussianLDS:
     """
 
     _model: Model[GaussianEmissions]
+
+    def __post_init__(self) -> None:
+        if self._model.batch_shape != ():
+            raise ValueError('GaussianLDS facade requires an unbatched core model')
 
     @property
     def latent_dim(self) -> int:
@@ -238,36 +219,13 @@ class GaussianLDS:
     @classmethod
     def via_pca(
         cls,
-        observations: jax.Array,
-        latent_dim: int,
-        *,
-        inputs: jax.Array | None = None,
-        mask: jax.Array | None = None,
-        ridge=gaussian_fit.DEFAULT_RIDGE,
-        covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
-    ) -> typing.Self:
-        """Initialize a Gaussian LDS from one observation sequence."""
-        return cls.via_pca_sequences(
-            Sequences.from_sequence(
-                observations,
-                inputs=inputs,
-                mask=mask,
-            ),
-            latent_dim=latent_dim,
-            ridge=ridge,
-            covariance_floor=covariance_floor,
-        )
-
-    @classmethod
-    def via_pca_sequences(
-        cls,
-        data: Sequences,
+        data: Dataset,
         latent_dim: int,
         *,
         ridge=gaussian_fit.DEFAULT_RIDGE,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     ) -> typing.Self:
-        """Initialize one shared Gaussian LDS from independent sequences."""
+        """Initialize one shared Gaussian LDS from a Dataset."""
         return cls(
             init_gaussian_via_pca(
                 data,
@@ -297,76 +255,28 @@ class GaussianLDS:
 
     def infer(
         self,
-        observations: jax.Array,
-        *,
-        inputs: jax.Array | None = None,
-        mask: jax.Array | None = None,
-    ) -> InferenceState[typing.Self, Posterior]:
-        """Compute the exact posterior for one sequence."""
-        inferred = self.infer_sequences(
-            Sequences.from_sequence(
-                observations,
-                inputs=inputs,
-                mask=mask,
-            )
-        )
-
-        return InferenceState(
-            model=inferred.model,
-            posterior=inferred.posterior.squeeze(axis=-1),
-            objective=inferred.objective,
-        )
-
-    def infer_sequences(
-        self,
-        data: Sequences,
-    ) -> InferenceState[typing.Self, Posterior]:
-        """Compute exact posteriors for independent sequences."""
+        data: Dataset,
+    ) -> Inferred[GaussianLDS]:
+        """Compute exact posteriors with the Dataset's batch shape."""
         inferred = _infer_exact_jit(
             self._model,
             data,
         )
 
-        return InferenceState(
+        return Inferred(
             model=self.__class__(inferred.model),
             posterior=inferred.posterior,
-            objective=inferred.objective,
+            data=data,
         )
 
     def fit(
         self,
-        observations: jax.Array,
-        *,
-        inputs: jax.Array | None = None,
-        mask: jax.Array | None = None,
-        num_iters: int,
-        progress: bool | str = 'EM',
-    ) -> Fitted[typing.Self, Posterior]:
-        """Fit one sequence by expectation-maximization."""
-        fit = self.fit_sequences(
-            Sequences.from_sequence(
-                observations,
-                inputs=inputs,
-                mask=mask,
-            ),
-            num_iters=num_iters,
-            progress=progress,
-        )
-
-        return Fitted(
-            model=fit.model,
-            posterior=fit.posterior.squeeze(axis=-1),
-            objective_trace=fit.objective_trace,
-        )
-
-    def fit_sequences(
-        self,
-        data: Sequences,
+        data: Dataset,
         *,
         num_iters: int,
         progress: bool | str = 'EM',
-    ) -> Fitted[typing.Self, Posterior]:
-        """Fit shared parameters across independent sequences."""
+    ) -> Fit[GaussianLDS]:
+        """Fit shared parameters across all Dataset batch entries by EM."""
         fit = _fit_em_jit(
             self._model,
             data,
@@ -374,19 +284,14 @@ class GaussianLDS:
             progress=progress,
         )
 
-        return Fitted(
-            model=self.__class__(fit.state.model),
-            posterior=fit.state.posterior,
+        return Fit(
+            inferred=Inferred(
+                model=self.__class__(fit.state.model),
+                posterior=fit.state.posterior,
+                data=data,
+            ),
             objective_trace=fit.objective_trace,
         )
-
-    def latent_mean(self, posterior: Posterior) -> jax.Array:
-        """Return posterior mean latent trajectories."""
-        return posterior.means
-
-    def observation_mean(self, posterior: Posterior) -> jax.Array:
-        """Return posterior mean observations."""
-        return _observation_mean(self._model, posterior)
 
     def align(self, alignment: Affine) -> typing.Self:
         """Express the latent dynamics in aligned coordinates."""
@@ -409,6 +314,10 @@ class PoissonLDS:
     """
 
     _model: Model[PoissonEmissions]
+
+    def __post_init__(self) -> None:
+        if self._model.batch_shape != ():
+            raise ValueError('PoissonLDS facade requires an unbatched core model')
 
     @property
     def latent_dim(self) -> int:
@@ -478,39 +387,14 @@ class PoissonLDS:
     @classmethod
     def via_pca(
         cls,
-        observations: jax.Array,
-        latent_dim: int,
-        *,
-        inputs: jax.Array | None = None,
-        mask: jax.Array | None = None,
-        ridge=gaussian_fit.DEFAULT_RIDGE,
-        covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
-        count_floor: float = poisson_fit.DEFAULT_COUNT_FLOOR,
-    ) -> typing.Self:
-        """Initialize a Poisson LDS from one observation sequence."""
-        return cls.via_pca_sequences(
-            Sequences.from_sequence(
-                observations,
-                inputs=inputs,
-                mask=mask,
-            ),
-            latent_dim=latent_dim,
-            ridge=ridge,
-            covariance_floor=covariance_floor,
-            count_floor=count_floor,
-        )
-
-    @classmethod
-    def via_pca_sequences(
-        cls,
-        data: Sequences,
+        data: Dataset,
         latent_dim: int,
         *,
         ridge=gaussian_fit.DEFAULT_RIDGE,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
         count_floor: float = poisson_fit.DEFAULT_COUNT_FLOOR,
     ) -> typing.Self:
-        """Initialize one shared Poisson LDS from independent sequences."""
+        """Initialize one shared Poisson LDS from a Dataset."""
         return cls(
             init_poisson_via_pca(
                 data,
@@ -541,44 +425,15 @@ class PoissonLDS:
 
     def infer(
         self,
-        observations: jax.Array,
-        *,
-        inputs: jax.Array | None = None,
-        mask: jax.Array | None = None,
-        initial_latents: jax.Array | None = None,
-        laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
-    ) -> InferenceState[typing.Self, Posterior]:
-        """Compute the Laplace posterior for one sequence."""
-        if initial_latents is not None:
-            initial_latents = jnp.expand_dims(
-                initial_latents,
-                axis=len(self._model.initial.batch_shape),
-            )
-
-        inferred = self.infer_sequences(
-            Sequences.from_sequence(
-                observations,
-                inputs=inputs,
-                mask=mask,
-            ),
-            initial_latents=initial_latents,
-            laplace_params=laplace_params,
-        )
-
-        return InferenceState(
-            model=inferred.model,
-            posterior=inferred.posterior.squeeze(axis=-1),
-            objective=inferred.objective,
-        )
-
-    def infer_sequences(
-        self,
-        data: Sequences,
+        data: Dataset,
         *,
         initial_latents: jax.Array | None = None,
         laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
-    ) -> InferenceState[typing.Self, Posterior]:
-        """Compute Laplace posteriors for independent sequences."""
+    ) -> Inferred[PoissonLDS]:
+        """Compute Laplace posteriors with the Dataset's batch shape.
+
+        Optional initial latents have shape `(*data.batch_shape, T, D_x)`.
+        """
         inferred = _infer_laplace_jit(
             self._model,
             data,
@@ -586,49 +441,21 @@ class PoissonLDS:
             params=laplace_params,
         )
 
-        return InferenceState(
+        return Inferred(
             model=self.__class__(inferred.model),
             posterior=inferred.posterior,
-            objective=inferred.objective,
+            data=data,
         )
 
     def fit(
         self,
-        observations: jax.Array,
-        *,
-        inputs: jax.Array | None = None,
-        mask: jax.Array | None = None,
-        num_iters: int,
-        progress: bool | str = 'Laplace EM',
-        laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
-    ) -> Fitted[typing.Self, Posterior]:
-        """Fit one sequence with Laplace-approximated EM."""
-        fit = self.fit_sequences(
-            Sequences.from_sequence(
-                observations,
-                inputs=inputs,
-                mask=mask,
-            ),
-            num_iters=num_iters,
-            progress=progress,
-            laplace_params=laplace_params,
-        )
-
-        return Fitted(
-            model=fit.model,
-            posterior=fit.posterior.squeeze(axis=-1),
-            objective_trace=fit.objective_trace,
-        )
-
-    def fit_sequences(
-        self,
-        data: Sequences,
+        data: Dataset,
         *,
         num_iters: int,
         progress: bool | str = 'Laplace EM',
         laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
-    ) -> Fitted[typing.Self, Posterior]:
-        """Fit shared parameters across independent sequences."""
+    ) -> Fit[PoissonLDS]:
+        """Fit shared parameters across Dataset batch entries by Laplace EM."""
         fit = _fit_laplace_em_jit(
             self._model,
             data,
@@ -637,22 +464,90 @@ class PoissonLDS:
             laplace_params=laplace_params,
         )
 
-        return Fitted(
-            model=self.__class__(fit.state.model),
-            posterior=fit.state.posterior,
+        return Fit(
+            inferred=Inferred(
+                model=self.__class__(fit.state.model),
+                posterior=fit.state.posterior,
+                data=data,
+            ),
             objective_trace=fit.objective_trace,
         )
-
-    def latent_mean(self, posterior: Posterior) -> jax.Array:
-        """Return posterior mean latent trajectories."""
-        return posterior.means
-
-    def observation_mean(self, posterior: Posterior) -> jax.Array:
-        """Return posterior mean observations."""
-        return _observation_mean(self._model, posterior)
 
     def align(self, alignment: Affine) -> typing.Self:
         """Express the latent dynamics in aligned coordinates."""
         return self.__class__(
             _model=self._model.align(alignment),
         )
+
+
+LDSFacadeT = typing.TypeVar('LDSFacadeT', GaussianLDS, PoissonLDS)
+
+
+@dataclasses.dataclass(frozen=True, eq=False)
+class Inferred(typing.Generic[LDSFacadeT]):
+    """Singular LDS facade, posterior, and the exact source Dataset.
+
+    Temporal accessors return `Sequences` with the source batch shape and lengths.
+    Use `get(index)` to retrieve one unpadded trajectory on the host.
+    Masked observations within each sequence's length retain their timesteps.
+    """
+
+    model: LDSFacadeT
+    posterior: Posterior
+    data: Dataset
+
+    def __post_init__(self) -> None:
+        expected_batch = self.data.batch_shape
+
+        if self.posterior.batch_shape != expected_batch:
+            raise ValueError(
+                f'expected posterior batch shape {expected_batch}, '
+                f'got {self.posterior.batch_shape}'
+            )
+
+        if self.posterior.num_steps != self.data.num_steps:
+            raise ValueError('posterior must match the padded time dimension')
+
+        if self.posterior.variable_dim != self.model.latent_dim:
+            raise ValueError('posterior variable dimension must match model latent_dim')
+
+    def latent_mean(self) -> Sequences:
+        """Return latent means with the source batch shape and lengths."""
+        return Sequences(values=self.posterior.means, lengths=self.data.lengths)
+
+    def observation_mean(self) -> Sequences:
+        """Return expected observations, including masked valid steps."""
+        emissions = self.model._model.emissions
+
+        if self.data.batch_shape:
+            emissions = emissions.broadcast(
+                self.data.batch_shape,
+                axis=0,
+            )
+
+        values = emissions.observation_mean(self.posterior)
+
+        return Sequences(values=values, lengths=self.data.lengths)
+
+    def align(self, alignment: Affine) -> Inferred[LDSFacadeT]:
+        """Transform model and posterior coordinates exactly, without reinference."""
+        model = self.model.align(alignment)
+        posterior_alignment = alignment
+        if self.data.batch_shape:
+            posterior_alignment = alignment.broadcast(self.data.batch_shape, axis=0)
+
+        return self.__class__(
+            model=model,
+            posterior=self.posterior.affine(posterior_alignment),
+            data=self.data,
+        )
+
+
+class Fit(
+    typing.NamedTuple,
+    typing.Generic[LDSFacadeT],
+):
+    """Result of fitting a model."""
+
+    inferred: Inferred[LDSFacadeT]
+    objective_trace: jax.Array

@@ -1,12 +1,13 @@
 """Initialize linear dynamical systems from principal-component latent trajectories."""
 
 import logging
+import math
 
 import jax
 from jax import numpy as jnp
 
 from xxm.core.affine import Affine
-from xxm.core.data import Sequences, WeightedObservations
+from xxm.core.data import Dataset, WeightedObservations
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
 from xxm.core.optim import gaussian as gaussian_fit
@@ -18,10 +19,10 @@ logger = logging.getLogger(__name__)
 
 
 def _validate_initialization(
-    data: Sequences,
+    data: Dataset,
     latent_dim: int,
 ) -> None:
-    observation_dim = data.observation_dim()
+    observation_dim = data.observation_dim
 
     if latent_dim < 1 or latent_dim > observation_dim:
         raise ValueError('latent_dim must be between 1 and the observation dimension')
@@ -81,7 +82,7 @@ def pca_latents_poisson(
 
 def _masked_pca_latents(
     values: jax.Array,
-    data: Sequences,
+    data: Dataset,
     latent_dim: int,
 ) -> jax.Array:
     """Estimate one PCA space from all observed valid rows and project the dataset."""
@@ -98,13 +99,13 @@ def _masked_pca_latents(
 
 def _init_initial(
     latents: jax.Array,
-    data: Sequences,
+    data: Dataset,
     *,
     covariance_floor: float,
 ) -> GaussianInitial:
     """Fit the shared initial distribution from observable sequence starts."""
     observed = data.observation_weights()
-    start_weights = observed[:, 0]
+    start_weights = observed[..., 0]
     num_starts = int(jnp.sum(start_weights))
 
     if num_starts == 0:
@@ -117,7 +118,7 @@ def _init_initial(
     # A single observed start is the normal single-sequence case. For multiple
     # sequences, warn when there are too few observed starts for their empirical
     # covariance to be potentially full rank.
-    if data.num_sequences() > 1 and num_starts < latent_dim + 1:
+    if math.prod(data.batch_shape) > 1 and num_starts < latent_dim + 1:
         logger.warning(
             f'PCA initial-state initialization has only {num_starts} observed sequence '
             f'starts for latent_dim={latent_dim}. Initial-state parameters are weakly '
@@ -129,8 +130,8 @@ def _init_initial(
         )
 
     initial = gaussian_fit.from_samples_weighted(
-        values=latents[:, 0, :],
-        weights=start_weights,
+        values=latents[..., 0, :].reshape((-1, latent_dim)),
+        weights=start_weights.reshape(-1),
         covariance_floor=0.0,
     )
 
@@ -161,17 +162,17 @@ def _init_initial(
 
 def _init_dynamics(
     latents: jax.Array,
-    data: Sequences,
+    data: Dataset,
     *,
     ridge: float,
     covariance_floor: float,
 ) -> GaussianLinearDynamics:
     """Fit controlled dynamics where both PCA endpoint observations are available."""
     observed = data.observation_weights()
-    usable = data.valid_transitions() & observed[:, :-1] & observed[:, 1:]
+    usable = data.valid_transitions() & observed[..., :-1] & observed[..., 1:]
 
     latent_dim = latents.shape[-1]
-    input_dim = data.input_dim()
+    input_dim = data.input_dim
     predictor_dim = latent_dim + input_dim
     num_usable = int(jnp.sum(usable))
 
@@ -195,7 +196,7 @@ def _init_dynamics(
 
     predictors = jnp.concatenate(
         [
-            latents[:, :-1, :],
+            latents[..., :-1, :],
             data.transition_inputs(),
         ],
         axis=-1,
@@ -203,7 +204,7 @@ def _init_dynamics(
 
     dist = gaussian_fit.linear_from_samples(
         inputs=predictors[usable],
-        outputs=latents[:, 1:, :][usable],
+        outputs=latents[..., 1:, :][usable],
         ridge=ridge,
         covariance_floor=covariance_floor,
     )
@@ -213,32 +214,32 @@ def _init_dynamics(
 
 def _init_gaussian_emissions(
     latents: jax.Array,
-    data: Sequences,
+    data: Dataset,
     covariance_floor: float,
 ) -> GaussianEmissions:
     observed = data.observation_weights()
 
     return GaussianEmissions.from_latents(
         latents=latents[observed],
-        observations=data.observations[observed],
+        observations=data.observations.values[observed],
         covariance_floor=covariance_floor,
     )
 
 
 def _init_poisson_emissions(
     latents: jax.Array,
-    data: Sequences,
+    data: Dataset,
 ) -> PoissonEmissions:
     observed = data.observation_weights()
 
     return PoissonEmissions.from_latents(
         latents=latents[observed],
-        observations=data.observations[observed],
+        observations=data.observations.values[observed],
     )
 
 
 def init_gaussian_via_pca(
-    data: Sequences,
+    data: Dataset,
     latent_dim: int,
     *,
     ridge=gaussian_fit.DEFAULT_RIDGE,
@@ -248,7 +249,7 @@ def init_gaussian_via_pca(
     _validate_initialization(data, latent_dim)
 
     latents = _masked_pca_latents(
-        data.observations,
+        data.observations.values,
         data,
         latent_dim,
     )
@@ -274,7 +275,7 @@ def init_gaussian_via_pca(
 
 
 def init_poisson_via_pca(
-    data: Sequences,
+    data: Dataset,
     latent_dim: int,
     *,
     ridge=gaussian_fit.DEFAULT_RIDGE,

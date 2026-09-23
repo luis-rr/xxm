@@ -5,6 +5,7 @@ from xxm.arhmm import (
     PoissonARHMM,
 )
 from xxm.core.data import (
+    Dataset,
     Sequences,
 )
 from xxm.hmm import (
@@ -21,6 +22,7 @@ from xxm.slds import (
 )
 
 __all__ = [
+    'Dataset',
     'GaussianARHMM',
     'GaussianHMM',
     'GaussianLDS',

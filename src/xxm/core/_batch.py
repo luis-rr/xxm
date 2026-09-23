@@ -2,9 +2,40 @@
 
 import math
 import operator
+import typing
 
 import jax
 import jax.numpy as jnp
+
+
+class _Broadcastable(typing.Protocol):
+    """Minimal structural interface for Cartesian batch broadcasting."""
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]: ...
+
+    def broadcast(self, shape: tuple[int, ...], axis: int = 0) -> typing.Self: ...
+
+
+_LeftT = typing.TypeVar('_LeftT', bound=_Broadcastable)
+_RightT = typing.TypeVar('_RightT', bound=_Broadcastable)
+
+
+def cartesian_broadcast(left: _LeftT, right: _RightT) -> tuple[_LeftT, _RightT]:
+    """Broadcast both objects to `(*L, *R)`, even when their batches match.
+
+    Empty batch shapes need no inserted axes. Each result retains its original
+    object type and uses only that object's structural broadcast operation.
+    """
+    left_shape = left.batch_shape
+    right_shape = right.batch_shape
+
+    if right_shape:
+        left = left.broadcast(right_shape, axis=len(left_shape))
+    if left_shape:
+        right = right.broadcast(left_shape, axis=0)
+
+    return left, right
 
 
 def flatten_batch(tree, batch_shape: tuple[int, ...]):

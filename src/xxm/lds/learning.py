@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from xxm.core.chains.gaussian import GaussianChainMarginals as Posterior
-from xxm.core.data import Sequences
+from xxm.core.data import Dataset
 from xxm.core.emissions.continuous import LaplaceEmissionsT, QuadraticEmissionsT
 from xxm.core.inference import InferenceState
 from xxm.core.optim.loop import Fit
@@ -19,7 +19,7 @@ def em_step(
         Model[QuadraticEmissionsT],
         Posterior,
     ],
-    data: Sequences,
+    data: Dataset,
 ) -> InferenceState[
     Model[QuadraticEmissionsT],
     Posterior,
@@ -41,7 +41,7 @@ def laplace_em_step(
         Model[LaplaceEmissionsT],
         Posterior,
     ],
-    data: Sequences,
+    data: Dataset,
     params: OptimParams,
 ) -> InferenceState[
     Model[LaplaceEmissionsT],
@@ -63,7 +63,7 @@ def laplace_em_step(
 
 def fit_em(
     model: Model[QuadraticEmissionsT],
-    data: Sequences,
+    data: Dataset,
     num_iters: int,
     progress: bool | str = 'EM',
 ) -> Fit[
@@ -89,7 +89,7 @@ def fit_em(
 
 def fit_laplace_em(
     model: Model[LaplaceEmissionsT],
-    data: Sequences,
+    data: Dataset,
     num_iters: int,
     progress: bool | str = 'Laplace EM',
     laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,

@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from xxm.core.data import Sequences
+from xxm.core.data import Dataset
 from xxm.lds.init import init_gaussian_via_pca, pca_latents
 
 OBSERVATIONS = jnp.array(
@@ -16,7 +16,7 @@ OBSERVATIONS = jnp.array(
 
 
 def test_gaussian_via_pca_returns_model_with_requested_latent_dimension():
-    model = init_gaussian_via_pca(Sequences.from_sequence(OBSERVATIONS), latent_dim=2)
+    model = init_gaussian_via_pca(Dataset.from_sequence(OBSERVATIONS), latent_dim=2)
 
     assert model.initial.dist.mean.shape == (2,)
     assert model.dynamics.dist.affine.coefficients.shape == (2, 2)

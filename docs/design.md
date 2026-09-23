@@ -331,22 +331,24 @@ For example:
 ```python
 import xxm
 
-model = xxm.GaussianLDS.via_pca(
-    observations,
-    latent_dim=3,
-)
+data = xxm.Dataset.from_sequence(observations)
+model = xxm.GaussianLDS.via_pca(data, latent_dim=3)
 
-fit = model.fit(
-    observations,
-    num_iters=50,
-)
+fit = model.fit(data, num_iters=50)
 
-posterior, log_normalizer = fit.model.infer(observations)
+latent = fit.inferred.latent_mean()
+predicted = fit.inferred.observation_mean().get()
 ```
 
 The facade API improves discoverability and removes the need for users to map concrete model types to their corresponding inference and learning functions. It does not replace the model-family API: explicit algorithmic functions and core model representations remain recommended interfaces when finer control, composition, or inspection is useful.
 
 Facade methods should remain thin wrappers around the existing model-family implementation. They should not duplicate model state, introduce runtime algorithm dispatch, or grow into a separate modelling framework.
+
+Low-level inference returns a numerical `InferenceState` containing the model, posterior, and objective. A core model with batch `*M` and a `Dataset` with batch `*D` produce a posterior with Cartesian batch `(*M, *D)`. Objectives and parameter fitting pool all dataset axes while preserving the model batch.
+
+The facades represent singular, unbatched models. Their `via_*`, `infer`, and `fit` methods accept a `Dataset`. Facade inference returns an immutable host-side `Inferred` owning the facade model, raw posterior, and exact source dataset. Fitting returns `Fit(inferred, objective_trace)`, including the initial objective in the trace.
+
+`Sequences` stores temporal values `(*B, T, D)` and lengths `(*B,)`. `Dataset` composes observations and inputs as matching `Sequences`, plus a whole-timestep mask `(*B, T)`. Public posterior batches match the dataset batch exactly; a single unbatched trajectory has no artificial sequence axis. Temporal accessors return `Sequences`, whose `get(index)` retrieves one cropped array on the host. `unpack()` is a convenience for unbatched or flat collections, and `stack()` constructs rectangular batch hierarchies.
 
 
 ## JAX and model representation

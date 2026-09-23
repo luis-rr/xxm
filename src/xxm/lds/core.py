@@ -11,78 +11,9 @@ from xxm.core import _batch
 from xxm.core.affine import Affine
 from xxm.core.chains.gaussian import GaussianChainMarginals as Posterior
 from xxm.core.chains.gaussian import GaussianPairPotential, GaussianPotential
-from xxm.core.data import Sequences, WeightedObservations
+from xxm.core.data import Dataset
 from xxm.core.emissions.continuous import EmissionsT
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
-
-
-class _AlignedData(typing.NamedTuple, typing.Generic[EmissionsT]):
-    """LDS components and sequence data with explicit model × sequence batching."""
-
-    initial: GaussianInitial
-    dynamics: GaussianLinearDynamics
-    emissions: EmissionsT
-    observations: WeightedObservations
-    transition_inputs: jax.Array
-    valid: jax.Array
-    valid_transitions: jax.Array
-
-
-def _model_batch_shape(model: Model) -> tuple[int, ...]:
-    """Return the common structural batch shape of the LDS components."""
-    batch_shape = model.initial.batch_shape
-
-    if model.dynamics.batch_shape != batch_shape:
-        raise ValueError('initial and dynamics batch shapes must match')
-
-    if model.emissions.batch_shape != batch_shape:
-        raise ValueError('initial and emissions batch shapes must match')
-
-    return batch_shape
-
-
-def _align_data(
-    model: Model[EmissionsT],
-    data: Sequences,
-) -> _AlignedData[EmissionsT]:
-    """Construct the explicit Cartesian product of model batches and sequences."""
-    batch_shape = _model_batch_shape(model)
-
-    if data.input_dim() != model.dynamics.input_dim:
-        raise ValueError(
-            f'expected input dimension {model.dynamics.input_dim}, '
-            f'got {data.input_dim()}'
-        )
-
-    num_sequences = data.num_sequences()
-    sequence_axis = len(batch_shape)
-
-    observations = data.weighted_observations()
-    if batch_shape:
-        observations = observations.broadcast(batch_shape, axis=0)
-
-    return _AlignedData(
-        initial=model.initial.broadcast(
-            (num_sequences,),
-            axis=sequence_axis,
-        ),
-        dynamics=model.dynamics.broadcast(
-            (num_sequences,),
-            axis=sequence_axis,
-        ),
-        emissions=model.emissions.broadcast(
-            (num_sequences,),
-            axis=sequence_axis,
-        ),
-        observations=observations,
-        transition_inputs=_batch.broadcast_array(
-            data.transition_inputs(), batch_shape, axis=0
-        ),
-        valid=_batch.broadcast_array(data.valid(), batch_shape, axis=0),
-        valid_transitions=_batch.broadcast_array(
-            data.valid_transitions(), batch_shape, axis=0
-        ),
-    )
 
 
 class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
@@ -100,6 +31,61 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     initial: GaussianInitial
     dynamics: GaussianLinearDynamics
     emissions: EmissionsT
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        """Common structural batch of all top-level components."""
+        batch_shape = self.initial.batch_shape
+        _batch.require_same(batch_shape, self.dynamics.batch_shape)
+        _batch.require_same(batch_shape, self.emissions.batch_shape)
+        return batch_shape
+
+    def select(self, index) -> typing.Self:
+        """Select independent models along their batch dimensions."""
+        index = _batch.selection(index, len(self.batch_shape))
+        return self.__class__(
+            self.initial.select(index),
+            self.dynamics.select(index),
+            self.emissions.select(index),
+        )
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        """Insert replicated model batch dimensions."""
+        shape, axis = _batch.insertion(shape, axis, len(self.batch_shape))
+        return self.__class__(
+            self.initial.broadcast(shape, axis),
+            self.dynamics.broadcast(shape, axis),
+            self.emissions.broadcast(shape, axis),
+        )
+
+    def squeeze(self, axis=None) -> typing.Self:
+        """Remove singleton model batch dimensions."""
+        axes = _batch.squeeze_axes(self.batch_shape, axis)
+        return self.__class__(
+            self.initial.squeeze(axes),
+            self.dynamics.squeeze(axes),
+            self.emissions.squeeze(axes),
+        )
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        """Reorder independent models along one batch axis."""
+        axis = _batch.axis_index(axis, len(self.batch_shape))
+        permutation = _batch.permutation_indices(permutation, self.batch_shape[axis])
+        return self.__class__(
+            self.initial.permute(permutation, axis),
+            self.dynamics.permute(permutation, axis),
+            self.emissions.permute(permutation, axis),
+        )
+
+    def move_axis(self, source: int, destination: int) -> typing.Self:
+        """Move one model batch axis to another batch position."""
+        source = _batch.axis_index(source, len(self.batch_shape))
+        destination = _batch.axis_index(destination, len(self.batch_shape))
+        return self.__class__(
+            self.initial.move_axis(source, destination),
+            self.dynamics.move_axis(source, destination),
+            self.emissions.move_axis(source, destination),
+        )
 
     def compute_initial_potential(self) -> GaussianPotential:
         """Return the canonical potential for the initial latent distribution."""
@@ -121,7 +107,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         inputs: jax.Array,
     ) -> tuple[jax.Array, jax.Array]:
         """Sample a complete latent and observation trajectory."""
-        _model_batch_shape(self)
+        _ = self.batch_shape
         self.dynamics.validate_trajectory_inputs(inputs, num_steps)
 
         key_initial, key_latents, key_observations = jax.random.split(
@@ -149,14 +135,14 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         inputs: jax.Array,
     ) -> jax.Array:
         r"""Compute prior latent means $\mathbb{E}[x_t]$."""
-        _model_batch_shape(self)
+        _ = self.batch_shape
         return self.dynamics.mean_trajectory(
             self.initial.dist.mean, num_steps, inputs=inputs
         )
 
     def log_joint(
         self,
-        data: Sequences,
+        data: Dataset,
         latents: jax.Array,
     ) -> jax.Array:
         r"""
@@ -166,24 +152,28 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         Latent initial and transition factors are included throughout each valid
         sequence prefix. Independent sequence log densities are summed.
         """
-        aligned = _align_data(self, data)
+        model_batch_shape = self.batch_shape
+        data_batch_shape = data.batch_shape
+        working_model, working_data = _batch.cartesian_broadcast(self, data)
 
         expected_latent_shape = (
-            *aligned.valid.shape,
-            aligned.dynamics.latent_dim,
+            *working_data.batch_shape,
+            working_data.num_steps,
+            working_model.dynamics.latent_dim,
         )
         if latents.shape != expected_latent_shape:
             raise ValueError(
                 f'latents must have shape {expected_latent_shape}; got {latents.shape}'
             )
 
-        initial_log_prob = aligned.initial.dist.log_prob(latents[..., 0, :])
+        initial_log_prob = working_model.initial.dist.log_prob(latents[..., 0, :])
 
-        valid_transitions = aligned.valid_transitions
+        valid_transitions = working_data.valid_transitions()
+        transition_inputs = working_data.transition_inputs()
         safe_inputs = jnp.where(
             valid_transitions[..., None],
-            aligned.transition_inputs,
-            jnp.zeros((), dtype=aligned.transition_inputs.dtype),
+            transition_inputs,
+            jnp.zeros((), dtype=transition_inputs.dtype),
         )
         safe_previous = jnp.where(
             valid_transitions[..., None],
@@ -196,7 +186,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
             jnp.zeros((), dtype=latents.dtype),
         )
 
-        dynamics = aligned.dynamics.conditional(safe_inputs)
+        dynamics = working_model.dynamics.conditional(safe_inputs)
         dynamics = dynamics.conditional(safe_previous)
 
         transition_log_probs = dynamics.log_prob(safe_next)
@@ -210,41 +200,55 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
             axis=-1,
         )
 
-        emission_log_prob = aligned.emissions.log_likelihood(
-            aligned.observations,
+        emission_log_prob = working_model.emissions.log_likelihood(
+            working_data.weighted_observations(),
             latents,
         )
 
         sequence_log_joint = initial_log_prob + dynamics_log_prob + emission_log_prob
 
-        return jnp.sum(sequence_log_joint, axis=-1)
+        data_axes = tuple(
+            range(
+                len(model_batch_shape),
+                len(model_batch_shape) + len(data_batch_shape),
+            )
+        )
+        return (
+            jnp.sum(sequence_log_joint, axis=data_axes)
+            if data_axes
+            else sequence_log_joint
+        )
 
     def fit_params(
         self,
-        data: Sequences,
+        data: Dataset,
         posterior: Posterior,
     ) -> typing.Self:
-        """Fit shared LDS parameters from a multi-sequence posterior."""
-        aligned = _align_data(self, data)
-        expected_batch = aligned.observations.batch_shape
+        """Pool dataset batch axes while preserving the model batch prefix."""
+        model_batch_shape = self.batch_shape
+        expected_batch = (*model_batch_shape, *data.batch_shape)
 
         if posterior.batch_shape != expected_batch:
             raise ValueError(
                 f'posterior batch must be {expected_batch}; got {posterior.batch_shape}'
             )
 
+        working_data = data
+        if model_batch_shape:
+            working_data = data.broadcast(model_batch_shape, axis=0)
+
         return self.__class__(
             initial=self.initial.fit_params(
                 posterior,
-                weights=aligned.valid,
+                weights=working_data.valid(),
             ),
             dynamics=self.dynamics.fit_params(
                 posterior,
-                inputs=aligned.transition_inputs,
-                weights=aligned.valid_transitions,
+                inputs=working_data.transition_inputs(),
+                weights=working_data.valid_transitions(),
             ),
             emissions=self.emissions.fit_params(
-                aligned.observations,
+                working_data.weighted_observations(),
                 posterior,
             ),
         )

@@ -10,7 +10,7 @@ import pytest
 from xxm import arhmm, lds, slds
 from xxm.arhmm.inference import infer_exact as infer_arhmm
 from xxm.arhmm.learning import em_step as arhmm_em_step
-from xxm.core.data import Sequences
+from xxm.core.data import Dataset
 from xxm.core.optim.newton import OptimParams
 from xxm.lds.inference import infer_laplace as infer_lds_laplace
 from xxm.lds.learning import laplace_em_step as lds_laplace_em_step
@@ -26,7 +26,7 @@ class ModelCase(typing.NamedTuple):
     infer: Callable
     infer_kwargs: dict
     em_step: Callable
-    observations: jax.Array | Sequences
+    observations: jax.Array | Dataset
 
 
 GAUSSIAN_OBSERVATIONS = jnp.array([[0.0], [0.5], [-0.25]])
@@ -117,7 +117,7 @@ MODEL_CASES = [
             lds_laplace_em_step,
             params=FAST_LAPLACE_PARAMS,
         ),
-        observations=Sequences.from_sequence(POISSON_OBSERVATIONS),
+        observations=Dataset.from_sequence(POISSON_OBSERVATIONS),
     ),
     ModelCase(
         name='slds-gaussian',

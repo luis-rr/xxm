@@ -1,7 +1,7 @@
 import jax
 import numpy as np
 
-from xxm.core.data import Sequences
+from xxm.core.data import Dataset
 from xxm.lds.inference import infer_exact
 from xxm.lds.learning import em_step, fit_em
 
@@ -9,7 +9,7 @@ from .lds_helpers import make_model, make_observations
 
 
 def test_em_step_returns_a_model_and_finite_objective():
-    data = Sequences.from_sequence(make_observations())
+    data = Dataset.from_sequence(make_observations())
     inferred = infer_exact(make_model(), data)
     result = em_step(inferred, data)
     model = result.model
@@ -22,7 +22,7 @@ def test_em_step_returns_a_model_and_finite_objective():
 
 def test_em_step_is_jittable():
     model = make_model()
-    observations = Sequences.from_sequence(make_observations())
+    observations = Dataset.from_sequence(make_observations())
 
     inferred = infer_exact(model, observations)
     eager = em_step(inferred, observations)
@@ -36,9 +36,7 @@ def test_em_step_is_jittable():
 
 
 def test_fit_em_includes_the_final_objective():
-    fit = fit_em(
-        make_model(), Sequences.from_sequence(make_observations()), num_iters=1
-    )
+    fit = fit_em(make_model(), Dataset.from_sequence(make_observations()), num_iters=1)
 
     assert fit.objective_trace.shape == (2,)
     assert np.isfinite(fit.objective_trace).all()
