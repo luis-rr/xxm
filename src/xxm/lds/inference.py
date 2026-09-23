@@ -3,7 +3,7 @@
 import jax
 from jax import numpy as jnp
 
-from xxm.core import _batch
+from xxm.core import batch
 from xxm.core.chains.gaussian import GaussianChain as Chain
 from xxm.core.chains.gaussian import GaussianChainMarginals as Posterior
 from xxm.core.chains.gaussian import GaussianPairPotential, GaussianPotential
@@ -109,7 +109,7 @@ def infer_exact(
     """Run exact Gaussian inference independently across all sequences."""
     model_batch_shape = model.batch_shape
     data_batch_shape = data.batch_shape
-    working_model, working_data = _batch.cartesian_broadcast(model, data)
+    working_model, working_data = batch.cartesian_broadcast(model, data)
     latent_chain = to_chain(working_model, working_data)
 
     observation_potential = working_model.emissions.compute_potential(
@@ -153,7 +153,7 @@ def infer_laplace(
     """
     model_batch_shape = model.batch_shape
     data_batch_shape = data.batch_shape
-    working_model, working_data = _batch.cartesian_broadcast(model, data)
+    working_model, working_data = batch.cartesian_broadcast(model, data)
     chain = to_chain(working_model, working_data)
 
     expected_latent_shape = (
@@ -210,7 +210,7 @@ def elbo_terms(
     model_batch_shape = model.batch_shape
     data_batch_shape = data.batch_shape
 
-    working_model, working_data = _batch.cartesian_broadcast(
+    working_model, working_data = batch.cartesian_broadcast(
         model,
         data,
     )

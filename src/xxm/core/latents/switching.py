@@ -5,14 +5,14 @@ import typing
 import jax
 import jax.numpy as jnp
 
-from xxm.core import _batch
+from xxm.core import batch
 from xxm.core.affine import Affine
 from xxm.core.chains.gaussian import (
     GaussianPairPotential,
 )
 from xxm.core.dists.gaussian import LinearGaussian
 from xxm.core.optim import gaussian as gaussian_fit
-from xxm.core.optim._batch import filter_valid_batches
+from xxm.core.optim.batch import filter_valid_batches
 from xxm.core.posteriors import ContinuousPosterior, DiscretePosterior
 
 
@@ -30,25 +30,25 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         assert self.dist.batch_shape
         return self.dist.batch_shape[:-1]
 
-    def select(self, index) -> typing.Self:
-        index = _batch.selection(index, len(self.batch_shape))
+    def select(self, index: batch.SelT) -> typing.Self:
+        index = batch.selection(index, len(self.batch_shape))
         return self._replace(dist=self.dist.select(index + (slice(None),)))
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
-        shape, axis = _batch.insertion(shape, axis, len(self.batch_shape))
+        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
         return self._replace(dist=self.dist.broadcast(shape, axis=axis))
 
     def squeeze(self, axis=None) -> typing.Self:
-        axes = _batch.squeeze_axes(self.batch_shape, axis)
+        axes = batch.squeeze_axes(self.batch_shape, axis)
         return self._replace(dist=self.dist.squeeze(axes))
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
-        axis = _batch.axis_index(axis, len(self.batch_shape))
+        axis = batch.axis_index(axis, len(self.batch_shape))
         return self._replace(dist=self.dist.permute(permutation, axis=axis))
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
-        source = _batch.axis_index(source, len(self.batch_shape))
-        destination = _batch.axis_index(destination, len(self.batch_shape))
+        source = batch.axis_index(source, len(self.batch_shape))
+        destination = batch.axis_index(destination, len(self.batch_shape))
         return self._replace(dist=self.dist.move_axis(source, destination))
 
     @property
@@ -105,7 +105,7 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         self, key: jax.Array, previous: jax.Array, state: jax.Array
     ) -> jax.Array:
         """Sample the next latent using the state being entered."""
-        conditional = _batch.take_along_last_batch(
+        conditional = batch.take_along_last_batch(
             self.dist, self.dist.batch_shape, state
         )
         return conditional.sample(key, previous)
@@ -153,7 +153,7 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
 
     def align(self, alignment: Affine) -> typing.Self:
         """Express the latent dynamics in aligned coordinates."""
-        _batch.require_same(
+        batch.require_same(
             alignment.batch_shape,
             self.batch_shape,
         )

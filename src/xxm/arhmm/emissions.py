@@ -20,13 +20,13 @@ import typing
 import jax
 import jax.numpy as jnp
 
-from xxm.core import _batch
+from xxm.core import batch
 from xxm.core.chains.discrete import DiscretePotential
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import poisson as poisson_fit
-from xxm.core.optim._batch import filter_valid_batches
+from xxm.core.optim.batch import filter_valid_batches
 from xxm.core.posteriors import DiscretePosterior
 
 from .data import ARObservations
@@ -102,25 +102,25 @@ class AREmissions(
         assert self.dist.batch_shape
         return self.dist.batch_shape[:-1]
 
-    def select(self, index) -> typing.Self:
-        index = _batch.selection(index, len(self.batch_shape))
+    def select(self, index: batch.SelT) -> typing.Self:
+        index = batch.selection(index, len(self.batch_shape))
         return self._replace(dist=self.dist.select(index + (slice(None),)))
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
-        shape, axis = _batch.insertion(shape, axis, len(self.batch_shape))
+        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
         return self._replace(dist=self.dist.broadcast(shape, axis=axis))
 
     def squeeze(self, axis=None) -> typing.Self:
-        axes = _batch.squeeze_axes(self.batch_shape, axis)
+        axes = batch.squeeze_axes(self.batch_shape, axis)
         return self._replace(dist=self.dist.squeeze(axes))
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
-        axis = _batch.axis_index(axis, len(self.batch_shape))
+        axis = batch.axis_index(axis, len(self.batch_shape))
         return self._replace(dist=self.dist.permute(permutation, axis=axis))
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
-        source = _batch.axis_index(source, len(self.batch_shape))
-        destination = _batch.axis_index(destination, len(self.batch_shape))
+        source = batch.axis_index(source, len(self.batch_shape))
+        destination = batch.axis_index(destination, len(self.batch_shape))
         return self._replace(dist=self.dist.move_axis(source, destination))
 
     @property
@@ -177,7 +177,7 @@ class AREmissions(
         predictors: jax.Array,
     ) -> Gaussian | Poisson:
         """Conditional distribution for each modeled time point and state."""
-        values = _batch.broadcast_array(
+        values = batch.broadcast_array(
             predictors, (self.num_states,), axis=len(self.batch_shape)
         )  # (*B, K, T-L, L, D_y)
         conditional = self.dist.conditional(values)
@@ -232,7 +232,7 @@ class AREmissions(
                 fitted, current_i, weights, min_expected_count=1.0
             )
 
-        fitted = _batch.vmap_batch(
+        fitted = batch.vmap_batch(
             fit_one,
             data.predictors,
             data.targets,
@@ -284,7 +284,7 @@ class AREmissions(
 
             key, key_observation = jax.random.split(key)
 
-            selected = _batch.take_along_last_batch(
+            selected = batch.take_along_last_batch(
                 self.dist, self.dist.batch_shape, state
             )
             conditional = selected.conditional(history)

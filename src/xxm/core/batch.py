@@ -3,6 +3,7 @@
 import math
 import operator
 import typing
+from types import EllipsisType
 
 import jax
 import jax.numpy as jnp
@@ -117,7 +118,11 @@ def axis_index(axis: int, ndim: int) -> int:
     return axis % ndim
 
 
-def selection(index, ndim: int) -> tuple:
+SelItemT = int | jax.Array | list[int] | slice | EllipsisType
+SelT = SelItemT | tuple[SelItemT, ...]
+
+
+def selection(index: SelT, ndim: int) -> tuple:
     """Expand integers, slices and integer arrays over exactly the batch prefix.
 
     One ellipsis is allowed. New axes belong to `broadcast`; boolean indexing
@@ -198,14 +203,18 @@ def align_array(
     return broadcast_array(values, shape[ndim:], ndim)
 
 
-def require_same(left: tuple[int, ...], right: tuple[int, ...]) -> None:
+def require_same(*shapes: tuple[int, ...]) -> None:
     """Require explicitly aligned object batches."""
-    if left != right:
-        raise ValueError(f'batch shapes must match; got {left} and {right}')
+
+    if shapes and any(shape != shapes[0] for shape in shapes[1:]):
+        raise ValueError(f'batch shapes must match; got {shapes}')
 
 
 def weighted_sum(
-    values: jax.Array, weights: jax.Array, batch_shape: tuple[int, ...], axis: int
+    values: jax.Array,
+    weights: jax.Array,
+    batch_shape: tuple[int, ...],
+    axis: int,
 ) -> jax.Array:
     """Reduce one explicit batch axis with matching, unnormalized weights."""
     axis = axis_index(axis, len(batch_shape))

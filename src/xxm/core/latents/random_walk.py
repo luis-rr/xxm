@@ -5,7 +5,7 @@ import typing
 import jax
 import jax.numpy as jnp
 
-from xxm.core import _batch
+from xxm.core import batch
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 
@@ -194,7 +194,7 @@ class GaussianRandomWalk(typing.NamedTuple):
             ),
         )
 
-    def select(self, index) -> typing.Self:
+    def select(self, index: batch.SelT) -> typing.Self:
         """Index only batch dimensions, retaining this object type."""
         return self._replace(
             initial=self.initial.select(index),
@@ -509,7 +509,7 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
         index,
     ) -> typing.Self:
         """Index only structural batch dimensions, preserving gates."""
-        index = _batch.selection(
+        index = batch.selection(
             index,
             len(self.batch_shape),
         ) + (slice(None),)
@@ -526,7 +526,7 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
         axis: int = 0,
     ) -> typing.Self:
         """Insert replicated structural batch dimensions before gates."""
-        shape, axis = _batch.insertion(shape, axis, len(self.batch_shape))
+        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
 
         return self._replace(
             initial=self.initial.broadcast(shape, axis=axis),
@@ -539,7 +539,7 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
         axis=None,
     ) -> typing.Self:
         """Remove singleton structural batch dimensions, preserving gates."""
-        axes = _batch.squeeze_axes(self.batch_shape, axis)
+        axes = batch.squeeze_axes(self.batch_shape, axis)
 
         if not axes:
             return self
@@ -560,7 +560,7 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
         axis: int = 0,
     ) -> typing.Self:
         """Reorder entries along a structural batch axis."""
-        axis = _batch.axis_index(axis, len(self.batch_shape))
+        axis = batch.axis_index(axis, len(self.batch_shape))
 
         return self._replace(
             initial=self.initial.permute(permutation, axis=axis),
@@ -572,12 +572,12 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one structural batch axis, preserving the final gate axis."""
-        source = _batch.axis_index(
+        source = batch.axis_index(
             source,
             len(self.batch_shape),
         )
 
-        destination = _batch.axis_index(
+        destination = batch.axis_index(
             destination,
             len(self.batch_shape),
         )

@@ -5,7 +5,7 @@ import typing
 import jax
 import jax.numpy as jnp
 
-from xxm.core import _batch
+from xxm.core import batch
 from xxm.core.chains.discrete import DiscreteChain
 from xxm.core.dists.categorical import Categorical
 from xxm.core.optim import categorical as categorical_fit
@@ -21,7 +21,7 @@ def homogeneous_chain(
     num_states = initial.num_states
     return DiscreteChain(
         initial_probs=initial.dist.probs,
-        transition_probs=_batch.broadcast_array(
+        transition_probs=batch.broadcast_array(
             transitions.dist.probs,
             (num_steps - 1,),
             axis=len(transitions.batch_shape),
@@ -42,7 +42,7 @@ class CategoricalInitial(typing.NamedTuple):
     def batch_shape(self) -> tuple[int, ...]:
         return self.dist.batch_shape
 
-    def select(self, index) -> typing.Self:
+    def select(self, index: batch.SelT) -> typing.Self:
         return self._replace(dist=self.dist.select(index))
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
@@ -79,7 +79,7 @@ class CategoricalInitial(typing.NamedTuple):
     ) -> typing.Self:
         r"""Fit initial distribution from posterior marginals $\gamma_0(k)$."""
 
-        _batch.require_same(
+        batch.require_same(
             self.batch_shape,
             posterior.state_probs.shape[:-2],
         )
@@ -105,25 +105,25 @@ class CategoricalTransitions(typing.NamedTuple):
         assert self.dist.batch_shape
         return self.dist.batch_shape[:-1]
 
-    def select(self, index) -> typing.Self:
-        index = _batch.selection(index, len(self.batch_shape))
+    def select(self, index: batch.SelT) -> typing.Self:
+        index = batch.selection(index, len(self.batch_shape))
         return self._replace(dist=self.dist.select(index + (slice(None),)))
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
-        shape, axis = _batch.insertion(shape, axis, len(self.batch_shape))
+        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
         return self._replace(dist=self.dist.broadcast(shape, axis=axis))
 
     def squeeze(self, axis=None) -> typing.Self:
-        axes = _batch.squeeze_axes(self.batch_shape, axis)
+        axes = batch.squeeze_axes(self.batch_shape, axis)
         return self._replace(dist=self.dist.squeeze(axes))
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
-        axis = _batch.axis_index(axis, len(self.batch_shape))
+        axis = batch.axis_index(axis, len(self.batch_shape))
         return self._replace(dist=self.dist.permute(permutation, axis=axis))
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
-        source = _batch.axis_index(source, len(self.batch_shape))
-        destination = _batch.axis_index(destination, len(self.batch_shape))
+        source = batch.axis_index(source, len(self.batch_shape))
+        destination = batch.axis_index(destination, len(self.batch_shape))
         return self._replace(dist=self.dist.move_axis(source, destination))
 
     @property
@@ -135,7 +135,7 @@ class CategoricalTransitions(typing.NamedTuple):
 
     def conditional(self, previous: jax.Array) -> Categorical:
         """Conditional distribution $p(z_t|z_{t-1})$ for next state."""
-        return _batch.take_along_last_batch(self.dist, self.dist.batch_shape, previous)
+        return batch.take_along_last_batch(self.dist, self.dist.batch_shape, previous)
 
     def sample_next(self, key: jax.Array, previous: jax.Array) -> jax.Array:
         """Sample next state conditional on previous state."""
@@ -186,7 +186,7 @@ class CategoricalTransitions(typing.NamedTuple):
     ) -> typing.Self:
         r"""Fit transition probabilities from posterior pair marginals $\xi_t(i,j)$."""
 
-        _batch.require_same(
+        batch.require_same(
             self.batch_shape,
             posterior.state_probs.shape[:-2],
         )

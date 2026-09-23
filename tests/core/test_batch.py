@@ -20,7 +20,7 @@ def _gaussian():
         (slice(None), None),
         True,
         np.bool_(False),
-        [True, False],
+        (True, False),
         np.array([[True, False, True], [False, True, False]]),
         (0, 0, 0),
         (Ellipsis, 0, 0, 0),
@@ -59,7 +59,8 @@ def test_select_integer_arrays_is_jittable():
     np.testing.assert_array_equal(selected.mean, gaussian.mean[1, indices])
     np.testing.assert_array_equal(selected.covariance, gaussian.covariance[1, indices])
     np.testing.assert_array_equal(
-        gaussian.select([1, 0]).mean, gaussian.mean[jnp.array([1, 0])]
+        gaussian.select([1, 0]).mean,
+        gaussian.mean[jnp.array([1, 0])],
     )
 
 

@@ -5,12 +5,12 @@ import typing
 import jax
 from jax import numpy as jnp
 
-from xxm.core import _batch
+from xxm.core import batch
 from xxm.core.affine import Affine
 from xxm.core.chains.gaussian import GaussianPotential
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian, PairedGaussian
 from xxm.core.optim import gaussian as gaussian_fit
-from xxm.core.optim._batch import filter_valid_batches
+from xxm.core.optim.batch import filter_valid_batches
 from xxm.core.posteriors import ContinuousPosterior
 
 
@@ -23,7 +23,7 @@ class GaussianInitial(typing.NamedTuple):
     def batch_shape(self) -> tuple[int, ...]:
         return self.dist.batch_shape
 
-    def select(self, index) -> typing.Self:
+    def select(self, index: batch.SelT) -> typing.Self:
         return self._replace(dist=self.dist.select(index))
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
@@ -63,7 +63,7 @@ class GaussianInitial(typing.NamedTuple):
             raise ValueError('weights must match posterior batch and time dimensions')
 
         replicate_shape = posterior_batch[batch_ndim:]
-        initial_marginals, initial_weights = _batch.pool_samples(
+        initial_marginals, initial_weights = batch.pool_samples(
             (
                 Gaussian(
                     mean=posterior.means[..., 0, :],
@@ -78,7 +78,7 @@ class GaussianInitial(typing.NamedTuple):
             initial_marginals, weights=initial_weights
         )
 
-        reference_marginals, reference_weights = _batch.pool_samples(
+        reference_marginals, reference_weights = batch.pool_samples(
             (
                 Gaussian(
                     mean=posterior.means,
@@ -112,7 +112,7 @@ class GaussianInitial(typing.NamedTuple):
         r"""
         Express the initial distribution in coordinates $x' = f(x)$ defined by `alignment`.
         """
-        _batch.require_same(
+        batch.require_same(
             alignment.batch_shape,
             self.batch_shape,
         )
@@ -130,7 +130,7 @@ class GaussianInitial(typing.NamedTuple):
         """Estimate an initial Gaussian from a known latent trajectory."""
 
         batch_shape = latents.shape[:-2]
-        reference = _batch.vmap_batch(
+        reference = batch.vmap_batch(
             lambda values: gaussian_fit.from_samples(
                 values, covariance_floor=covariance_floor
             ),
@@ -164,7 +164,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
     def batch_shape(self) -> tuple[int, ...]:
         return self.dist.batch_shape
 
-    def select(self, index) -> typing.Self:
+    def select(self, index: batch.SelT) -> typing.Self:
         return type(self)(self.dist.select(index))
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
@@ -226,10 +226,10 @@ class GaussianLinearDynamics(typing.NamedTuple):
         )
         bias = input_affine.apply(inputs)
 
-        coefficients = _batch.align_array(
+        coefficients = batch.align_array(
             self.latent_coefficients, self.batch_shape, inputs.shape[:-1]
         )
-        covariance = _batch.align_array(
+        covariance = batch.align_array(
             self.dist.covariance, self.batch_shape, inputs.shape[:-1]
         )
 
@@ -296,7 +296,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
         if 0 in sample_shape:
             return self
 
-        paired, inputs, weights = _batch.pool_samples(
+        paired, inputs, weights = batch.pool_samples(
             (posterior.paired_marginals(), inputs, weights),
             self.batch_shape,
             sample_shape,
@@ -315,7 +315,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
                 covariance_floor=covariance_floor,
             )
 
-        fitted = _batch.vmap_batch(
+        fitted = batch.vmap_batch(
             fit_one,
             paired,
             inputs,
@@ -490,7 +490,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
 
         External input coordinates are unchanged.
         """
-        _batch.require_same(
+        batch.require_same(
             alignment.batch_shape,
             self.batch_shape,
         )
@@ -571,7 +571,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
                 covariance_floor=covariance_floor,
             )
 
-        fitted = _batch.vmap_batch(
+        fitted = batch.vmap_batch(
             fit_one,
             latents,
             inputs,
@@ -595,27 +595,27 @@ class StateConditionedGaussian(typing.NamedTuple):
         assert self.dist.batch_shape
         return self.dist.batch_shape[:-1]
 
-    def select(self, index) -> typing.Self:
-        index = _batch.selection(index, len(self.batch_shape))
+    def select(self, index: batch.SelT) -> typing.Self:
+        index = batch.selection(index, len(self.batch_shape))
         return self._replace(dist=self.dist.select(index + (slice(None),)))
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
-        shape, axis = _batch.insertion(shape, axis, len(self.batch_shape))
+        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
         return self._replace(dist=self.dist.broadcast(shape, axis=axis))
 
     def squeeze(self, axis=None) -> typing.Self:
-        axes = _batch.squeeze_axes(self.batch_shape, axis)
+        axes = batch.squeeze_axes(self.batch_shape, axis)
         return self._replace(dist=self.dist.squeeze(axes))
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
-        axis = _batch.axis_index(axis, len(self.batch_shape))
+        axis = batch.axis_index(axis, len(self.batch_shape))
         return self._replace(dist=self.dist.permute(permutation, axis=axis))
 
         return self._replace(dist=self.dist.permute(permutation, axis=axis))
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
-        source = _batch.axis_index(source, len(self.batch_shape))
-        destination = _batch.axis_index(destination, len(self.batch_shape))
+        source = batch.axis_index(source, len(self.batch_shape))
+        destination = batch.axis_index(destination, len(self.batch_shape))
 
         return self._replace(dist=self.dist.move_axis(source, destination))
 
@@ -630,7 +630,7 @@ class StateConditionedGaussian(typing.NamedTuple):
         state: jax.Array,
     ) -> Gaussian:
         """Gaussian distribution conditional on the given state."""
-        return _batch.take_along_last_batch(self.dist, self.dist.batch_shape, state)
+        return batch.take_along_last_batch(self.dist, self.dist.batch_shape, state)
 
     def compute_potentials(self) -> GaussianPotential:
         """Return one Gaussian potential per discrete state."""
@@ -652,7 +652,7 @@ class StateConditionedGaussian(typing.NamedTuple):
 
     def align(self, alignment: Affine) -> typing.Self:
         """Express the conditional distributions in coordinates $x' = f(x)$."""
-        _batch.require_same(
+        batch.require_same(
             alignment.batch_shape,
             self.batch_shape,
         )

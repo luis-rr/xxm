@@ -5,13 +5,13 @@ import typing
 import jax
 import jax.numpy as jnp
 
-from xxm.core import _batch
+from xxm.core import batch
 from xxm.core.chains.discrete import DiscretePotential
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import poisson as poisson_fit
-from xxm.core.optim._batch import filter_valid_batches
+from xxm.core.optim.batch import filter_valid_batches
 from xxm.core.posteriors import DiscretePosterior
 
 
@@ -24,7 +24,7 @@ class Emissions(typing.Protocol):
     @property
     def num_states(self) -> int: ...
 
-    def select(self, index) -> typing.Self: ...
+    def select(self, index: batch.SelT) -> typing.Self: ...
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self: ...
 
@@ -85,25 +85,25 @@ class GaussianEmissions(typing.NamedTuple):
         assert self.dist.batch_shape
         return self.dist.batch_shape[:-1]
 
-    def select(self, index) -> typing.Self:
-        index = _batch.selection(index, len(self.batch_shape))
+    def select(self, index: batch.SelT) -> typing.Self:
+        index = batch.selection(index, len(self.batch_shape))
         return self._replace(dist=self.dist.select(index + (slice(None),)))
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
-        shape, axis = _batch.insertion(shape, axis, len(self.batch_shape))
+        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
         return self._replace(dist=self.dist.broadcast(shape, axis=axis))
 
     def squeeze(self, axis=None) -> typing.Self:
-        axes = _batch.squeeze_axes(self.batch_shape, axis)
+        axes = batch.squeeze_axes(self.batch_shape, axis)
         return self._replace(dist=self.dist.squeeze(axes))
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
-        axis = _batch.axis_index(axis, len(self.batch_shape))
+        axis = batch.axis_index(axis, len(self.batch_shape))
         return self._replace(dist=self.dist.permute(permutation, axis=axis))
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
-        source = _batch.axis_index(source, len(self.batch_shape))
-        destination = _batch.axis_index(destination, len(self.batch_shape))
+        source = batch.axis_index(source, len(self.batch_shape))
+        destination = batch.axis_index(destination, len(self.batch_shape))
         return self._replace(dist=self.dist.move_axis(source, destination))
 
     @property
@@ -114,7 +114,7 @@ class GaussianEmissions(typing.NamedTuple):
 
     def log_likelihoods(self, observations: jax.Array) -> jax.Array:
         r"""Evaluate log probabilities $\log p(y_t|z_t=k)$ for all states and time."""
-        values = _batch.broadcast_array(
+        values = batch.broadcast_array(
             observations, (self.num_states,), axis=len(self.batch_shape)
         )  # (*B, K, *Q, D)
         return jnp.moveaxis(self.dist.log_prob(values), len(self.batch_shape), -1)
@@ -146,7 +146,7 @@ class GaussianEmissions(typing.NamedTuple):
                 fitted, current_i, weights, min_expected_count=1.0
             )
 
-        fitted = _batch.vmap_batch(
+        fitted = batch.vmap_batch(
             fit_one,
             observations,
             posterior.state_probs,
@@ -159,7 +159,7 @@ class GaussianEmissions(typing.NamedTuple):
 
     def sample(self, key: jax.Array, states: jax.Array) -> jax.Array:
         """Sample observations conditional on discrete state indices."""
-        return _batch.take_along_last_batch(
+        return batch.take_along_last_batch(
             self.dist, self.dist.batch_shape, states
         ).sample(key)
 
@@ -185,25 +185,25 @@ class PoissonEmissions(typing.NamedTuple):
         assert self.dist.batch_shape
         return self.dist.batch_shape[:-1]
 
-    def select(self, index) -> typing.Self:
-        index = _batch.selection(index, len(self.batch_shape))
+    def select(self, index: batch.SelT) -> typing.Self:
+        index = batch.selection(index, len(self.batch_shape))
         return self._replace(dist=self.dist.select(index + (slice(None),)))
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
-        shape, axis = _batch.insertion(shape, axis, len(self.batch_shape))
+        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
         return self._replace(dist=self.dist.broadcast(shape, axis=axis))
 
     def squeeze(self, axis=None) -> typing.Self:
-        axes = _batch.squeeze_axes(self.batch_shape, axis)
+        axes = batch.squeeze_axes(self.batch_shape, axis)
         return self._replace(dist=self.dist.squeeze(axes))
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
-        axis = _batch.axis_index(axis, len(self.batch_shape))
+        axis = batch.axis_index(axis, len(self.batch_shape))
         return self._replace(dist=self.dist.permute(permutation, axis=axis))
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
-        source = _batch.axis_index(source, len(self.batch_shape))
-        destination = _batch.axis_index(destination, len(self.batch_shape))
+        source = batch.axis_index(source, len(self.batch_shape))
+        destination = batch.axis_index(destination, len(self.batch_shape))
         return self._replace(dist=self.dist.move_axis(source, destination))
 
     @property
@@ -214,7 +214,7 @@ class PoissonEmissions(typing.NamedTuple):
 
     def log_likelihoods(self, observations: jax.Array) -> jax.Array:
         r"""Evaluate $\log p(y_t\mid z_t=k)$ for all states and time."""
-        values = _batch.broadcast_array(
+        values = batch.broadcast_array(
             observations, (self.num_states,), axis=len(self.batch_shape)
         )  # (*B, K, *Q, D)
         return jnp.moveaxis(self.dist.log_prob(values), len(self.batch_shape), -1)
@@ -243,7 +243,7 @@ class PoissonEmissions(typing.NamedTuple):
                 fitted, current_i, weights, min_expected_count=1.0
             )
 
-        fitted = _batch.vmap_batch(
+        fitted = batch.vmap_batch(
             fit_one,
             observations,
             posterior.state_probs,
@@ -269,6 +269,6 @@ class PoissonEmissions(typing.NamedTuple):
         states: jax.Array,
     ) -> jax.Array:
         """Sample observations conditional on discrete state indices."""
-        return _batch.take_along_last_batch(
+        return batch.take_along_last_batch(
             self.dist, self.dist.batch_shape, states
         ).sample(key)

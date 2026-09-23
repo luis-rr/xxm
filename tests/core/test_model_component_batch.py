@@ -9,7 +9,7 @@ import pytest
 
 from xxm.arhmm.data import ARObservations
 from xxm.arhmm.emissions import AREmissions
-from xxm.core import _batch
+from xxm.core import batch
 from xxm.core.affine import Affine
 from xxm.core.chains.discrete import DiscreteChainMarginals
 from xxm.core.chains.gaussian import GaussianChainMarginals
@@ -181,9 +181,9 @@ def test_structural_operations_preserve_intrinsic_axes(component):
 @pytest.mark.parametrize('batch_shape', [(), B])
 def test_flatten_round_trip(batch_shape):
     dist = _gaussian(batch_shape + (K,))
-    flat = _batch.flatten_batch(dist, batch_shape)
+    flat = batch.flatten_batch(dist, batch_shape)
     assert flat.batch_shape == (math.prod(batch_shape), K)
-    _assert_tree_close(_batch.unflatten_batch(flat, batch_shape), dist)
+    _assert_tree_close(batch.unflatten_batch(flat, batch_shape), dist)
 
 
 @pytest.mark.parametrize('query_shape', [(), (T,), (2, T)])

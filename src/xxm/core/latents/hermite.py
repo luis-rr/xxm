@@ -9,6 +9,7 @@ import typing
 import jax
 import jax.numpy as jnp
 
+from xxm.core import batch
 from xxm.core.dists.gaussian import Gaussian
 
 
@@ -532,7 +533,7 @@ class HermiteSpline:
             ),
         )
 
-    def select(self, index) -> typing.Self:
+    def select(self, index: batch.SelT) -> typing.Self:
         """Index only batch dimensions, retaining this object type."""
         return dataclasses.replace(
             self,

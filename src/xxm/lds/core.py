@@ -7,7 +7,7 @@ import typing
 import jax
 from jax import numpy as jnp
 
-from xxm.core import _batch
+from xxm.core import batch
 from xxm.core.affine import Affine
 from xxm.core.chains.gaussian import GaussianChainMarginals as Posterior
 from xxm.core.chains.gaussian import GaussianPairPotential, GaussianPotential
@@ -36,13 +36,16 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     def batch_shape(self) -> tuple[int, ...]:
         """Common structural batch of all top-level components."""
         batch_shape = self.initial.batch_shape
-        _batch.require_same(batch_shape, self.dynamics.batch_shape)
-        _batch.require_same(batch_shape, self.emissions.batch_shape)
+        batch.require_same(
+            batch_shape,
+            self.dynamics.batch_shape,
+            self.emissions.batch_shape,
+        )
         return batch_shape
 
-    def select(self, index) -> typing.Self:
+    def select(self, index: batch.SelT) -> typing.Self:
         """Select independent models along their batch dimensions."""
-        index = _batch.selection(index, len(self.batch_shape))
+        index = batch.selection(index, len(self.batch_shape))
         return self.__class__(
             self.initial.select(index),
             self.dynamics.select(index),
@@ -51,7 +54,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
         """Insert replicated model batch dimensions."""
-        shape, axis = _batch.insertion(shape, axis, len(self.batch_shape))
+        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
         return self.__class__(
             self.initial.broadcast(shape, axis),
             self.dynamics.broadcast(shape, axis),
@@ -60,7 +63,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
     def squeeze(self, axis=None) -> typing.Self:
         """Remove singleton model batch dimensions."""
-        axes = _batch.squeeze_axes(self.batch_shape, axis)
+        axes = batch.squeeze_axes(self.batch_shape, axis)
         return self.__class__(
             self.initial.squeeze(axes),
             self.dynamics.squeeze(axes),
@@ -69,8 +72,8 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder independent models along one batch axis."""
-        axis = _batch.axis_index(axis, len(self.batch_shape))
-        permutation = _batch.permutation_indices(permutation, self.batch_shape[axis])
+        axis = batch.axis_index(axis, len(self.batch_shape))
+        permutation = batch.permutation_indices(permutation, self.batch_shape[axis])
         return self.__class__(
             self.initial.permute(permutation, axis),
             self.dynamics.permute(permutation, axis),
@@ -79,8 +82,8 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one model batch axis to another batch position."""
-        source = _batch.axis_index(source, len(self.batch_shape))
-        destination = _batch.axis_index(destination, len(self.batch_shape))
+        source = batch.axis_index(source, len(self.batch_shape))
+        destination = batch.axis_index(destination, len(self.batch_shape))
         return self.__class__(
             self.initial.move_axis(source, destination),
             self.dynamics.move_axis(source, destination),
@@ -154,7 +157,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         """
         model_batch_shape = self.batch_shape
         data_batch_shape = data.batch_shape
-        working_model, working_data = _batch.cartesian_broadcast(self, data)
+        working_model, working_data = batch.cartesian_broadcast(self, data)
 
         expected_latent_shape = (
             *working_data.batch_shape,

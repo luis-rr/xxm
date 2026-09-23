@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import jax.scipy as jsp
 
-from xxm.core import _batch
+from xxm.core import batch
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian
 
@@ -32,9 +32,9 @@ class Poisson(typing.NamedTuple):
         """Number of independent Poisson variables."""
         return self.log_rates.shape[-1]
 
-    def select(self, index) -> typing.Self:
+    def select(self, index: batch.SelT) -> typing.Self:
         """Index only batch dimensions, retaining this object type."""
-        index = _batch.selection(index, len(self.batch_shape))
+        index = batch.selection(index, len(self.batch_shape))
         return self.__class__(
             log_rates=self.log_rates[index],
         )
@@ -71,7 +71,7 @@ class Poisson(typing.NamedTuple):
         """Evaluate the log probability separately for each output dimension."""
         if values.shape[-1:] != (self.variable_dim,):
             raise ValueError('values must match the Poisson variable dimension')
-        log_rates = _batch.align_array(
+        log_rates = batch.align_array(
             self.log_rates, self.batch_shape, values.shape[:-1]
         )
         return values * log_rates - jnp.exp(log_rates) - jsp.special.gammaln(values + 1)
@@ -93,34 +93,34 @@ class Poisson(typing.NamedTuple):
 
     def mixture_mean(self, weights: jax.Array, *, axis: int) -> jax.Array:
         """Compute a mixture mean over an explicit, aligned batch axis."""
-        return _batch.weighted_sum(self.rates, weights, self.batch_shape, axis)
+        return batch.weighted_sum(self.rates, weights, self.batch_shape, axis)
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
         """Insert replicated batch dimensions at `axis`."""
-        shape, axis = _batch.insertion(shape, axis, len(self.batch_shape))
+        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
         return self.__class__(
-            log_rates=_batch.broadcast_array(self.log_rates, shape, axis),
+            log_rates=batch.broadcast_array(self.log_rates, shape, axis),
         )
 
     def squeeze(self, axis=None) -> typing.Self:
         """Remove singleton batch dimensions."""
-        axes = _batch.squeeze_axes(self.batch_shape, axis)
+        axes = batch.squeeze_axes(self.batch_shape, axis)
         return self.__class__(
             log_rates=jnp.squeeze(self.log_rates, axis=axes),
         )
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder entries along a batch axis."""
-        axis = _batch.axis_index(axis, len(self.batch_shape))
-        permutation = _batch.permutation_indices(permutation, self.batch_shape[axis])
+        axis = batch.axis_index(axis, len(self.batch_shape))
+        permutation = batch.permutation_indices(permutation, self.batch_shape[axis])
         return self.__class__(
             log_rates=jnp.take(self.log_rates, permutation, axis=axis),
         )
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another position."""
-        source = _batch.axis_index(source, len(self.batch_shape))
-        destination = _batch.axis_index(destination, len(self.batch_shape))
+        source = batch.axis_index(source, len(self.batch_shape))
+        destination = batch.axis_index(destination, len(self.batch_shape))
         return self.__class__(
             log_rates=jnp.moveaxis(self.log_rates, source, destination),
         )
@@ -177,9 +177,9 @@ class LinearPoisson(typing.NamedTuple):
             affine=self.affine.reshape_input(input_shape),
         )
 
-    def select(self, index) -> typing.Self:
+    def select(self, index: batch.SelT) -> typing.Self:
         """Index only batch dimensions, retaining this object type."""
-        index = _batch.selection(index, len(self.batch_shape))
+        index = batch.selection(index, len(self.batch_shape))
         return self.__class__(
             affine=self.affine.select(index),
         )
@@ -234,7 +234,7 @@ class LinearPoisson(typing.NamedTuple):
         )
 
         if weights is not None:
-            _batch.require_same(weights.shape, log_probs.shape[:-1])
+            batch.require_same(weights.shape, log_probs.shape[:-1])
             log_probs = weights[..., None] * log_probs
 
         return jnp.sum(log_probs, axis=-1)
@@ -250,30 +250,30 @@ class LinearPoisson(typing.NamedTuple):
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
         """Insert replicated batch dimensions at `axis`."""
-        shape, axis = _batch.insertion(shape, axis, len(self.batch_shape))
+        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
         return self.__class__(
             affine=self.affine.broadcast(shape, axis=axis),
         )
 
     def squeeze(self, axis=None) -> typing.Self:
         """Remove singleton batch dimensions."""
-        axes = _batch.squeeze_axes(self.batch_shape, axis)
+        axes = batch.squeeze_axes(self.batch_shape, axis)
         return self.__class__(
             affine=self.affine.squeeze(axes),
         )
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder entries along a batch axis."""
-        axis = _batch.axis_index(axis, len(self.batch_shape))
-        permutation = _batch.permutation_indices(permutation, self.batch_shape[axis])
+        axis = batch.axis_index(axis, len(self.batch_shape))
+        permutation = batch.permutation_indices(permutation, self.batch_shape[axis])
         return self.__class__(
             affine=self.affine.permute(permutation, axis=axis),
         )
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another position."""
-        source = _batch.axis_index(source, len(self.batch_shape))
-        destination = _batch.axis_index(destination, len(self.batch_shape))
+        source = batch.axis_index(source, len(self.batch_shape))
+        destination = batch.axis_index(destination, len(self.batch_shape))
         return self.__class__(
             affine=self.affine.move_axis(source, destination),
         )

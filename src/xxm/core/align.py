@@ -5,7 +5,7 @@ import itertools
 import jax
 import jax.numpy as jnp
 
-from xxm.core import _batch
+from xxm.core import batch
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.optim import gaussian as _gaussian_fit
@@ -244,7 +244,7 @@ def zscore_gaussian(gaussian: Gaussian) -> Affine:
     centers each variable at zero and scales it to unit marginal variance.
     """
     if gaussian.batch_shape:
-        gaussian = _batch.flatten_batch(
+        gaussian = batch.flatten_batch(
             gaussian,
             gaussian.batch_shape,
         )
