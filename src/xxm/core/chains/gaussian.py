@@ -1360,19 +1360,79 @@ class GaussianChainMarginals(typing.NamedTuple):
         """Dimension of each Gaussian variable."""
         return self.means.shape[-1]
 
-    def entropy(self) -> jax.Array:
-        """Entropy per chain, preserving the batch prefix."""
+    def entropy_terms(self) -> jax.Array:
+        r"""Return Markov entropy contributions for each time step.
+
+        The returned terms are
+
+        $$
+        H(x_0),\;
+        H(x_1 \mid x_0),\;
+        \ldots,\;
+        H(x_{T-1} \mid x_{T-2}),
+        $$
+
+        with shape `(*B, T)`.
+        """
         if self.num_steps == 0:
-            return jnp.zeros(self.batch_shape, dtype=self.means.dtype)
+            return jnp.zeros(
+                (*self.batch_shape, 0),
+                dtype=self.means.dtype,
+            )
+
+        constant = self.variable_dim * (1.0 + jnp.log(2.0 * jnp.pi))
+
         initial_log_det = _log_det(self.covariances[..., 0, :, :])
+
         conditional_log_dets = _conditional_log_det(
             self.covariances[..., :-1, :, :],
             self.covariances[..., 1:, :, :],
             self.cross_covariances,
         )
-        joint_log_det = initial_log_det + jnp.sum(conditional_log_dets, axis=-1)
-        joint_dim = self.num_steps * self.variable_dim
-        return 0.5 * (joint_dim * (1.0 + jnp.log(2.0 * jnp.pi)) + joint_log_det)
+
+        initial = 0.5 * (constant + initial_log_det)
+
+        conditionals = 0.5 * (constant + conditional_log_dets)
+
+        return jnp.concatenate(
+            [
+                initial[..., None],
+                conditionals,
+            ],
+            axis=-1,
+        )
+
+    def entropy(
+        self,
+        valid: jax.Array | None = None,
+    ) -> jax.Array:
+        """Entropy per chain, optionally restricted to a valid time prefix."""
+        terms = self.entropy_terms()
+
+        if valid is not None:
+            expected_shape = (
+                *self.batch_shape,
+                self.num_steps,
+            )
+
+            if valid.shape != expected_shape:
+                raise ValueError(
+                    f'valid must have shape {expected_shape}; got {valid.shape}'
+                )
+
+            if valid.dtype != jnp.bool_:
+                raise ValueError('valid must have boolean dtype')
+
+            terms = jnp.where(
+                valid,
+                terms,
+                jnp.zeros((), dtype=terms.dtype),
+            )
+
+        return jnp.sum(
+            terms,
+            axis=-1,
+        )
 
     def affine(self, affine: Affine) -> typing.Self:
         """Push posterior marginals through a batch-aligned affine map."""

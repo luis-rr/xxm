@@ -20,7 +20,7 @@ from xxm.core.optim import poisson as poisson_fit
 from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
 
 from .core import Model
-from .inference import infer_exact, infer_laplace
+from .inference import elbo, infer_exact, infer_laplace
 from .init import init_gaussian_via_pca, init_poisson_via_pca
 from .learning import fit_em, fit_laplace_em
 
@@ -42,6 +42,8 @@ _fit_laplace_em_jit = jax.jit(
         'progress',
     ),
 )
+
+_elbo_jit = jax.jit(elbo)
 
 
 def _latent_components_from_params(
@@ -540,6 +542,13 @@ class Inferred(typing.Generic[LDSFacadeT]):
             model=model,
             posterior=self.posterior.affine(posterior_alignment),
             data=self.data,
+        )
+
+    def elbo(self) -> jax.Array:
+        return _elbo_jit(
+            self.model._model,
+            self.data,
+            self.posterior,
         )
 
 

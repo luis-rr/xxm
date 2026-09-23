@@ -58,6 +58,14 @@ class Emissions(typing.Protocol):
         """Evaluate the total conditional log likelihood."""
         ...
 
+    def expected_log_likelihood(
+        self,
+        observations: WeightedObservations,
+        posterior: GaussianChainMarginals,
+    ) -> jax.Array:
+        r"""Evaluate E_q[log p(y|x)] under Gaussian marginals."""
+        ...
+
     def compose_input(
         self,
         alignment: Affine,
@@ -220,6 +228,49 @@ class GaussianEmissions(typing.NamedTuple):
         log_probs = self.conditional(latents).log_prob(observations.safe_values())
 
         return observations.weighted_sum(log_probs)
+
+    def expected_log_likelihood(
+        self,
+        observations: WeightedObservations,
+        posterior: ContinuousPosterior,
+    ) -> jax.Array:
+        """Compute the weighted expected conditional log likelihood."""
+        _batch.require_same(
+            self.batch_shape,
+            observations.batch_shape,
+        )
+
+        _batch.require_same(
+            self.batch_shape,
+            posterior.batch_shape,
+        )
+
+        if observations.num_steps != posterior.num_steps:
+            raise ValueError(
+                'posterior and observations must have the same number of timesteps'
+            )
+
+        potential = self.compute_potential(
+            observations,
+        )
+
+        means = observations.safe_aligned(
+            posterior.means,
+        )
+
+        second_moments = observations.safe_aligned(
+            posterior.raw_second_moments(),
+        )
+
+        terms = potential.expected_log_potential(
+            means,
+            second_moments,
+        )
+
+        return jnp.sum(
+            terms,
+            axis=-1,
+        )
 
     def compute_potential(
         self,
