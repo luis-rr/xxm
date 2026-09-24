@@ -613,6 +613,11 @@ class Dataset:
         if not bool(jnp.all(self.lengths == self.inputs.lengths)):
             raise ValueError('observations and inputs must share their lengths')
 
+        if self.mask.batch_shape != self.batch_shape:
+            raise ValueError('observation mask must share the dataset batch shape')
+        if self.mask.num_steps != self.num_steps:
+            raise ValueError('observation mask must share the dataset time dimension')
+
         self.mask.validate(self.observations.values)
 
         valid = self.valid().materialize(self.num_steps)
