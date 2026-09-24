@@ -1,7 +1,6 @@
 """Temporal masks with explicit batch semantics."""
 
 import dataclasses
-import math
 import operator
 import typing
 
@@ -84,12 +83,7 @@ class NoMask(typing.NamedTuple):
             raise ValueError('values must contain a time dimension')
 
     def flatten(self) -> typing.Self:
-        return type(self)(
-            values=self.values.reshape(
-                math.prod(self.batch_shape),
-                0,
-            )
-        )
+        return batch.flatten_batch(self, self.batch_shape)
 
     def apply(
         self,
@@ -191,10 +185,7 @@ class ArbitraryMask:
         """Replace masked entries, broadcasting over trailing event dimensions."""
         self.validate(values)
 
-        trailing_ndim = values.ndim - self.values.ndim
-        mask = self.values.reshape(
-            self.values.shape + (1,) * trailing_ndim,
-        )
+        mask = batch.expand_trailing(self.values, values.ndim)
 
         return jnp.where(
             mask,
@@ -220,12 +211,7 @@ class ArbitraryMask:
         return self
 
     def flatten(self) -> typing.Self:
-        return self._unchecked(
-            self.values.reshape(
-                math.prod(self.batch_shape),
-                self.num_steps,
-            )
-        )
+        return batch.flatten_batch(self, self.batch_shape)
 
     def materialize(self, num_steps: int) -> jax.Array:
         """Return this explicit mask, optionally checking the time dimension."""
@@ -237,41 +223,23 @@ class ArbitraryMask:
 
     def select(self, index: batch.SelT) -> typing.Self:
         """Select only batch axes, retaining the time axis."""
-        index = batch.selection(index, len(self.batch_shape))
-        return self._unchecked(self.values[index])
+        return batch.select(self, index)
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
         """Insert replicated batch dimensions at `axis`."""
-        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
-        return self._unchecked(
-            batch.broadcast_array(self.values, shape, axis),
-        )
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(self, axis=None) -> typing.Self:
         """Remove singleton batch dimensions."""
-        axes = batch.squeeze_axes(self.batch_shape, axis)
-        return self._unchecked(
-            jnp.squeeze(self.values, axis=axes),
-        )
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder entries along one batch axis."""
-        axis = batch.axis_index(axis, len(self.batch_shape))
-        permutation = batch.permutation_indices(
-            permutation,
-            self.batch_shape[axis],
-        )
-        return self._unchecked(
-            jnp.take(self.values, permutation, axis=axis),
-        )
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another batch position."""
-        source = batch.axis_index(source, len(self.batch_shape))
-        destination = batch.axis_index(destination, len(self.batch_shape))
-        return self._unchecked(
-            jnp.moveaxis(self.values, source, destination),
-        )
+        return batch.move_axis(self, source, destination)
 
 
 @jax.tree_util.register_pytree_node_class
@@ -365,46 +333,24 @@ class ContiguousMask:
         return self
 
     def flatten(self) -> typing.Self:
-        return self._unchecked(
-            self.lengths.reshape(
-                math.prod(self.batch_shape),
-            )
-        )
+        return batch.flatten_batch(self, self.batch_shape)
 
     def select(self, index: batch.SelT) -> typing.Self:
         """Select only batch axes."""
-        index = batch.selection(index, len(self.batch_shape))
-        return self._unchecked(self.lengths[index])
+        return batch.select(self, index)
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
         """Insert replicated batch dimensions at `axis`."""
-        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
-        return self._unchecked(
-            batch.broadcast_array(self.lengths, shape, axis),
-        )
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(self, axis=None) -> typing.Self:
         """Remove singleton batch dimensions."""
-        axes = batch.squeeze_axes(self.batch_shape, axis)
-        return self._unchecked(
-            jnp.squeeze(self.lengths, axis=axes),
-        )
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder entries along one batch axis."""
-        axis = batch.axis_index(axis, len(self.batch_shape))
-        permutation = batch.permutation_indices(
-            permutation,
-            self.batch_shape[axis],
-        )
-        return self._unchecked(
-            jnp.take(self.lengths, permutation, axis=axis),
-        )
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another batch position."""
-        source = batch.axis_index(source, len(self.batch_shape))
-        destination = batch.axis_index(destination, len(self.batch_shape))
-        return self._unchecked(
-            jnp.moveaxis(self.lengths, source, destination),
-        )
+        return batch.move_axis(self, source, destination)

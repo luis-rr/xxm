@@ -229,7 +229,7 @@ def test_batch_transformations_and_scalar_selection(make_chain, make_marginals):
             obj.select(None)
         with pytest.raises(ValueError):
             obj.move_axis(0, 2)
-    with pytest.raises(ValueError, match='batch shapes must match'):
+    with pytest.raises(ValueError, match='shapes must match'):
         marginals.expected_log_potential(chain.select(0))
 
 

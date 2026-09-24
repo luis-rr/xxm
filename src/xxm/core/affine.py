@@ -46,12 +46,7 @@ class Affine(typing.NamedTuple):
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another position."""
-        source = batch.axis_index(source, len(self.batch_shape))
-        destination = batch.axis_index(destination, len(self.batch_shape))
-        return self.__class__(
-            coefficients=jnp.moveaxis(self.coefficients, source, destination),
-            bias=jnp.moveaxis(self.bias, source, destination),
-        )
+        return batch.move_axis(self, source, destination)
 
     @property
     def input_shape(self) -> tuple[int, ...]:  # (I1, I2, ...)
@@ -181,11 +176,7 @@ class Affine(typing.NamedTuple):
 
     def select(self, index: batch.SelT) -> typing.Self:
         """Index only batch dimensions, retaining this object type."""
-        index = batch.selection(index, len(self.batch_shape))
-        return self.__class__(
-            coefficients=self.coefficients[index],
-            bias=self.bias[index],
-        )
+        return batch.select(self, index)
 
     def compose(
         self,
@@ -199,7 +190,7 @@ class Affine(typing.NamedTuple):
                 f'({inner.output_dim},)'
             )
 
-        batch.require_same(self.batch_shape, inner.batch_shape)
+        batch.require_same_shape(self.batch_shape, inner.batch_shape)
 
         coefficients = jnp.einsum(
             '...oi,...ij->...oj',
@@ -275,25 +266,12 @@ class Affine(typing.NamedTuple):
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
         """Insert replicated batch dimensions at `axis`."""
-        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
-        return self.__class__(
-            coefficients=batch.broadcast_array(self.coefficients, shape, axis),
-            bias=batch.broadcast_array(self.bias, shape, axis),
-        )
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(self, axis=None) -> typing.Self:
         """Remove singleton batch dimensions."""
-        axes = batch.squeeze_axes(self.batch_shape, axis)
-        return self.__class__(
-            coefficients=jnp.squeeze(self.coefficients, axis=axes),
-            bias=jnp.squeeze(self.bias, axis=axes),
-        )
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder entries along a batch axis."""
-        axis = batch.axis_index(axis, len(self.batch_shape))
-        permutation = batch.permutation_indices(permutation, self.batch_shape[axis])
-        return self.__class__(
-            coefficients=jnp.take(self.coefficients, permutation, axis=axis),
-            bias=jnp.take(self.bias, permutation, axis=axis),
-        )
+        return batch.permute(self, permutation, axis=axis)

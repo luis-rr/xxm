@@ -535,35 +535,20 @@ class HermiteSpline:
 
     def select(self, index: batch.SelT) -> typing.Self:
         """Index only batch dimensions, retaining this object type."""
-        return dataclasses.replace(
-            self,
-            coefficient_prior=self.coefficient_prior.select(index),
-        )
+        return batch.select(self, index)
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
         """Insert replicated batch dimensions at axis."""
-        return dataclasses.replace(
-            self,
-            coefficient_prior=self.coefficient_prior.broadcast(shape, axis=axis),
-        )
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(self, axis=None) -> typing.Self:
         """Remove singleton batch dimensions."""
-        return dataclasses.replace(
-            self,
-            coefficient_prior=self.coefficient_prior.squeeze(axis=axis),
-        )
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder entries along a batch axis."""
-        return dataclasses.replace(
-            self,
-            coefficient_prior=self.coefficient_prior.permute(permutation, axis=axis),
-        )
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another position."""
-        return dataclasses.replace(
-            self,
-            coefficient_prior=self.coefficient_prior.move_axis(source, destination),
-        )
+        return batch.move_axis(self, source, destination)

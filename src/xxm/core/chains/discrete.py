@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 import typing
 
 import jax
@@ -34,40 +33,23 @@ class DiscretePotential(typing.NamedTuple):
 
     def select(self, index: batch.SelT) -> typing.Self:
         """Index only batch dimensions, retaining this object type."""
-        index = batch.selection(index, len(self.batch_shape))
-        return self.__class__(
-            log_values=self.log_values[index],
-        )
+        return batch.select(self, index)
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
         """Insert replicated batch dimensions at `axis`."""
-        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
-        return self.__class__(
-            log_values=batch.broadcast_array(self.log_values, shape, axis),
-        )
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(self, axis=None) -> typing.Self:
         """Remove singleton batch dimensions."""
-        axes = batch.squeeze_axes(self.batch_shape, axis)
-        return self.__class__(
-            log_values=jnp.squeeze(self.log_values, axis=axes),
-        )
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder entries along a batch axis."""
-        axis = batch.axis_index(axis, len(self.batch_shape))
-        permutation = batch.permutation_indices(permutation, self.batch_shape[axis])
-        return self.__class__(
-            log_values=jnp.take(self.log_values, permutation, axis=axis),
-        )
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another position."""
-        source = batch.axis_index(source, len(self.batch_shape))
-        destination = batch.axis_index(destination, len(self.batch_shape))
-        return self.__class__(
-            log_values=jnp.moveaxis(self.log_values, source, destination),
-        )
+        return batch.move_axis(self, source, destination)
 
 
 class DiscreteChain(typing.NamedTuple):
@@ -138,84 +120,43 @@ class DiscreteChain(typing.NamedTuple):
         """Infer each chain independently, preserving the batch prefix."""
         if self.num_steps < 1:
             raise ValueError('Discrete chain inference requires at least one time step')
-        batch = self.batch_shape
+        batch_shape = self.batch_shape
         t, k = self.num_steps, self.num_states
-        if self.transition_probs.shape != batch + (
+        if self.transition_probs.shape != batch_shape + (
             t - 1,
             k,
             k,
-        ) or self.state_log_potentials.shape != batch + (t, k):
+        ) or self.state_log_potentials.shape != batch_shape + (t, k):
             raise ValueError(
                 'Discrete chain fields must have aligned batch, time, and state dimensions'
             )
-        if not batch:
+        if not batch_shape:
             return _forward_backward(self).compute_marginals(self)
-        n, t, k = math.prod(batch), self.num_steps, self.num_states
-        flat = DiscreteChain(
-            initial_probs=self.initial_probs.reshape(n, k),
-            transition_probs=self.transition_probs.reshape(n, t - 1, k, k),
-            state_log_potentials=self.state_log_potentials.reshape(n, t, k),
+        return batch.vmap_batch(
+            lambda chain: _forward_backward(chain).compute_marginals(chain),
+            self,
+            batch_shape=self.batch_shape,
         )
-        posterior, log_normalizer = jax.vmap(
-            lambda chain: _forward_backward(chain).compute_marginals(chain)
-        )(flat)
-        return DiscreteChainMarginals(
-            state_probs=posterior.state_probs.reshape(batch + (t, k)),
-            pair_probs=posterior.pair_probs.reshape(batch + (t - 1, k, k)),
-        ), log_normalizer.reshape(batch)
 
     def select(self, index: batch.SelT) -> typing.Self:
         """Index only batch dimensions, retaining this object type."""
-        index = batch.selection(index, len(self.batch_shape))
-        return self.__class__(
-            initial_probs=self.initial_probs[index],
-            transition_probs=self.transition_probs[index],
-            state_log_potentials=self.state_log_potentials[index],
-        )
+        return batch.select(self, index)
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
         """Insert replicated batch dimensions at `axis`."""
-        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
-        return self.__class__(
-            initial_probs=batch.broadcast_array(self.initial_probs, shape, axis),
-            transition_probs=batch.broadcast_array(self.transition_probs, shape, axis),
-            state_log_potentials=batch.broadcast_array(
-                self.state_log_potentials, shape, axis
-            ),
-        )
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(self, axis=None) -> typing.Self:
         """Remove singleton batch dimensions."""
-        axes = batch.squeeze_axes(self.batch_shape, axis)
-        return self.__class__(
-            initial_probs=jnp.squeeze(self.initial_probs, axis=axes),
-            transition_probs=jnp.squeeze(self.transition_probs, axis=axes),
-            state_log_potentials=jnp.squeeze(self.state_log_potentials, axis=axes),
-        )
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder entries along a batch axis."""
-        axis = batch.axis_index(axis, len(self.batch_shape))
-        permutation = batch.permutation_indices(permutation, self.batch_shape[axis])
-        return self.__class__(
-            initial_probs=jnp.take(self.initial_probs, permutation, axis=axis),
-            transition_probs=jnp.take(self.transition_probs, permutation, axis=axis),
-            state_log_potentials=jnp.take(
-                self.state_log_potentials, permutation, axis=axis
-            ),
-        )
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another position."""
-        source = batch.axis_index(source, len(self.batch_shape))
-        destination = batch.axis_index(destination, len(self.batch_shape))
-        return self.__class__(
-            initial_probs=jnp.moveaxis(self.initial_probs, source, destination),
-            transition_probs=jnp.moveaxis(self.transition_probs, source, destination),
-            state_log_potentials=jnp.moveaxis(
-                self.state_log_potentials, source, destination
-            ),
-        )
+        return batch.move_axis(self, source, destination)
 
     def add_local_potential(
         self,
@@ -272,45 +213,23 @@ class DiscreteChainMarginals(typing.NamedTuple):
 
     def select(self, index: batch.SelT) -> typing.Self:
         """Index only batch dimensions, retaining this object type."""
-        index = batch.selection(index, len(self.batch_shape))
-        return self.__class__(
-            state_probs=self.state_probs[index],
-            pair_probs=self.pair_probs[index],
-        )
+        return batch.select(self, index)
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
         """Insert replicated batch dimensions at `axis`."""
-        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
-        return self.__class__(
-            state_probs=batch.broadcast_array(self.state_probs, shape, axis),
-            pair_probs=batch.broadcast_array(self.pair_probs, shape, axis),
-        )
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(self, axis=None) -> typing.Self:
         """Remove singleton batch dimensions."""
-        axes = batch.squeeze_axes(self.batch_shape, axis)
-        return self.__class__(
-            state_probs=jnp.squeeze(self.state_probs, axis=axes),
-            pair_probs=jnp.squeeze(self.pair_probs, axis=axes),
-        )
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder entries along a batch axis."""
-        axis = batch.axis_index(axis, len(self.batch_shape))
-        permutation = batch.permutation_indices(permutation, self.batch_shape[axis])
-        return self.__class__(
-            state_probs=jnp.take(self.state_probs, permutation, axis=axis),
-            pair_probs=jnp.take(self.pair_probs, permutation, axis=axis),
-        )
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another position."""
-        source = batch.axis_index(source, len(self.batch_shape))
-        destination = batch.axis_index(destination, len(self.batch_shape))
-        return self.__class__(
-            state_probs=jnp.moveaxis(self.state_probs, source, destination),
-            pair_probs=jnp.moveaxis(self.pair_probs, source, destination),
-        )
+        return batch.move_axis(self, source, destination)
 
     def incoming_state_probs(
         self,
@@ -355,7 +274,7 @@ class DiscreteChainMarginals(typing.NamedTuple):
     ) -> jax.Array:
         r"""Expected chain log potential $\mathbb{E}_q[\log f(z)]$."""
 
-        batch.require_same(self.batch_shape, chain.batch_shape)
+        batch.require_same_shape(self.batch_shape, chain.batch_shape)
         if self.state_probs.shape != chain.state_log_potentials.shape:
             raise ValueError('chain and posterior time/state dimensions must match')
         expected_initial = jnp.sum(

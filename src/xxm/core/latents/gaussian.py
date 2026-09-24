@@ -24,19 +24,19 @@ class GaussianInitial(typing.NamedTuple):
         return self.dist.batch_shape
 
     def select(self, index: batch.SelT) -> typing.Self:
-        return self._replace(dist=self.dist.select(index))
+        return batch.select(self, index)
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
-        return self._replace(dist=self.dist.broadcast(shape, axis=axis))
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(self, axis=None) -> typing.Self:
-        return self._replace(dist=self.dist.squeeze(axis))
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
-        return self._replace(dist=self.dist.permute(permutation, axis=axis))
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
-        return self._replace(dist=self.dist.move_axis(source, destination))
+        return batch.move_axis(self, source, destination)
 
     def fit_params(
         self,
@@ -52,17 +52,13 @@ class GaussianInitial(typing.NamedTuple):
         distribution. ``weights`` contains one validity weight per latent state.
         """
         posterior_batch = posterior.batch_shape
-        batch_ndim = len(self.batch_shape)
-
-        if posterior_batch[:batch_ndim] != self.batch_shape:
-            raise ValueError(
-                'posterior batch must begin with the initial-distribution batch shape'
-            )
+        replicate_shape = batch.split_prefix(
+            posterior_batch, self.batch_shape, name='posterior batch shape'
+        )
 
         if weights.shape != posterior.means.shape[:-1]:
             raise ValueError('weights must match posterior batch and time dimensions')
 
-        replicate_shape = posterior_batch[batch_ndim:]
         initial_marginals, initial_weights = batch.pool_samples(
             (
                 Gaussian(
@@ -112,7 +108,7 @@ class GaussianInitial(typing.NamedTuple):
         r"""
         Express the initial distribution in coordinates $x' = f(x)$ defined by `alignment`.
         """
-        batch.require_same(
+        batch.require_same_shape(
             alignment.batch_shape,
             self.batch_shape,
         )
@@ -165,19 +161,19 @@ class GaussianLinearDynamics(typing.NamedTuple):
         return self.dist.batch_shape
 
     def select(self, index: batch.SelT) -> typing.Self:
-        return type(self)(self.dist.select(index))
+        return batch.select(self, index)
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
-        return type(self)(self.dist.broadcast(shape, axis=axis))
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(self, axis=None) -> typing.Self:
-        return type(self)(self.dist.squeeze(axis))
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
-        return type(self)(self.dist.permute(permutation, axis=axis))
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
-        return type(self)(self.dist.move_axis(source, destination))
+        return batch.move_axis(self, source, destination)
 
     @property
     def latent_dim(self) -> int:
@@ -257,10 +253,9 @@ class GaussianLinearDynamics(typing.NamedTuple):
         contain one entry per transition.
         """
         posterior_batch = posterior.batch_shape
-        batch_ndim = len(self.batch_shape)
-
-        if posterior_batch[:batch_ndim] != self.batch_shape:
-            raise ValueError('posterior batch must begin with the dynamics batch shape')
+        replicate_shape = batch.split_prefix(
+            posterior_batch, self.batch_shape, name='posterior batch shape'
+        )
 
         num_transitions = posterior.num_steps - 1
         expected_inputs_shape = (
@@ -292,7 +287,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
             ),
         )
 
-        sample_shape = (*posterior_batch[batch_ndim:], num_transitions)
+        sample_shape = (*replicate_shape, num_transitions)
         if 0 in sample_shape:
             return self
 
@@ -490,7 +485,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
 
         External input coordinates are unchanged.
         """
-        batch.require_same(
+        batch.require_same_shape(
             alignment.batch_shape,
             self.batch_shape,
         )
@@ -596,28 +591,19 @@ class StateConditionedGaussian(typing.NamedTuple):
         return self.dist.batch_shape[:-1]
 
     def select(self, index: batch.SelT) -> typing.Self:
-        index = batch.selection(index, len(self.batch_shape))
-        return self._replace(dist=self.dist.select(index + (slice(None),)))
+        return batch.select(self, index)
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
-        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
-        return self._replace(dist=self.dist.broadcast(shape, axis=axis))
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(self, axis=None) -> typing.Self:
-        axes = batch.squeeze_axes(self.batch_shape, axis)
-        return self._replace(dist=self.dist.squeeze(axes))
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
-        axis = batch.axis_index(axis, len(self.batch_shape))
-        return self._replace(dist=self.dist.permute(permutation, axis=axis))
-
-        return self._replace(dist=self.dist.permute(permutation, axis=axis))
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
-        source = batch.axis_index(source, len(self.batch_shape))
-        destination = batch.axis_index(destination, len(self.batch_shape))
-
-        return self._replace(dist=self.dist.move_axis(source, destination))
+        return batch.move_axis(self, source, destination)
 
     @property
     def num_states(self) -> int:
@@ -652,7 +638,7 @@ class StateConditionedGaussian(typing.NamedTuple):
 
     def align(self, alignment: Affine) -> typing.Self:
         """Express the conditional distributions in coordinates $x' = f(x)$."""
-        batch.require_same(
+        batch.require_same_shape(
             alignment.batch_shape,
             self.batch_shape,
         )

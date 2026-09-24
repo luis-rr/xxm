@@ -196,38 +196,23 @@ class GaussianRandomWalk(typing.NamedTuple):
 
     def select(self, index: batch.SelT) -> typing.Self:
         """Index only batch dimensions, retaining this object type."""
-        return self._replace(
-            initial=self.initial.select(index),
-            innovation=self.innovation.select(index),
-        )
+        return batch.select(self, index)
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
         """Insert replicated batch dimensions at axis."""
-        return self._replace(
-            initial=self.initial.broadcast(shape, axis=axis),
-            innovation=self.innovation.broadcast(shape, axis=axis),
-        )
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(self, axis=None) -> typing.Self:
         """Remove singleton batch dimensions."""
-        return self._replace(
-            initial=self.initial.squeeze(axis=axis),
-            innovation=self.innovation.squeeze(axis=axis),
-        )
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder entries along a batch axis."""
-        return self._replace(
-            initial=self.initial.permute(permutation, axis=axis),
-            innovation=self.innovation.permute(permutation, axis=axis),
-        )
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another position."""
-        return self._replace(
-            initial=self.initial.move_axis(source, destination),
-            innovation=self.innovation.move_axis(source, destination),
-        )
+        return batch.move_axis(self, source, destination)
 
 
 class GatedGaussianRandomWalk(typing.NamedTuple):
@@ -509,16 +494,7 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
         index,
     ) -> typing.Self:
         """Index only structural batch dimensions, preserving gates."""
-        index = batch.selection(
-            index,
-            len(self.batch_shape),
-        ) + (slice(None),)
-
-        return self._replace(
-            initial=self.initial.select(index),
-            active_innovation=(self.active_innovation.select(index)),
-            inactive_innovation=(self.inactive_innovation.select(index)),
-        )
+        return batch.select(self, index)
 
     def broadcast(
         self,
@@ -526,33 +502,14 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
         axis: int = 0,
     ) -> typing.Self:
         """Insert replicated structural batch dimensions before gates."""
-        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
-
-        return self._replace(
-            initial=self.initial.broadcast(shape, axis=axis),
-            active_innovation=(self.active_innovation.broadcast(shape, axis=axis)),
-            inactive_innovation=(self.inactive_innovation.broadcast(shape, axis=axis)),
-        )
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(
         self,
         axis=None,
     ) -> typing.Self:
         """Remove singleton structural batch dimensions, preserving gates."""
-        axes = batch.squeeze_axes(self.batch_shape, axis)
-
-        if not axes:
-            return self
-
-        return self._replace(
-            initial=self.initial.squeeze(axis=axes),
-            active_innovation=(
-                self.active_innovation.squeeze(
-                    axis=axes,
-                )
-            ),
-            inactive_innovation=(self.inactive_innovation.squeeze(axis=axes)),
-        )
+        return batch.squeeze(self, axis=axis)
 
     def permute(
         self,
@@ -560,35 +517,11 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
         axis: int = 0,
     ) -> typing.Self:
         """Reorder entries along a structural batch axis."""
-        axis = batch.axis_index(axis, len(self.batch_shape))
-
-        return self._replace(
-            initial=self.initial.permute(permutation, axis=axis),
-            active_innovation=(self.active_innovation.permute(permutation, axis=axis)),
-            inactive_innovation=(
-                self.inactive_innovation.permute(permutation, axis=axis)
-            ),
-        )
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one structural batch axis, preserving the final gate axis."""
-        source = batch.axis_index(
-            source,
-            len(self.batch_shape),
-        )
-
-        destination = batch.axis_index(
-            destination,
-            len(self.batch_shape),
-        )
-
-        return self._replace(
-            initial=self.initial.move_axis(source, destination),
-            active_innovation=(self.active_innovation.move_axis(source, destination)),
-            inactive_innovation=(
-                self.inactive_innovation.move_axis(source, destination)
-            ),
-        )
+        return batch.move_axis(self, source, destination)
 
     def permute_gates(
         self,

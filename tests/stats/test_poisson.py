@@ -312,6 +312,38 @@ def test_weighted_poisson_fit_supports_multi_axis_batches():
         np.testing.assert_allclose(fit.log_rates[index], expected.log_rates, atol=ATOL)
 
 
+@pytest.mark.parametrize('warm_start', [False, True])
+def test_linear_marginal_fit_preserves_multi_axis_batch(warm_start):
+    inputs = Gaussian(
+        mean=jnp.array([[-1.0], [0.0], [1.0]]),
+        covariance=jnp.full((3, 1, 1), 0.1),
+    )
+    outputs = jnp.array([[1.0], [2.0], [4.0]])
+    weights = jnp.arange(1.0, 13.0).reshape(2, 2, 3)
+    initial = (
+        Affine(jnp.zeros((2, 2, 1, 1)), jnp.zeros((2, 2, 1))) if warm_start else None
+    )
+    fitted = poisson_fit.linear_from_marginals(
+        inputs, outputs, weights, initial, max_iter=3, ridge=0.1
+    )
+    assert fitted.batch_shape == (2, 2)
+    for index in np.ndindex((2, 2)):
+        expected = poisson_fit.linear_from_marginals(
+            inputs,
+            outputs,
+            weights[index],
+            None if initial is None else initial.select(index),
+            max_iter=3,
+            ridge=0.1,
+        )
+        np.testing.assert_allclose(
+            fitted.affine.coefficients[index], expected.affine.coefficients, atol=ATOL
+        )
+        np.testing.assert_allclose(
+            fitted.affine.bias[index], expected.affine.bias, atol=ATOL
+        )
+
+
 def test_fit_linear_preserves_structured_input_shape():
     inputs = jnp.array(
         [

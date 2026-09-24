@@ -243,10 +243,10 @@ def test_discrete_latent_fit_and_sampling():
 def test_discrete_latent_fit_requires_matching_posterior_batch():
     posterior = _discrete_posterior(batch=(4,), num_steps=2)
 
-    with pytest.raises(ValueError, match='batch shapes must match'):
+    with pytest.raises(ValueError, match='shapes must match'):
         CategoricalInitial(_categorical(B)).fit_params(posterior)
 
-    with pytest.raises(ValueError, match='batch shapes must match'):
+    with pytest.raises(ValueError, match='shapes must match'):
         CategoricalTransitions(_categorical(B + (K,))).fit_params(posterior)
 
     matched = _discrete_posterior(batch=B, num_steps=2)
@@ -286,10 +286,10 @@ def test_gaussian_latent_sampling_and_potentials(kind, component):
 def test_gaussian_latent_fit_requires_receiver_batch_prefix():
     posterior = _continuous_posterior(batch=(4,), num_steps=2)
 
-    with pytest.raises(ValueError, match='posterior batch must begin with'):
+    with pytest.raises(ValueError, match='posterior batch shape must begin with'):
         GaussianInitial(_gaussian(B)).fit_params(posterior, weights=jnp.ones((4, 2)))
 
-    with pytest.raises(ValueError, match='posterior batch must begin with'):
+    with pytest.raises(ValueError, match='posterior batch shape must begin with'):
         GaussianLinearDynamics(_linear(B)).fit_params(
             posterior,
             inputs=jnp.empty((4, 1, 0), dtype=posterior.means.dtype),
@@ -483,7 +483,7 @@ def test_alignment_matches_standalone_components(kind, component, global_alignme
     )
     def test_batched_alignment_requires_explicit_alignment_batch(kind, component):
         alignment = Affine(jnp.eye(D), jnp.zeros(D))
-        with pytest.raises(ValueError, match='batch shapes must match'):
+        with pytest.raises(ValueError, match='shapes must match'):
             if kind.startswith('continuous_'):
                 component.compose_input(alignment)
             else:

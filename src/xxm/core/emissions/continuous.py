@@ -149,15 +149,12 @@ def _flatten_fit_data(
     dimensions are independent replicates and are pooled together with time.
     """
     observation_batch = observations.batch_shape
-    batch_ndim = len(batch_shape)
-
-    if observation_batch[:batch_ndim] != batch_shape:
-        raise ValueError(
-            'observation batch must begin with the emission parameter batch shape'
-        )
+    replicate_shape = batch.split_prefix(
+        observation_batch, batch_shape, name='observation batch shape'
+    )
 
     posterior_batch = posterior.batch_shape
-    batch.require_same(
+    batch.require_same_shape(
         observation_batch,
         posterior_batch,
     )
@@ -175,7 +172,7 @@ def _flatten_fit_data(
             posterior.covariances,
         ),
         batch_shape,
-        (*observation_batch[batch_ndim:], observations.num_steps),
+        (*replicate_shape, observations.num_steps),
     )
 
 
@@ -195,19 +192,19 @@ class GaussianEmissions(typing.NamedTuple):
         return self.dist.batch_shape
 
     def select(self, index: batch.SelT) -> typing.Self:
-        return self._replace(dist=self.dist.select(index))
+        return batch.select(self, index)
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
-        return self._replace(dist=self.dist.broadcast(shape, axis=axis))
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(self, axis=None) -> typing.Self:
-        return self._replace(dist=self.dist.squeeze(axis))
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
-        return self._replace(dist=self.dist.permute(permutation, axis=axis))
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
-        return self._replace(dist=self.dist.move_axis(source, destination))
+        return batch.move_axis(self, source, destination)
 
     def conditional(
         self,
@@ -222,7 +219,7 @@ class GaussianEmissions(typing.NamedTuple):
         latents: jax.Array,
     ) -> jax.Array:
         """Compute the weighted conditional log likelihood."""
-        batch.require_same(self.batch_shape, observations.batch_shape)
+        batch.require_same_shape(self.batch_shape, observations.batch_shape)
 
         latents = observations.safe_aligned(latents)
         log_probs = self.conditional(latents).log_prob(observations.safe_values())
@@ -235,7 +232,7 @@ class GaussianEmissions(typing.NamedTuple):
         posterior: ContinuousPosterior,
     ) -> jax.Array:
         """Compute the weighted expected conditional log likelihood."""
-        batch.require_same(
+        batch.require_same_shape(
             self.batch_shape,
             observations.batch_shape,
             posterior.batch_shape,
@@ -273,7 +270,7 @@ class GaussianEmissions(typing.NamedTuple):
         observations: WeightedObservations,
     ) -> GaussianPotential:
         """Construct exact weighted Gaussian likelihood potentials."""
-        batch.require_same(self.batch_shape, observations.batch_shape)
+        batch.require_same_shape(self.batch_shape, observations.batch_shape)
 
         potential = GaussianPotential.from_linear_likelihood(
             self.dist,
@@ -346,7 +343,7 @@ class GaussianEmissions(typing.NamedTuple):
 
     def observation_mean(self, posterior: ContinuousPosterior) -> jax.Array:
         """Expected observations under posterior marginals."""
-        batch.require_same(self.batch_shape, posterior.batch_shape)
+        batch.require_same_shape(self.batch_shape, posterior.batch_shape)
 
         return self.dist.conditional_mean(
             posterior.means,
@@ -357,7 +354,7 @@ class GaussianEmissions(typing.NamedTuple):
         alignment: Affine,
     ) -> typing.Self:
         """Express the emissions in aligned latent coordinates."""
-        batch.require_same(
+        batch.require_same_shape(
             alignment.batch_shape,
             self.batch_shape,
         )
@@ -418,19 +415,19 @@ class PoissonEmissions(typing.NamedTuple):
         return self.dist.batch_shape
 
     def select(self, index: batch.SelT) -> typing.Self:
-        return self._replace(dist=self.dist.select(index))
+        return batch.select(self, index)
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
-        return self._replace(dist=self.dist.broadcast(shape, axis=axis))
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(self, axis=None) -> typing.Self:
-        return self._replace(dist=self.dist.squeeze(axis))
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
-        return self._replace(dist=self.dist.permute(permutation, axis=axis))
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
-        return self._replace(dist=self.dist.move_axis(source, destination))
+        return batch.move_axis(self, source, destination)
 
     def conditional(
         self,
@@ -452,7 +449,7 @@ class PoissonEmissions(typing.NamedTuple):
         latents: jax.Array,
     ) -> jax.Array:
         """Compute the weighted conditional log likelihood."""
-        batch.require_same(
+        batch.require_same_shape(
             self.batch_shape,
             observations.batch_shape,
         )
@@ -468,7 +465,7 @@ class PoissonEmissions(typing.NamedTuple):
         posterior: ContinuousPosterior,
     ) -> jax.Array:
         """Compute the weighted expected conditional log likelihood."""
-        batch.require_same(
+        batch.require_same_shape(
             self.batch_shape,
             observations.batch_shape,
             posterior.batch_shape,
@@ -498,7 +495,7 @@ class PoissonEmissions(typing.NamedTuple):
         latents: jax.Array,
     ) -> GaussianPotential:
         """Construct a weighted quadratic approximation around `latents`."""
-        batch.require_same(
+        batch.require_same_shape(
             self.batch_shape,
             observations.batch_shape,
         )
@@ -602,7 +599,7 @@ class PoissonEmissions(typing.NamedTuple):
 
     def observation_mean(self, posterior: ContinuousPosterior) -> jax.Array:
         """Compute expected observations under posterior latent marginals."""
-        batch.require_same(
+        batch.require_same_shape(
             self.batch_shape,
             posterior.batch_shape,
         )
@@ -626,7 +623,7 @@ class PoissonEmissions(typing.NamedTuple):
         alignment: Affine,
     ) -> typing.Self:
         """Express the emissions in aligned latent coordinates."""
-        batch.require_same(
+        batch.require_same_shape(
             alignment.batch_shape,
             self.batch_shape,
         )

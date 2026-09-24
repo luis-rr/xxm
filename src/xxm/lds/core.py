@@ -36,7 +36,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     def batch_shape(self) -> tuple[int, ...]:
         """Common structural batch of all top-level components."""
         batch_shape = self.initial.batch_shape
-        batch.require_same(
+        batch.require_same_shape(
             batch_shape,
             self.dynamics.batch_shape,
             self.emissions.batch_shape,
@@ -45,50 +45,23 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
     def select(self, index: batch.SelT) -> typing.Self:
         """Select independent models along their batch dimensions."""
-        index = batch.selection(index, len(self.batch_shape))
-        return self.__class__(
-            self.initial.select(index),
-            self.dynamics.select(index),
-            self.emissions.select(index),
-        )
+        return batch.select(self, index)
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
         """Insert replicated model batch dimensions."""
-        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
-        return self.__class__(
-            self.initial.broadcast(shape, axis),
-            self.dynamics.broadcast(shape, axis),
-            self.emissions.broadcast(shape, axis),
-        )
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(self, axis=None) -> typing.Self:
         """Remove singleton model batch dimensions."""
-        axes = batch.squeeze_axes(self.batch_shape, axis)
-        return self.__class__(
-            self.initial.squeeze(axes),
-            self.dynamics.squeeze(axes),
-            self.emissions.squeeze(axes),
-        )
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder independent models along one batch axis."""
-        axis = batch.axis_index(axis, len(self.batch_shape))
-        permutation = batch.permutation_indices(permutation, self.batch_shape[axis])
-        return self.__class__(
-            self.initial.permute(permutation, axis),
-            self.dynamics.permute(permutation, axis),
-            self.emissions.permute(permutation, axis),
-        )
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one model batch axis to another batch position."""
-        source = batch.axis_index(source, len(self.batch_shape))
-        destination = batch.axis_index(destination, len(self.batch_shape))
-        return self.__class__(
-            self.initial.move_axis(source, destination),
-            self.dynamics.move_axis(source, destination),
-            self.emissions.move_axis(source, destination),
-        )
+        return batch.move_axis(self, source, destination)
 
     def compute_initial_potential(self) -> GaussianPotential:
         """Return the canonical potential for the initial latent distribution."""

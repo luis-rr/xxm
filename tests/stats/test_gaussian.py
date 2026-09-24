@@ -259,7 +259,7 @@ def test_linear_gaussian_conditional_broadcasts_covariance():
         jnp.broadcast_to(model.covariance[:, None], conditional.covariance.shape),
         atol=ATOL,
     )
-    with pytest.raises(ValueError, match='expected batch prefix'):
+    with pytest.raises(ValueError, match='target shape must begin with'):
         model.conditional(jnp.swapaxes(inputs, 0, 1))
 
 

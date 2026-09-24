@@ -34,10 +34,7 @@ class Poisson(typing.NamedTuple):
 
     def select(self, index: batch.SelT) -> typing.Self:
         """Index only batch dimensions, retaining this object type."""
-        index = batch.selection(index, len(self.batch_shape))
-        return self.__class__(
-            log_rates=self.log_rates[index],
-        )
+        return batch.select(self, index)
 
     def astype(self, dtype: jax.typing.DTypeLike) -> 'Poisson':
         """Convert to a different data type."""
@@ -97,33 +94,19 @@ class Poisson(typing.NamedTuple):
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
         """Insert replicated batch dimensions at `axis`."""
-        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
-        return self.__class__(
-            log_rates=batch.broadcast_array(self.log_rates, shape, axis),
-        )
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(self, axis=None) -> typing.Self:
         """Remove singleton batch dimensions."""
-        axes = batch.squeeze_axes(self.batch_shape, axis)
-        return self.__class__(
-            log_rates=jnp.squeeze(self.log_rates, axis=axes),
-        )
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder entries along a batch axis."""
-        axis = batch.axis_index(axis, len(self.batch_shape))
-        permutation = batch.permutation_indices(permutation, self.batch_shape[axis])
-        return self.__class__(
-            log_rates=jnp.take(self.log_rates, permutation, axis=axis),
-        )
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another position."""
-        source = batch.axis_index(source, len(self.batch_shape))
-        destination = batch.axis_index(destination, len(self.batch_shape))
-        return self.__class__(
-            log_rates=jnp.moveaxis(self.log_rates, source, destination),
-        )
+        return batch.move_axis(self, source, destination)
 
 
 class LinearPoisson(typing.NamedTuple):
@@ -179,10 +162,7 @@ class LinearPoisson(typing.NamedTuple):
 
     def select(self, index: batch.SelT) -> typing.Self:
         """Index only batch dimensions, retaining this object type."""
-        index = batch.selection(index, len(self.batch_shape))
-        return self.__class__(
-            affine=self.affine.select(index),
-        )
+        return batch.select(self, index)
 
     def astype(self, dtype: jax.typing.DTypeLike) -> typing.Self:
         """Convert to a different data type."""
@@ -234,7 +214,7 @@ class LinearPoisson(typing.NamedTuple):
         )
 
         if weights is not None:
-            batch.require_same(weights.shape, log_probs.shape[:-1])
+            batch.require_same_shape(weights.shape, log_probs.shape[:-1])
             log_probs = weights[..., None] * log_probs
 
         return jnp.sum(log_probs, axis=-1)
@@ -250,30 +230,16 @@ class LinearPoisson(typing.NamedTuple):
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
         """Insert replicated batch dimensions at `axis`."""
-        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
-        return self.__class__(
-            affine=self.affine.broadcast(shape, axis=axis),
-        )
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(self, axis=None) -> typing.Self:
         """Remove singleton batch dimensions."""
-        axes = batch.squeeze_axes(self.batch_shape, axis)
-        return self.__class__(
-            affine=self.affine.squeeze(axes),
-        )
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder entries along a batch axis."""
-        axis = batch.axis_index(axis, len(self.batch_shape))
-        permutation = batch.permutation_indices(permutation, self.batch_shape[axis])
-        return self.__class__(
-            affine=self.affine.permute(permutation, axis=axis),
-        )
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another position."""
-        source = batch.axis_index(source, len(self.batch_shape))
-        destination = batch.axis_index(destination, len(self.batch_shape))
-        return self.__class__(
-            affine=self.affine.move_axis(source, destination),
-        )
+        return batch.move_axis(self, source, destination)

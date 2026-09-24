@@ -31,10 +31,7 @@ class Categorical(typing.NamedTuple):
 
     def select(self, index: batch.SelT) -> typing.Self:
         """Index only batch dimensions, retaining this object type."""
-        index = batch.selection(index, len(self.batch_shape))
-        return self.__class__(
-            probs=self.probs[index],
-        )
+        return batch.select(self, index)
 
     def permute_categories(
         self,
@@ -47,10 +44,7 @@ class Categorical(typing.NamedTuple):
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
         """Insert replicated batch dimensions at `axis`."""
-        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
-        return self.__class__(
-            probs=batch.broadcast_array(self.probs, shape, axis),
-        )
+        return batch.broadcast(self, shape, axis=axis)
 
     def astype(
         self,
@@ -77,23 +71,12 @@ class Categorical(typing.NamedTuple):
 
     def squeeze(self, axis=None) -> typing.Self:
         """Remove singleton batch dimensions."""
-        axes = batch.squeeze_axes(self.batch_shape, axis)
-        return self.__class__(
-            probs=jnp.squeeze(self.probs, axis=axes),
-        )
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder entries along a batch axis."""
-        axis = batch.axis_index(axis, len(self.batch_shape))
-        permutation = batch.permutation_indices(permutation, self.batch_shape[axis])
-        return self.__class__(
-            probs=jnp.take(self.probs, permutation, axis=axis),
-        )
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another position."""
-        source = batch.axis_index(source, len(self.batch_shape))
-        destination = batch.axis_index(destination, len(self.batch_shape))
-        return self.__class__(
-            probs=jnp.moveaxis(self.probs, source, destination),
-        )
+        return batch.move_axis(self, source, destination)

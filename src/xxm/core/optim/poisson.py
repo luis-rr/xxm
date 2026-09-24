@@ -1,11 +1,11 @@
 """Poisson parameter fitting routines."""
 
-import math
 import typing
 
 import jax
 import jax.numpy as jnp
 
+from xxm.core import batch
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
@@ -573,18 +573,12 @@ def _linear_from_batched_marginals(
         initial_affine=initial_affine,
     )
 
-    flat_size = math.prod(batch_shape)
-    flat_weights = weights.reshape((flat_size, weights.shape[-1]))
-    flat_initial = None
-    if initial_affine is not None:
-        flat_initial = initial_affine._replace(
-            coefficients=initial_affine.coefficients.reshape(
-                (flat_size,) + initial_affine.coefficients.shape[len(batch_shape) :]
-            ),
-            bias=initial_affine.bias.reshape(
-                (flat_size,) + initial_affine.bias.shape[len(batch_shape) :]
-            ),
-        )
+    flat_weights = batch.flatten_batch(weights, batch_shape)
+    flat_initial = (
+        None
+        if initial_affine is None
+        else batch.flatten_batch(initial_affine, batch_shape)
+    )
 
     def fit_one(
         sample_weights: jax.Array,
@@ -609,14 +603,7 @@ def _linear_from_batched_marginals(
     else:
         fitted = jax.vmap(fit_one)(flat_weights, flat_initial)
 
-    return fitted._replace(
-        affine=fitted.affine._replace(
-            coefficients=fitted.affine.coefficients.reshape(
-                batch_shape + fitted.affine.coefficients.shape[1:]
-            ),
-            bias=fitted.affine.bias.reshape(batch_shape + fitted.affine.bias.shape[1:]),
-        )
-    )
+    return batch.unflatten_batch(fitted, batch_shape)
 
 
 def linear_from_marginals(

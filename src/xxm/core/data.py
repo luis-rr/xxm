@@ -44,7 +44,7 @@ class WeightedObservations(typing.NamedTuple):
         values_shape = self.values.shape[:-2]
         weights_shape = self.weights.shape[:-1]
 
-        assert values_shape == weights_shape
+        batch.require_same_shape(values_shape, weights_shape)
 
         return values_shape
 
@@ -123,15 +123,7 @@ class WeightedObservations(typing.NamedTuple):
         index,
     ) -> typing.Self:
         """Index only batch dimensions, retaining this object type."""
-        index = batch.selection(
-            index,
-            len(self.batch_shape),
-        )
-
-        return self.__class__(
-            values=self.values[index],
-            weights=self.weights[index],
-        )
+        return batch.select(self, index)
 
     def broadcast(
         self,
@@ -139,45 +131,14 @@ class WeightedObservations(typing.NamedTuple):
         axis: int = 0,
     ) -> typing.Self:
         """Insert replicated batch dimensions at `axis`."""
-        shape, axis = batch.insertion(
-            shape,
-            axis,
-            len(self.batch_shape),
-        )
-
-        return self.__class__(
-            values=batch.broadcast_array(
-                self.values,
-                shape,
-                axis,
-            ),
-            weights=batch.broadcast_array(
-                self.weights,
-                shape,
-                axis,
-            ),
-        )
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(
         self,
         axis=None,
     ) -> typing.Self:
         """Remove singleton batch dimensions."""
-        axes = batch.squeeze_axes(
-            self.batch_shape,
-            axis,
-        )
-
-        return self.__class__(
-            values=jnp.squeeze(
-                self.values,
-                axis=axes,
-            ),
-            weights=jnp.squeeze(
-                self.weights,
-                axis=axes,
-            ),
-        )
+        return batch.squeeze(self, axis=axis)
 
     def permute(
         self,
@@ -185,28 +146,7 @@ class WeightedObservations(typing.NamedTuple):
         axis: int = 0,
     ) -> typing.Self:
         """Reorder entries along a batch axis."""
-        axis = batch.axis_index(
-            axis,
-            len(self.batch_shape),
-        )
-
-        permutation = batch.permutation_indices(
-            permutation,
-            self.batch_shape[axis],
-        )
-
-        return self.__class__(
-            values=jnp.take(
-                self.values,
-                permutation,
-                axis=axis,
-            ),
-            weights=jnp.take(
-                self.weights,
-                permutation,
-                axis=axis,
-            ),
-        )
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(
         self,
@@ -214,27 +154,7 @@ class WeightedObservations(typing.NamedTuple):
         destination: int,
     ) -> typing.Self:
         """Move one batch axis to another position."""
-        source = batch.axis_index(
-            source,
-            len(self.batch_shape),
-        )
-        destination = batch.axis_index(
-            destination,
-            len(self.batch_shape),
-        )
-
-        return self.__class__(
-            values=jnp.moveaxis(
-                self.values,
-                source,
-                destination,
-            ),
-            weights=jnp.moveaxis(
-                self.weights,
-                source,
-                destination,
-            ),
-        )
+        return batch.move_axis(self, source, destination)
 
     def astype(
         self,
@@ -256,13 +176,8 @@ class WeightedObservations(typing.NamedTuple):
 
     def safe_aligned(self, values: jax.Array) -> jax.Array:
         """Zero aligned `(*B, T, *E)` values wherever observation weight is zero."""
-        ndim = self.weights.ndim
-        if values.shape[:ndim] != self.weights.shape:
-            raise ValueError('values must begin with the observation weight shape')
-
-        present = (self.weights != 0).reshape(
-            self.weights.shape + (1,) * (values.ndim - ndim)
-        )
+        batch.split_prefix(values.shape, self.weights.shape, name='values shape')
+        present = batch.expand_trailing(self.weights != 0, values.ndim)
         return jnp.where(present, values, jnp.zeros((), dtype=values.dtype))
 
     def weighted_sum(
@@ -414,7 +329,7 @@ class Sequences:
         value_dim = sequences[0].values.shape[-1]
 
         for sequence in sequences:
-            batch.require_same(batch_shape, sequence.batch_shape)
+            batch.require_same_shape(batch_shape, sequence.batch_shape)
             if sequence.values.shape[-1] != value_dim:
                 raise ValueError('sequences must share a value dimension')
 
@@ -447,52 +362,23 @@ class Sequences:
 
     def select(self, index: batch.SelT) -> typing.Self:
         """Select only batch axes, retaining time and event axes."""
-        index = batch.selection(index, len(self.batch_shape))
-        return self._unchecked(
-            self.values[index],
-            self.mask.select(index),
-        )
+        return batch.select(self, index)
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
         """Insert replicated batch dimensions at `axis`."""
-        shape, axis = batch.insertion(
-            shape,
-            axis,
-            len(self.batch_shape),
-        )
-        return self._unchecked(
-            batch.broadcast_array(self.values, shape, axis),
-            self.mask.broadcast(shape, axis),
-        )
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(self, axis=None) -> typing.Self:
         """Remove singleton batch dimensions."""
-        axes = batch.squeeze_axes(self.batch_shape, axis)
-        return self._unchecked(
-            jnp.squeeze(self.values, axis=axes),
-            self.mask.squeeze(axes),
-        )
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder entries along one batch axis."""
-        axis = batch.axis_index(axis, len(self.batch_shape))
-        permutation = batch.permutation_indices(
-            permutation,
-            self.batch_shape[axis],
-        )
-        return self._unchecked(
-            jnp.take(self.values, permutation, axis=axis),
-            self.mask.permute(permutation, axis),
-        )
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another batch position."""
-        source = batch.axis_index(source, len(self.batch_shape))
-        destination = batch.axis_index(destination, len(self.batch_shape))
-        return self._unchecked(
-            jnp.moveaxis(self.values, source, destination),
-            self.mask.move_axis(source, destination),
-        )
+        return batch.move_axis(self, source, destination)
 
     def valid(self) -> ContiguousMask:
         """Contiguous validity mask for these sequences."""
@@ -798,57 +684,23 @@ class Dataset:
 
     def select(self, index: batch.SelT) -> typing.Self:
         """Select only trajectory batch dimensions."""
-        index = batch.selection(index, len(self.batch_shape))
-        return self._unchecked(
-            self.observations.select(index),
-            self.inputs.select(index),
-            self.mask.select(index),
-        )
+        return batch.select(self, index)
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
         """Insert replicated batch dimensions at `axis`."""
-        shape, axis = batch.insertion(
-            shape,
-            axis,
-            len(self.batch_shape),
-        )
-        return self._unchecked(
-            self.observations.broadcast(shape, axis),
-            self.inputs.broadcast(shape, axis),
-            self.mask.broadcast(shape, axis),
-        )
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(self, axis=None) -> typing.Self:
         """Remove singleton batch dimensions."""
-        axes = batch.squeeze_axes(self.batch_shape, axis)
-        return self._unchecked(
-            self.observations.squeeze(axes),
-            self.inputs.squeeze(axes),
-            self.mask.squeeze(axes),
-        )
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder entries along one batch axis."""
-        axis = batch.axis_index(axis, len(self.batch_shape))
-        permutation = batch.permutation_indices(
-            permutation,
-            self.batch_shape[axis],
-        )
-        return self._unchecked(
-            self.observations.permute(permutation, axis),
-            self.inputs.permute(permutation, axis),
-            self.mask.permute(permutation, axis),
-        )
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another batch position."""
-        source = batch.axis_index(source, len(self.batch_shape))
-        destination = batch.axis_index(destination, len(self.batch_shape))
-        return self._unchecked(
-            self.observations.move_axis(source, destination),
-            self.inputs.move_axis(source, destination),
-            self.mask.move_axis(source, destination),
-        )
+        return batch.move_axis(self, source, destination)
 
     def unpack(self) -> tuple[jax.Array, ...]:
         """Crop observations in an unbatched or flat dataset on the host."""

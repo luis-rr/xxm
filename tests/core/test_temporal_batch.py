@@ -258,3 +258,23 @@ def test_temporal_common_batch_api(process):
 
     if process == 'gated':
         assert obj.num_gates == 4
+
+    transformed = jax.jit(
+        lambda model: (
+            model.broadcast(1, axis=1)
+            .squeeze(1)
+            .permute(jnp.array([2, 0, 1]), axis=1)
+            .move_axis(1, 0)
+            .select((slice(None), 1))
+        )
+    )(obj)
+    assert transformed.batch_shape == (3,)
+    for actual, original in zip(
+        jax.tree.leaves(transformed), jax.tree.leaves(obj), strict=True
+    ):
+        np.testing.assert_array_equal(actual, original[1, jnp.array([2, 0, 1])])
+    if process == 'gated':
+        assert transformed.num_gates == 4
+        assert transformed.initial.batch_shape == (3, 4)
+    elif process == 'hermite':
+        assert transformed.num_motifs == obj.num_motifs

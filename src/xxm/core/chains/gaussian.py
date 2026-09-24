@@ -10,7 +10,6 @@ $J^{-1}h$ and covariance $J^{-1}$. The log normalizer is $\log \int f(x)\, dx$.
 
 from __future__ import annotations
 
-import math
 import typing
 
 import jax
@@ -72,7 +71,7 @@ class GaussianPotential(typing.NamedTuple):
         precision_shape = self.precision_blocks.shape[:-2]
         information_shape = self.information_vectors.shape[:-1]
         log_constant_shape = self.log_constant.shape
-        assert precision_shape == information_shape == log_constant_shape
+        batch.require_same_shape(precision_shape, information_shape, log_constant_shape)
         return precision_shape
 
     @property
@@ -320,7 +319,7 @@ class GaussianPotential(typing.NamedTuple):
                 f'got {second_moment.shape}'
             )
 
-        batch.require_same(mean.shape[:-1], second_moment.shape[:-2])
+        batch.require_same_shape(mean.shape[:-1], second_moment.shape[:-2])
         shape = mean.shape[:-1]
         precision = batch.align_array(self.precision_blocks, self.batch_shape, shape)
         information = batch.align_array(
@@ -354,56 +353,23 @@ class GaussianPotential(typing.NamedTuple):
 
     def select(self, index: batch.SelT) -> typing.Self:
         """Index only batch dimensions, retaining this object type."""
-        index = batch.selection(index, len(self.batch_shape))
-        return self.__class__(
-            precision_blocks=self.precision_blocks[index],
-            information_vectors=self.information_vectors[index],
-            log_constant=self.log_constant[index],
-        )
+        return batch.select(self, index)
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
         """Insert replicated batch dimensions at `axis`."""
-        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
-        return self.__class__(
-            precision_blocks=batch.broadcast_array(self.precision_blocks, shape, axis),
-            information_vectors=batch.broadcast_array(
-                self.information_vectors, shape, axis
-            ),
-            log_constant=batch.broadcast_array(self.log_constant, shape, axis),
-        )
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(self, axis=None) -> typing.Self:
         """Remove singleton batch dimensions."""
-        axes = batch.squeeze_axes(self.batch_shape, axis)
-        return self.__class__(
-            precision_blocks=jnp.squeeze(self.precision_blocks, axis=axes),
-            information_vectors=jnp.squeeze(self.information_vectors, axis=axes),
-            log_constant=jnp.squeeze(self.log_constant, axis=axes),
-        )
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder entries along a batch axis."""
-        axis = batch.axis_index(axis, len(self.batch_shape))
-        permutation = batch.permutation_indices(permutation, self.batch_shape[axis])
-        return self.__class__(
-            precision_blocks=jnp.take(self.precision_blocks, permutation, axis=axis),
-            information_vectors=jnp.take(
-                self.information_vectors, permutation, axis=axis
-            ),
-            log_constant=jnp.take(self.log_constant, permutation, axis=axis),
-        )
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another position."""
-        source = batch.axis_index(source, len(self.batch_shape))
-        destination = batch.axis_index(destination, len(self.batch_shape))
-        return self.__class__(
-            precision_blocks=jnp.moveaxis(self.precision_blocks, source, destination),
-            information_vectors=jnp.moveaxis(
-                self.information_vectors, source, destination
-            ),
-            log_constant=jnp.moveaxis(self.log_constant, source, destination),
-        )
+        return batch.move_axis(self, source, destination)
 
     def scale(
         self,
@@ -455,13 +421,13 @@ class GaussianPairPotential(typing.NamedTuple):
         left_information_shape = self.left_information.shape[:-1]
         right_information_shape = self.right_information.shape[:-1]
         log_constant_shape = self.log_constant.shape
-        assert (
-            left_precision_shape
-            == right_precision_shape
-            == lower_precision_shape
-            == left_information_shape
-            == right_information_shape
-            == log_constant_shape
+        batch.require_same_shape(
+            left_precision_shape,
+            right_precision_shape,
+            lower_precision_shape,
+            left_information_shape,
+            right_information_shape,
+            log_constant_shape,
         )
         return left_precision_shape
 
@@ -545,17 +511,7 @@ class GaussianPairPotential(typing.NamedTuple):
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
         """Insert replicated batch dimensions at `axis`."""
-        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
-        return self.__class__(
-            left_precision=batch.broadcast_array(self.left_precision, shape, axis),
-            right_precision=batch.broadcast_array(self.right_precision, shape, axis),
-            lower_precision=batch.broadcast_array(self.lower_precision, shape, axis),
-            left_information=batch.broadcast_array(self.left_information, shape, axis),
-            right_information=batch.broadcast_array(
-                self.right_information, shape, axis
-            ),
-            log_constant=batch.broadcast_array(self.log_constant, shape, axis),
-        )
+        return batch.broadcast(self, shape, axis=axis)
 
     def weighted_sum(self, weights: jax.Array, *, axis: int) -> typing.Self:
         """Sum log potentials over an explicit, aligned batch axis."""
@@ -600,7 +556,7 @@ class GaussianPairPotential(typing.NamedTuple):
                 f'right variable dimension must be {self.variable_dim}; '
                 f'got {posterior.right_dim}'
             )
-        batch.require_same(self.batch_shape, posterior.batch_shape)
+        batch.require_same_shape(self.batch_shape, posterior.batch_shape)
 
         left_mean = posterior.left.mean
         right_mean = posterior.right.mean
@@ -671,53 +627,19 @@ class GaussianPairPotential(typing.NamedTuple):
 
     def select(self, index: batch.SelT) -> typing.Self:
         """Index only batch dimensions, retaining this object type."""
-        index = batch.selection(index, len(self.batch_shape))
-        return self.__class__(
-            left_precision=self.left_precision[index],
-            right_precision=self.right_precision[index],
-            lower_precision=self.lower_precision[index],
-            left_information=self.left_information[index],
-            right_information=self.right_information[index],
-            log_constant=self.log_constant[index],
-        )
+        return batch.select(self, index)
 
     def squeeze(self, axis=None) -> typing.Self:
         """Remove singleton batch dimensions."""
-        axes = batch.squeeze_axes(self.batch_shape, axis)
-        return self.__class__(
-            left_precision=jnp.squeeze(self.left_precision, axis=axes),
-            right_precision=jnp.squeeze(self.right_precision, axis=axes),
-            lower_precision=jnp.squeeze(self.lower_precision, axis=axes),
-            left_information=jnp.squeeze(self.left_information, axis=axes),
-            right_information=jnp.squeeze(self.right_information, axis=axes),
-            log_constant=jnp.squeeze(self.log_constant, axis=axes),
-        )
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder entries along a batch axis."""
-        axis = batch.axis_index(axis, len(self.batch_shape))
-        permutation = batch.permutation_indices(permutation, self.batch_shape[axis])
-        return self.__class__(
-            left_precision=jnp.take(self.left_precision, permutation, axis=axis),
-            right_precision=jnp.take(self.right_precision, permutation, axis=axis),
-            lower_precision=jnp.take(self.lower_precision, permutation, axis=axis),
-            left_information=jnp.take(self.left_information, permutation, axis=axis),
-            right_information=jnp.take(self.right_information, permutation, axis=axis),
-            log_constant=jnp.take(self.log_constant, permutation, axis=axis),
-        )
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another position."""
-        source = batch.axis_index(source, len(self.batch_shape))
-        destination = batch.axis_index(destination, len(self.batch_shape))
-        return self.__class__(
-            left_precision=jnp.moveaxis(self.left_precision, source, destination),
-            right_precision=jnp.moveaxis(self.right_precision, source, destination),
-            lower_precision=jnp.moveaxis(self.lower_precision, source, destination),
-            left_information=jnp.moveaxis(self.left_information, source, destination),
-            right_information=jnp.moveaxis(self.right_information, source, destination),
-            log_constant=jnp.moveaxis(self.log_constant, source, destination),
-        )
+        return batch.move_axis(self, source, destination)
 
     def scale(
         self,
@@ -787,7 +709,7 @@ class GaussianChain(typing.NamedTuple):
 
         valid = valid.align_batch(batch_shape)
 
-        batch.require_same(
+        batch.require_same_shape(
             batch_shape,
             self.log_constant.shape,
             valid.batch_shape,
@@ -806,108 +728,32 @@ class GaussianChain(typing.NamedTuple):
         if not batch_shape:
             return self._forward_backward_single(valid)
 
-        n = math.prod(batch_shape)
-
-        flat = GaussianChain(
-            diagonal_precision_blocks=(
-                self.diagonal_precision_blocks.reshape(n, t, d, d)
-            ),
-            lower_precision_blocks=(
-                self.lower_precision_blocks.reshape(n, t - 1, d, d)
-            ),
-            information_vectors=self.information_vectors.reshape(n, t, d),
-            log_constant=self.log_constant.reshape(n),
-        )
-
-        flat_valid = valid.flatten()
-
-        posterior, log_normalizer = jax.vmap(GaussianChain._forward_backward_single)(
-            flat,
-            flat_valid,
-        )
-
-        return (
-            GaussianChainMarginals(
-                means=posterior.means.reshape(batch_shape + (t, d)),
-                covariances=posterior.covariances.reshape(batch_shape + (t, d, d)),
-                cross_covariances=(
-                    posterior.cross_covariances.reshape(batch_shape + (t - 1, d, d))
-                ),
-            ),
-            log_normalizer.reshape(batch_shape),
+        return batch.vmap_batch(
+            GaussianChain._forward_backward_single,
+            self,
+            valid,
+            batch_shape=self.batch_shape,
         )
 
     def select(self, index: batch.SelT) -> typing.Self:
         """Index only batch dimensions, retaining this object type."""
-        index = batch.selection(index, len(self.batch_shape))
-        return self.__class__(
-            diagonal_precision_blocks=self.diagonal_precision_blocks[index],
-            lower_precision_blocks=self.lower_precision_blocks[index],
-            information_vectors=self.information_vectors[index],
-            log_constant=self.log_constant[index],
-        )
+        return batch.select(self, index)
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
         """Insert replicated batch dimensions at `axis`."""
-        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
-        return self.__class__(
-            diagonal_precision_blocks=batch.broadcast_array(
-                self.diagonal_precision_blocks, shape, axis
-            ),
-            lower_precision_blocks=batch.broadcast_array(
-                self.lower_precision_blocks, shape, axis
-            ),
-            information_vectors=batch.broadcast_array(
-                self.information_vectors, shape, axis
-            ),
-            log_constant=batch.broadcast_array(self.log_constant, shape, axis),
-        )
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(self, axis=None) -> typing.Self:
         """Remove singleton batch dimensions."""
-        axes = batch.squeeze_axes(self.batch_shape, axis)
-        return self.__class__(
-            diagonal_precision_blocks=jnp.squeeze(
-                self.diagonal_precision_blocks, axis=axes
-            ),
-            lower_precision_blocks=jnp.squeeze(self.lower_precision_blocks, axis=axes),
-            information_vectors=jnp.squeeze(self.information_vectors, axis=axes),
-            log_constant=jnp.squeeze(self.log_constant, axis=axes),
-        )
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder entries along a batch axis."""
-        axis = batch.axis_index(axis, len(self.batch_shape))
-        permutation = batch.permutation_indices(permutation, self.batch_shape[axis])
-        return self.__class__(
-            diagonal_precision_blocks=jnp.take(
-                self.diagonal_precision_blocks, permutation, axis=axis
-            ),
-            lower_precision_blocks=jnp.take(
-                self.lower_precision_blocks, permutation, axis=axis
-            ),
-            information_vectors=jnp.take(
-                self.information_vectors, permutation, axis=axis
-            ),
-            log_constant=jnp.take(self.log_constant, permutation, axis=axis),
-        )
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another position."""
-        source = batch.axis_index(source, len(self.batch_shape))
-        destination = batch.axis_index(destination, len(self.batch_shape))
-        return self.__class__(
-            diagonal_precision_blocks=jnp.moveaxis(
-                self.diagonal_precision_blocks, source, destination
-            ),
-            lower_precision_blocks=jnp.moveaxis(
-                self.lower_precision_blocks, source, destination
-            ),
-            information_vectors=jnp.moveaxis(
-                self.information_vectors, source, destination
-            ),
-            log_constant=jnp.moveaxis(self.log_constant, source, destination),
-        )
+        return batch.move_axis(self, source, destination)
 
     @classmethod
     def from_pair_potentials(
@@ -1451,7 +1297,7 @@ class GaussianChainMarginals(typing.NamedTuple):
 
     def affine(self, affine: Affine) -> typing.Self:
         """Push posterior marginals through a batch-aligned affine map."""
-        batch.require_same(self.batch_shape, affine.batch_shape)
+        batch.require_same_shape(self.batch_shape, affine.batch_shape)
 
         if affine.input_shape != (self.variable_dim,):
             raise ValueError(
@@ -1484,52 +1330,23 @@ class GaussianChainMarginals(typing.NamedTuple):
 
     def select(self, index: batch.SelT) -> typing.Self:
         """Index only batch dimensions, retaining this object type."""
-        index = batch.selection(index, len(self.batch_shape))
-        return self.__class__(
-            means=self.means[index],
-            covariances=self.covariances[index],
-            cross_covariances=self.cross_covariances[index],
-        )
+        return batch.select(self, index)
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
         """Insert replicated batch dimensions at `axis`."""
-        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
-        return self.__class__(
-            means=batch.broadcast_array(self.means, shape, axis),
-            covariances=batch.broadcast_array(self.covariances, shape, axis),
-            cross_covariances=batch.broadcast_array(
-                self.cross_covariances, shape, axis
-            ),
-        )
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(self, axis=None) -> typing.Self:
         """Remove singleton batch dimensions."""
-        axes = batch.squeeze_axes(self.batch_shape, axis)
-        return self.__class__(
-            means=jnp.squeeze(self.means, axis=axes),
-            covariances=jnp.squeeze(self.covariances, axis=axes),
-            cross_covariances=jnp.squeeze(self.cross_covariances, axis=axes),
-        )
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder entries along a batch axis."""
-        axis = batch.axis_index(axis, len(self.batch_shape))
-        permutation = batch.permutation_indices(permutation, self.batch_shape[axis])
-        return self.__class__(
-            means=jnp.take(self.means, permutation, axis=axis),
-            covariances=jnp.take(self.covariances, permutation, axis=axis),
-            cross_covariances=jnp.take(self.cross_covariances, permutation, axis=axis),
-        )
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another position."""
-        source = batch.axis_index(source, len(self.batch_shape))
-        destination = batch.axis_index(destination, len(self.batch_shape))
-        return self.__class__(
-            means=jnp.moveaxis(self.means, source, destination),
-            covariances=jnp.moveaxis(self.covariances, source, destination),
-            cross_covariances=jnp.moveaxis(self.cross_covariances, source, destination),
-        )
+        return batch.move_axis(self, source, destination)
 
     def raw_second_moments(self) -> jax.Array:
         r"""Return raw second moments $\mathbb{E}_q[x_t x_t^\top]$."""
@@ -1574,7 +1391,7 @@ class GaussianChainMarginals(typing.NamedTuple):
         chain: GaussianChain,
     ) -> jax.Array:
         r"""Compute the expected chain log potential $\mathbb{E}_q[\log f(x)]$."""
-        batch.require_same(self.batch_shape, chain.batch_shape)
+        batch.require_same_shape(self.batch_shape, chain.batch_shape)
         if chain.num_steps != self.num_steps:
             raise ValueError('chain and posterior must have the same number of steps')
 

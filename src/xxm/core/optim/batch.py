@@ -5,6 +5,8 @@ import typing
 import jax
 import jax.numpy as jnp
 
+from xxm.core import batch
+
 PyTreeT = typing.TypeVar('PyTreeT')
 
 
@@ -52,7 +54,7 @@ def filter_valid_batches(
                 'fitted and current parameter leaves must have equal shapes'
             )
 
-        mask = valid.reshape(valid.shape + (1,) * (fitted_leaf.ndim - valid.ndim))
+        mask = batch.expand_trailing(valid, fitted_leaf.ndim)
 
         return jnp.where(
             mask,

@@ -47,17 +47,12 @@ class Gaussian(typing.NamedTuple):
         """Batch shape."""
         mean_shape = self.mean.shape[:-1]
         covariance_shape = self.covariance.shape[:-2]
-        assert mean_shape == covariance_shape
+        batch.require_same_shape(mean_shape, covariance_shape)
         return mean_shape
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another position."""
-        source = batch.axis_index(source, len(self.batch_shape))
-        destination = batch.axis_index(destination, len(self.batch_shape))
-        return self.__class__(
-            mean=jnp.moveaxis(self.mean, source, destination),
-            covariance=jnp.moveaxis(self.covariance, source, destination),
-        )
+        return batch.move_axis(self, source, destination)
 
     def permute_variables(
         self,
@@ -155,11 +150,7 @@ class Gaussian(typing.NamedTuple):
 
     def select(self, index: batch.SelT) -> typing.Self:
         """Index only batch dimensions, retaining this object type."""
-        index = batch.selection(index, len(self.batch_shape))
-        return self.__class__(
-            mean=self.mean[index],
-            covariance=self.covariance[index],
-        )
+        return batch.select(self, index)
 
     def astype(self, dtype: jax.typing.DTypeLike) -> 'Gaussian':
         """Convert to a different data type."""
@@ -196,7 +187,7 @@ class Gaussian(typing.NamedTuple):
         self,
         affine: Affine,
     ) -> None:
-        batch.require_same(self.batch_shape, affine.batch_shape)
+        batch.require_same_shape(self.batch_shape, affine.batch_shape)
 
         if affine.input_shape != (self.variable_dim,):
             raise ValueError(
@@ -308,7 +299,7 @@ class Gaussian(typing.NamedTuple):
 
         The two Gaussian objects must have aligned batches.
         """
-        batch.require_same(self.batch_shape, other.batch_shape)
+        batch.require_same_shape(self.batch_shape, other.batch_shape)
         if other.mean.shape[-1] != self.variable_dim:
             raise ValueError(
                 f'mean must have trailing dimension {self.variable_dim}; '
@@ -371,28 +362,15 @@ class Gaussian(typing.NamedTuple):
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
         """Insert replicated batch dimensions at `axis`."""
-        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
-        return self.__class__(
-            mean=batch.broadcast_array(self.mean, shape, axis),
-            covariance=batch.broadcast_array(self.covariance, shape, axis),
-        )
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(self, axis=None) -> typing.Self:
         """Remove singleton batch dimensions."""
-        axes = batch.squeeze_axes(self.batch_shape, axis)
-        return self.__class__(
-            mean=jnp.squeeze(self.mean, axis=axes),
-            covariance=jnp.squeeze(self.covariance, axis=axes),
-        )
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder entries along a batch axis."""
-        axis = batch.axis_index(axis, len(self.batch_shape))
-        permutation = batch.permutation_indices(permutation, self.batch_shape[axis])
-        return self.__class__(
-            mean=jnp.take(self.mean, permutation, axis=axis),
-            covariance=jnp.take(self.covariance, permutation, axis=axis),
-        )
+        return batch.permute(self, permutation, axis=axis)
 
 
 class LinearGaussian(typing.NamedTuple):
@@ -413,16 +391,12 @@ class LinearGaussian(typing.NamedTuple):
         """Batch shape."""
         covariance_shape = self.covariance.shape[:-2]
         affine_shape = self.affine.batch_shape
-        assert covariance_shape == affine_shape
+        batch.require_same_shape(covariance_shape, affine_shape)
         return affine_shape
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
         """Insert replicated batch dimensions at `axis`."""
-        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
-        return self.__class__(
-            affine=self.affine.broadcast(shape, axis=axis),
-            covariance=batch.broadcast_array(self.covariance, shape, axis),
-        )
+        return batch.broadcast(self, shape, axis=axis)
 
     @property
     def input_shape(self) -> tuple[int, ...]:
@@ -460,11 +434,7 @@ class LinearGaussian(typing.NamedTuple):
 
     def select(self, index: batch.SelT) -> typing.Self:
         """Index only batch dimensions, retaining this object type."""
-        index = batch.selection(index, len(self.batch_shape))
-        return self.__class__(
-            affine=self.affine.select(index),
-            covariance=self.covariance[index],
-        )
+        return batch.select(self, index)
 
     def astype(
         self,
@@ -563,7 +533,7 @@ class LinearGaussian(typing.NamedTuple):
         )
 
         shape = input_mean_flat.shape[:-1]
-        batch.require_same(
+        batch.require_same_shape(
             shape,
             self.batch_shape,
             input.covariance.shape[:-2],
@@ -651,7 +621,7 @@ class LinearGaussian(typing.NamedTuple):
         # Gaussian input means may retain the conditional's tensor input shape.
         input = Gaussian(self.affine.flatten_input(input.mean), input.covariance)
         query_shape = input.batch_shape
-        batch.require_same(
+        batch.require_same_shape(
             query_shape,
             output.batch_shape,
             input_output_covariance.shape[:-2],
@@ -677,29 +647,15 @@ class LinearGaussian(typing.NamedTuple):
 
     def squeeze(self, axis=None) -> typing.Self:
         """Remove singleton batch dimensions."""
-        axes = batch.squeeze_axes(self.batch_shape, axis)
-        return self.__class__(
-            affine=self.affine.squeeze(axes),
-            covariance=jnp.squeeze(self.covariance, axis=axes),
-        )
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder entries along a batch axis."""
-        axis = batch.axis_index(axis, len(self.batch_shape))
-        permutation = batch.permutation_indices(permutation, self.batch_shape[axis])
-        return self.__class__(
-            affine=self.affine.permute(permutation, axis=axis),
-            covariance=jnp.take(self.covariance, permutation, axis=axis),
-        )
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another position."""
-        source = batch.axis_index(source, len(self.batch_shape))
-        destination = batch.axis_index(destination, len(self.batch_shape))
-        return self.__class__(
-            affine=self.affine.move_axis(source, destination),
-            covariance=jnp.moveaxis(self.covariance, source, destination),
-        )
+        return batch.move_axis(self, source, destination)
 
 
 class PairedGaussian(typing.NamedTuple):
@@ -721,8 +677,8 @@ class PairedGaussian(typing.NamedTuple):
         right_shape = self.right.batch_shape
         cross_shape = self.cross_covariance.shape[:-2]
 
-        assert left_shape == right_shape
-        assert left_shape == cross_shape
+        batch.require_same_shape(left_shape, right_shape)
+        batch.require_same_shape(left_shape, cross_shape)
         assert self.cross_covariance.shape[-2:] == (
             self.right_dim,
             self.left_dim,
@@ -774,12 +730,7 @@ class PairedGaussian(typing.NamedTuple):
 
     def select(self, index: batch.SelT) -> typing.Self:
         """Index only batch dimensions, retaining this object type."""
-        index = batch.selection(index, len(self.batch_shape))
-        return self.__class__(
-            left=self.left.select(index),
-            right=self.right.select(index),
-            cross_covariance=self.cross_covariance[index],
-        )
+        return batch.select(self, index)
 
     def astype(self, dtype: jax.typing.DTypeLike) -> typing.Self:
         """Convert to a different data type."""
@@ -791,38 +742,16 @@ class PairedGaussian(typing.NamedTuple):
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
         """Insert replicated batch dimensions at `axis`."""
-        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
-        return self.__class__(
-            left=self.left.broadcast(shape, axis=axis),
-            right=self.right.broadcast(shape, axis=axis),
-            cross_covariance=batch.broadcast_array(self.cross_covariance, shape, axis),
-        )
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(self, axis=None) -> typing.Self:
         """Remove singleton batch dimensions."""
-        axes = batch.squeeze_axes(self.batch_shape, axis)
-        return self.__class__(
-            left=self.left.squeeze(axes),
-            right=self.right.squeeze(axes),
-            cross_covariance=jnp.squeeze(self.cross_covariance, axis=axes),
-        )
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder entries along a batch axis."""
-        axis = batch.axis_index(axis, len(self.batch_shape))
-        permutation = batch.permutation_indices(permutation, self.batch_shape[axis])
-        return self.__class__(
-            left=self.left.permute(permutation, axis=axis),
-            right=self.right.permute(permutation, axis=axis),
-            cross_covariance=jnp.take(self.cross_covariance, permutation, axis=axis),
-        )
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another position."""
-        source = batch.axis_index(source, len(self.batch_shape))
-        destination = batch.axis_index(destination, len(self.batch_shape))
-        return self.__class__(
-            left=self.left.move_axis(source, destination),
-            right=self.right.move_axis(source, destination),
-            cross_covariance=jnp.moveaxis(self.cross_covariance, source, destination),
-        )
+        return batch.move_axis(self, source, destination)

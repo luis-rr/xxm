@@ -43,19 +43,19 @@ class CategoricalInitial(typing.NamedTuple):
         return self.dist.batch_shape
 
     def select(self, index: batch.SelT) -> typing.Self:
-        return self._replace(dist=self.dist.select(index))
+        return batch.select(self, index)
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
-        return self._replace(dist=self.dist.broadcast(shape, axis=axis))
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(self, axis=None) -> typing.Self:
-        return self._replace(dist=self.dist.squeeze(axis))
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
-        return self._replace(dist=self.dist.permute(permutation, axis=axis))
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
-        return self._replace(dist=self.dist.move_axis(source, destination))
+        return batch.move_axis(self, source, destination)
 
     @property
     def num_states(self) -> int:
@@ -79,7 +79,7 @@ class CategoricalInitial(typing.NamedTuple):
     ) -> typing.Self:
         r"""Fit initial distribution from posterior marginals $\gamma_0(k)$."""
 
-        batch.require_same(
+        batch.require_same_shape(
             self.batch_shape,
             posterior.state_probs.shape[:-2],
         )
@@ -106,25 +106,19 @@ class CategoricalTransitions(typing.NamedTuple):
         return self.dist.batch_shape[:-1]
 
     def select(self, index: batch.SelT) -> typing.Self:
-        index = batch.selection(index, len(self.batch_shape))
-        return self._replace(dist=self.dist.select(index + (slice(None),)))
+        return batch.select(self, index)
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self:
-        shape, axis = batch.insertion(shape, axis, len(self.batch_shape))
-        return self._replace(dist=self.dist.broadcast(shape, axis=axis))
+        return batch.broadcast(self, shape, axis=axis)
 
     def squeeze(self, axis=None) -> typing.Self:
-        axes = batch.squeeze_axes(self.batch_shape, axis)
-        return self._replace(dist=self.dist.squeeze(axes))
+        return batch.squeeze(self, axis=axis)
 
     def permute(self, permutation, axis: int = 0) -> typing.Self:
-        axis = batch.axis_index(axis, len(self.batch_shape))
-        return self._replace(dist=self.dist.permute(permutation, axis=axis))
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
-        source = batch.axis_index(source, len(self.batch_shape))
-        destination = batch.axis_index(destination, len(self.batch_shape))
-        return self._replace(dist=self.dist.move_axis(source, destination))
+        return batch.move_axis(self, source, destination)
 
     @property
     def num_states(self) -> int:
@@ -186,7 +180,7 @@ class CategoricalTransitions(typing.NamedTuple):
     ) -> typing.Self:
         r"""Fit transition probabilities from posterior pair marginals $\xi_t(i,j)$."""
 
-        batch.require_same(
+        batch.require_same_shape(
             self.batch_shape,
             posterior.state_probs.shape[:-2],
         )
