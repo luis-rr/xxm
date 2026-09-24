@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from xxm.core.chains.discrete import DiscreteChainMarginals
+from xxm.core.data import Dataset, WeightedObservations
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
@@ -121,7 +122,7 @@ def test_poisson_log_likelihoods():
         ]
     )
 
-    result = emissions.log_likelihoods(observations)
+    result = emissions.log_likelihoods(WeightedObservations.from_sequence(observations))
 
     # log P(x | lambda) = x log(lambda) - lambda - log(x!)
     expected = np.array(
@@ -159,7 +160,9 @@ def test_poisson_m_step():
         dist=Poisson(log_rates=jnp.zeros((2, 1))),
     )
 
-    result = emissions.fit_params(observations, posterior)
+    result = emissions.fit_params(
+        WeightedObservations.from_sequence(observations), posterior
+    )
 
     expected = np.array(
         [
@@ -196,7 +199,7 @@ def test_gaussian_log_likelihoods():
         ]
     )
 
-    result = emissions.log_likelihoods(observations)
+    result = emissions.log_likelihoods(WeightedObservations.from_sequence(observations))
 
     c = -0.5 * np.log(2 * np.pi)
 
@@ -234,7 +237,9 @@ def test_gaussian_m_step():
         dist=Gaussian(mean=jnp.zeros((2, 1)), covariance=jnp.ones((2, 1, 1))),
     )
 
-    result = emissions.fit_params(observations, posterior)
+    result = emissions.fit_params(
+        WeightedObservations.from_sequence(observations), posterior
+    )
 
     expected_means = np.array(
         [
@@ -302,9 +307,10 @@ def test_em_step_is_jit_compatible():
         ]
     )
 
-    inferred = infer_exact(model, observations)
-    eager = em_step(inferred, observations)
-    jitted = jax.jit(em_step)(inferred, observations)
+    data = Dataset.from_sequence(observations)
+    inferred = infer_exact(model, data)
+    eager = em_step(inferred, data)
+    jitted = jax.jit(em_step)(inferred, data)
 
     np.testing.assert_allclose(
         jitted.model.initial.dist.probs,

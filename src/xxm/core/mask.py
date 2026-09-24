@@ -45,6 +45,10 @@ class Mask(typing.Protocol):
 
     def materialize(self, num_steps: int) -> jax.Array: ...
 
+    def adjacent_pairs(self) -> typing.Self:
+        """Mask pairs `(t, t + 1)`, active only when both entries are active."""
+        ...
+
 
 class NoMask(typing.NamedTuple):
     """Identity mask used when every entry is active."""
@@ -84,6 +88,10 @@ class NoMask(typing.NamedTuple):
 
     def flatten(self) -> typing.Self:
         return batch.flatten_batch(self, self.batch_shape)
+
+    def adjacent_pairs(self) -> typing.Self:
+        """Every adjacent pair remains active."""
+        return self
 
     def apply(
         self,
@@ -213,6 +221,10 @@ class ArbitraryMask:
     def flatten(self) -> typing.Self:
         return batch.flatten_batch(self, self.batch_shape)
 
+    def adjacent_pairs(self) -> typing.Self:
+        """Require both adjacent entries, retaining the structural batch shape."""
+        return self._unchecked(self.values[..., :-1] & self.values[..., 1:])
+
     def materialize(self, num_steps: int) -> jax.Array:
         """Return this explicit mask, optionally checking the time dimension."""
         if num_steps is not None and operator.index(num_steps) != self.num_steps:
@@ -334,6 +346,11 @@ class ContiguousMask:
 
     def flatten(self) -> typing.Self:
         return batch.flatten_batch(self, self.batch_shape)
+
+    def adjacent_pairs(self) -> typing.Self:
+        """A prefix of length L contains max(L - 1, 0) adjacent pairs."""
+        one = jnp.ones((), dtype=self.lengths.dtype)
+        return self._unchecked(jnp.maximum(self.lengths, one) - one)
 
     def select(self, index: batch.SelT) -> typing.Self:
         """Select only batch axes."""

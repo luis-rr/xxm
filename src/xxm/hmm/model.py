@@ -8,6 +8,7 @@ import typing
 import jax
 import jax.numpy as jnp
 
+from xxm.core.data import Dataset, Sequences
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
@@ -15,7 +16,6 @@ from xxm.core.emissions.discrete import (
     GaussianEmissions,
     PoissonEmissions,
 )
-from xxm.core.inference import Fitted, InferenceState
 from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
@@ -75,6 +75,19 @@ class GaussianHMM:
 
     _model: Model[GaussianEmissions]
 
+    def __post_init__(self) -> None:
+        if self._model.batch_shape != ():
+            raise ValueError('GaussianHMM facade requires an unbatched core model')
+
+    @property
+    def model(self) -> Model[GaussianEmissions]:
+        """Underlying core model."""
+        return self._model
+
+    @property
+    def observation_dim(self) -> int:
+        return self._model.emissions.observation_dim
+
     @property
     def num_states(self) -> int:
         """Number of discrete states $K$."""
@@ -96,13 +109,6 @@ class GaussianHMM:
         return jnp.argmax(
             posterior.state_probs,
             axis=-1,
-        )
-
-    def observation_mean(self, posterior: Posterior) -> jax.Array:
-        """Return the posterior mean observation at each time point."""
-        return self.states.broadcast(posterior.state_probs.shape[0]).mixture_mean(
-            posterior.state_probs,
-            axis=1,
         )
 
     @classmethod
@@ -137,7 +143,7 @@ class GaussianHMM:
     def via_kmeans(
         cls,
         key: jax.Array,
-        observations: jax.Array,
+        data: Dataset,
         num_states: int,
         *,
         self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
@@ -145,7 +151,7 @@ class GaussianHMM:
         """Initialize a Gaussian HMM by clustering the observations with K-means."""
         model = init_gaussian_via_kmeans(
             key=key,
-            observations=observations,
+            data=data,
             num_states=num_states,
             self_transition_prob=self_transition_prob,
         )
@@ -161,38 +167,41 @@ class GaussianHMM:
 
     def infer(
         self,
-        observations: jax.Array,
-    ) -> InferenceState[typing.Self, Posterior]:
-        """Compute the exact posterior over states and the observation log likelihood."""
+        data: Dataset,
+    ) -> Inferred[GaussianHMM]:
+        """Infer states for all Dataset sequences and retain their source structure."""
         inferred = _infer_exact_jit(
             self._model,
-            observations,
+            data,
         )
 
-        return InferenceState(
-            model=self.__class__(inferred.model),
+        return Inferred(
+            model=self,
             posterior=inferred.posterior,
-            objective=inferred.objective,
+            data=data,
         )
 
     def fit(
         self,
-        observations: jax.Array,
+        data: Dataset,
         *,
         num_iters: int,
         progress: bool | str = 'EM',
-    ) -> Fitted[typing.Self, Posterior]:
+    ) -> Fit[GaussianHMM]:
         """Fit model parameters by expectation-maximization."""
         fit = _fit_em_jit(
             self._model,
-            observations,
+            data,
             num_iters=num_iters,
             progress=progress,
         )
 
-        return Fitted(
-            model=self.__class__(fit.state.model),
-            posterior=fit.state.posterior,
+        return Fit(
+            inferred=Inferred(
+                model=self.__class__(fit.state.model),
+                posterior=fit.state.posterior,
+                data=data,
+            ),
             objective_trace=fit.objective_trace,
         )
 
@@ -213,6 +222,19 @@ class PoissonHMM:
     """
 
     _model: Model[PoissonEmissions]
+
+    def __post_init__(self) -> None:
+        if self._model.batch_shape != ():
+            raise ValueError('PoissonHMM facade requires an unbatched core model')
+
+    @property
+    def model(self) -> Model[PoissonEmissions]:
+        """Underlying core model."""
+        return self._model
+
+    @property
+    def observation_dim(self) -> int:
+        return self._model.emissions.observation_dim
 
     @property
     def num_states(self) -> int:
@@ -235,13 +257,6 @@ class PoissonHMM:
         return jnp.argmax(
             posterior.state_probs,
             axis=-1,
-        )
-
-    def observation_mean(self, posterior: Posterior) -> jax.Array:
-        """Return the posterior mean observation at each time point."""
-        return self.states.broadcast(posterior.state_probs.shape[0]).mixture_mean(
-            posterior.state_probs,
-            axis=1,
         )
 
     @classmethod
@@ -274,7 +289,7 @@ class PoissonHMM:
     def via_kmeans(
         cls,
         key: jax.Array,
-        observations: jax.Array,
+        data: Dataset,
         num_states: int,
         *,
         self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
@@ -282,7 +297,7 @@ class PoissonHMM:
         """Initialize a Poisson HMM by clustering the observations with K-means."""
         model = init_poisson_via_kmeans(
             key=key,
-            observations=observations,
+            data=data,
             num_states=num_states,
             self_transition_prob=self_transition_prob,
         )
@@ -298,37 +313,82 @@ class PoissonHMM:
 
     def infer(
         self,
-        observations: jax.Array,
-    ) -> InferenceState[typing.Self, Posterior]:
-        """Compute the exact posterior over states and the observation log likelihood."""
+        data: Dataset,
+    ) -> Inferred[PoissonHMM]:
+        """Infer states for all Dataset sequences and retain their source structure."""
         inferred = infer_exact(
             self._model,
-            observations,
+            data,
         )
 
-        return InferenceState(
-            model=self.__class__(inferred.model),
+        return Inferred(
+            model=self,
             posterior=inferred.posterior,
-            objective=inferred.objective,
+            data=data,
         )
 
     def fit(
         self,
-        observations: jax.Array,
+        data: Dataset,
         *,
         num_iters: int,
         progress: bool | str = 'EM',
-    ) -> Fitted[typing.Self, Posterior]:
+    ) -> Fit[PoissonHMM]:
         """Fit model parameters by expectation-maximization."""
         fit = fit_em(
             self._model,
-            observations,
+            data,
             num_iters=num_iters,
             progress=progress,
         )
 
-        return Fitted(
-            model=self.__class__(fit.state.model),
-            posterior=fit.state.posterior,
+        return Fit(
+            inferred=Inferred(
+                model=self.__class__(fit.state.model),
+                posterior=fit.state.posterior,
+                data=data,
+            ),
             objective_trace=fit.objective_trace,
         )
+
+
+HMMFacadeT = typing.TypeVar('HMMFacadeT', GaussianHMM, PoissonHMM)
+
+
+@dataclasses.dataclass(frozen=True, eq=False)
+class Inferred(typing.Generic[HMMFacadeT]):
+    """Singular HMM, posterior, and exact source Dataset."""
+
+    model: HMMFacadeT
+    posterior: Posterior
+    data: Dataset
+
+    def __post_init__(self) -> None:
+        if self.posterior.batch_shape != self.data.batch_shape:
+            raise ValueError('posterior batch must match the source dataset')
+        if self.posterior.num_steps != self.data.num_steps:
+            raise ValueError('posterior must match the padded time dimension')
+        if self.posterior.num_states != self.model.num_states:
+            raise ValueError('posterior must match the model number of states')
+
+    def state_probs(self) -> Sequences:
+        """State probabilities with the source batch shape and sequence lengths."""
+        return Sequences.from_padded(
+            self.posterior.state_probs,
+            self.data.lengths,
+        )
+
+    def observation_mean(self, posterior: Posterior) -> jax.Array:
+        """Return the posterior mean observation at each time point."""
+        return self.model.model.emissions.broadcast(
+            posterior.batch_shape
+        ).observation_mean(
+            posterior,
+        )
+
+
+class Fit(typing.NamedTuple, typing.Generic[HMMFacadeT]):
+    """Fitted result and objective trace, including the initial objective."""
+
+    inferred: Inferred[HMMFacadeT]
+    objective_trace: jax.Array

@@ -9,6 +9,7 @@ from xxm.core import batch
 from xxm.core.chains.discrete import DiscreteChain
 from xxm.core.dists.categorical import Categorical
 from xxm.core.optim import categorical as categorical_fit
+from xxm.core.optim.batch import filter_valid_batches
 from xxm.core.posteriors import DiscretePosterior
 
 
@@ -79,17 +80,20 @@ class CategoricalInitial(typing.NamedTuple):
     ) -> typing.Self:
         r"""Fit initial distribution from posterior marginals $\gamma_0(k)$."""
 
-        batch.require_same_shape(
-            self.batch_shape,
-            posterior.state_probs.shape[:-2],
+        if posterior.num_states != self.num_states:
+            raise ValueError('posterior and initial distribution must share states')
+
+        replicate_shape = batch.split_prefix(
+            posterior.batch_shape, self.batch_shape, name='posterior batch shape'
         )
 
-        return self._replace(
-            dist=categorical_fit.from_counts(
-                posterior.state_probs[..., 0, :],
-                pseudocount=pseudocount,
-            )
+        starts = batch.pool_samples(
+            posterior.state_probs[..., 0, :], self.batch_shape, replicate_shape
         )
+        counts = jnp.sum(starts, axis=-2)
+        fitted = categorical_fit.from_counts(counts, pseudocount=pseudocount)
+
+        return self._replace(dist=filter_valid_batches(fitted, self.dist, counts))
 
 
 class CategoricalTransitions(typing.NamedTuple):
@@ -177,19 +181,47 @@ class CategoricalTransitions(typing.NamedTuple):
         self,
         posterior: DiscretePosterior,
         pseudocount=categorical_fit.DEFAULT_PSEUDOCOUNT,
+        *,
+        weights: jax.Array | None = None,
     ) -> typing.Self:
         r"""Fit transition probabilities from posterior pair marginals $\xi_t(i,j)$."""
 
-        batch.require_same_shape(
-            self.batch_shape,
-            posterior.state_probs.shape[:-2],
+        if posterior.num_states != self.num_states:
+            raise ValueError('posterior and transitions must share states')
+
+        pairs = posterior.pair_probs
+        expected_shape = (*posterior.batch_shape, posterior.num_steps - 1)
+
+        if pairs.shape != (*expected_shape, self.num_states, self.num_states):
+            raise ValueError('posterior pair probabilities must match time and states')
+
+        if weights is not None:
+            if weights.shape != expected_shape:
+                raise ValueError(f'transition weights must have shape {expected_shape}')
+
+            expanded_weights = batch.expand_trailing(weights, pairs.ndim)
+            pairs = jnp.where(expanded_weights != 0, pairs, 0) * expanded_weights
+
+        replicate_shape = batch.split_prefix(
+            posterior.batch_shape, self.batch_shape, name='posterior batch shape'
         )
 
-        expected_transitions = posterior.pair_probs.sum(axis=-3)  # (*B, K, K)
+        samples = batch.pool_samples(
+            pairs,
+            self.batch_shape,
+            (*replicate_shape, posterior.num_steps - 1),
+        )
+        expected_transitions = samples.sum(axis=-3)
+
+        fitted = categorical_fit.from_counts(
+            expected_transitions,
+            pseudocount=pseudocount,
+        )
 
         return self._replace(
-            dist=categorical_fit.from_counts(
+            dist=filter_valid_batches(
+                fitted,
+                self.dist,
                 expected_transitions,
-                pseudocount=pseudocount,
             )
         )

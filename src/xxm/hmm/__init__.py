@@ -1,6 +1,6 @@
 """Hidden Markov model public API."""
 
-from .core import Posterior
+from .core import Model, Posterior
 from .inference import infer_exact
 from .init import (
     init_gaussian_via_kmeans,
@@ -8,12 +8,17 @@ from .init import (
 )
 from .learning import fit_em
 from .model import (
+    Fit,
     GaussianHMM,
+    Inferred,
     PoissonHMM,
 )
 
 __all__ = [
+    'Fit',
     'GaussianHMM',
+    'Inferred',
+    'Model',
     'PoissonHMM',
     'Posterior',
     'fit_em',

@@ -3,6 +3,7 @@
 import jax
 from jax import numpy as jnp
 
+from xxm.core.data import Dataset
 from xxm.core.dists.categorical import Categorical
 from xxm.core.emissions.discrete import (
     Emissions,
@@ -16,6 +17,27 @@ from xxm.core.optim.kmeans import kmeans_assignments
 from xxm.hmm.core import Model
 
 DEFAULT_SELF_TRANSITION_PROB = 0.9
+
+
+def _validate_inputs(data: Dataset, num_states: int):
+    if data.input_dim != 0:
+        raise ValueError('stationary HMMs require data.input_dim == 0')
+
+    if num_states < 1:
+        raise ValueError('num_states must be positive')
+
+
+def _visible_observations(data: Dataset, num_states: int) -> jax.Array:
+    """Collect visible valid rows on the host for clustering."""
+
+    observations = data.observations.values[data.observation_weights()]
+
+    if observations.shape[0] < num_states:
+        raise ValueError(
+            'HMM initialization requires at least num_states visible valid rows'
+        )
+
+    return observations
 
 
 def _init(
@@ -82,12 +104,15 @@ def _init_gaussian_emissions(
 
 def init_gaussian_via_kmeans(
     key: jax.Array,
-    observations: jax.Array,
+    data: Dataset,
     num_states: int,
     self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
     covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
 ) -> Model:
-    """Initialize Gaussian-emission HMM via K-means clustering."""
+    """Initialize a shared Gaussian HMM from visible valid Dataset rows."""
+    _validate_inputs(data, num_states)
+
+    observations = _visible_observations(data, num_states)
     emissions = _init_gaussian_emissions(
         observations=observations,
         num_states=num_states,
@@ -126,11 +151,14 @@ def _init_poisson_emissions(
 
 def init_poisson_via_kmeans(
     key: jax.Array,
-    observations: jax.Array,
+    data: Dataset,
     num_states: int,
     self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
 ) -> Model:
-    """Initialize a Poisson-emission HMM via K-means clustering."""
+    """Initialize a shared Poisson HMM from visible valid Dataset rows."""
+    _validate_inputs(data, num_states)
+
+    observations = _visible_observations(data, num_states)
     emissions = _init_poisson_emissions(
         key=key,
         observations=observations,

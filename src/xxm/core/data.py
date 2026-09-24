@@ -713,12 +713,7 @@ class Dataset:
 
     def valid_transitions(self) -> ContiguousMask:
         """Contiguous mask for valid transitions `x[t] -> x[t+1]`."""
-        return ContiguousMask._unchecked(
-            jnp.maximum(
-                self.lengths - 1,
-                jnp.zeros((), dtype=self.lengths.dtype),
-            )
-        )
+        return self.valid().adjacent_pairs()
 
     def observation_weights(self) -> jax.Array:
         """Boolean weights combining structural validity and observation visibility."""

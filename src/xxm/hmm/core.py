@@ -1,4 +1,4 @@
-r"""Single-sequence homogeneous Hidden Markov Model."""
+r"""Homogeneous Hidden Markov models."""
 
 from __future__ import annotations
 
@@ -6,7 +6,9 @@ import typing
 
 import jax
 
+from xxm.core import batch
 from xxm.core.chains.discrete import DiscreteChainMarginals as Posterior
+from xxm.core.data import Dataset
 from xxm.core.emissions.discrete import Emissions
 from xxm.core.latents.discrete import CategoricalInitial, CategoricalTransitions
 
@@ -29,6 +31,36 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     initial: CategoricalInitial
     transitions: CategoricalTransitions
     emissions: EmissionsT
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        """Independent parameter batches shared by all model components."""
+        batch.require_same_shape(
+            self.initial.batch_shape,
+            self.transitions.batch_shape,
+            self.emissions.batch_shape,
+        )
+        if (
+            self.initial.num_states != self.transitions.num_states
+            or self.initial.num_states != self.emissions.num_states
+        ):
+            raise ValueError('HMM components must share their number of states')
+        return self.initial.batch_shape
+
+    def select(self, index: batch.SelT) -> typing.Self:
+        return batch.select(self, index)
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        return batch.broadcast(self, shape, axis=axis)
+
+    def squeeze(self, axis=None) -> typing.Self:
+        return batch.squeeze(self, axis=axis)
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        return batch.permute(self, permutation, axis=axis)
+
+    def move_axis(self, source: int, destination: int) -> typing.Self:
+        return batch.move_axis(self, source, destination)
 
     @property
     def num_states(self) -> int:
@@ -83,17 +115,38 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
     def fit_params(
         self,
-        observations: jax.Array,
+        data: Dataset,
         posterior: Posterior,
     ) -> Model[EmissionsT]:
-        """
-        Perform the EM M-step from posterior state and pair marginals.
-        """
+        """Pool independent sequences, preserving the model batch prefix."""
+        if data.input_dim != 0:
+            raise ValueError('stationary HMMs require data.input_dim == 0')
+
+        model_batch_shape = self.batch_shape
+        expected_batch = (*model_batch_shape, *data.batch_shape)
+        if posterior.batch_shape != expected_batch:
+            raise ValueError(
+                f'posterior batch must be {expected_batch}; got {posterior.batch_shape}'
+            )
+
+        if posterior.num_steps != data.num_steps:
+            raise ValueError('posterior and dataset must share their time dimension')
+
+        if posterior.num_states != self.num_states:
+            raise ValueError('posterior and model must share their number of states')
+
+        working_data = data.broadcast(model_batch_shape, axis=0)
+
         return Model(
             initial=self.initial.fit_params(posterior),
-            transitions=self.transitions.fit_params(posterior),
+            transitions=self.transitions.fit_params(
+                posterior,
+                weights=working_data.valid_transitions().materialize(
+                    data.num_steps - 1
+                ),
+            ),
             emissions=self.emissions.fit_params(
-                observations,
+                working_data.weighted_observations(),
                 posterior,
             ),
         )

@@ -240,13 +240,13 @@ def test_discrete_latent_fit_and_sampling():
     assert chain.state_log_potentials.shape == FIT_B + (T, K)
 
 
-def test_discrete_latent_fit_requires_matching_posterior_batch():
+def test_discrete_latent_fit_requires_matching_model_batch_prefix():
     posterior = _discrete_posterior(batch=(4,), num_steps=2)
 
-    with pytest.raises(ValueError, match='shapes must match'):
+    with pytest.raises(ValueError, match='posterior batch shape must begin with'):
         CategoricalInitial(_categorical(B)).fit_params(posterior)
 
-    with pytest.raises(ValueError, match='shapes must match'):
+    with pytest.raises(ValueError, match='posterior batch shape must begin with'):
         CategoricalTransitions(_categorical(B + (K,))).fit_params(posterior)
 
     matched = _discrete_posterior(batch=B, num_steps=2)
@@ -322,7 +322,11 @@ def test_state_emission_likelihood_and_sampling(kind, component):
         jnp.arange(math.prod(FIT_B + (T, O))).reshape(FIT_B + (T, O)) % 4
     ).astype(jnp.float32)
     is_ar = kind.startswith('ar_')
-    data = ARObservations.from_observations(observations, L) if is_ar else observations
+    data = (
+        ARObservations.from_observations(observations, L)
+        if is_ar
+        else WeightedObservations(observations, jnp.ones(FIT_B + (T,), dtype=bool))
+    )
     likelihood = component.log_likelihoods(data)
     assert likelihood.shape == FIT_B + (T - L if is_ar else T, K)
     for index in FIT_INDICES:
@@ -330,7 +334,7 @@ def test_state_emission_likelihood_and_sampling(kind, component):
         data_i = (
             ARObservations.from_observations(observations[index], L)
             if is_ar
-            else observations[index]
+            else WeightedObservations.from_sequence(observations[index])
         )
         np.testing.assert_allclose(
             likelihood[index], standalone.log_likelihoods(data_i), atol=2e-5
@@ -538,7 +542,7 @@ def test_unoccupied_states_retain_each_batchs_parameters(kind, component):
         data = (
             ARObservations.from_observations(observations, L)
             if kind.startswith('ar_')
-            else observations
+            else WeightedObservations(observations, jnp.ones(B + (T,), dtype=bool))
         )
         fitted = component.fit_params(data, posterior)
     unused = np.asarray(jnp.arange(K) != active[..., None])
@@ -572,10 +576,9 @@ def test_representative_batched_fits_are_jittable():
     )
     emissions = discrete.GaussianEmissions(_gaussian(B + (K,), O))
     observations = _values(B + (T, O))
+    data = WeightedObservations(observations, jnp.ones(B + (T,), dtype=bool))
     states = _discrete_posterior()
     _assert_tree_close(
-        jax.jit(lambda model, y, q: model.fit_params(y, q))(
-            emissions, observations, states
-        ),
-        emissions.fit_params(observations, states),
+        jax.jit(lambda model, y, q: model.fit_params(y, q))(emissions, data, states),
+        emissions.fit_params(data, states),
     )

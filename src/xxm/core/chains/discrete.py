@@ -9,6 +9,7 @@ import jax.numpy as jnp
 import jax.scipy as jsp
 
 from xxm.core import batch
+from xxm.core.mask import NO_MASK, ArbitraryMask, Mask
 
 
 class DiscretePotential(typing.NamedTuple):
@@ -116,8 +117,15 @@ class DiscreteChain(typing.NamedTuple):
         """Leading independent-chain dimensions."""
         return self.initial_probs.shape[:-1]
 
-    def forward_backward(self) -> tuple[DiscreteChainMarginals, jax.Array]:
-        """Infer each chain independently, preserving the batch prefix."""
+    def forward_backward(
+        self,
+        valid: Mask = NO_MASK,
+    ) -> tuple[DiscreteChainMarginals, jax.Array]:
+        """Infer chains with neutral padded factors and exclude invalid suffixes.
+
+        Callers supply neutral local potentials in padded suffixes. Validity
+        denotes a contiguous sequence prefix, never observation visibility.
+        """
         if self.num_steps < 1:
             raise ValueError('Discrete chain inference requires at least one time step')
         batch_shape = self.batch_shape
@@ -130,11 +138,16 @@ class DiscreteChain(typing.NamedTuple):
             raise ValueError(
                 'Discrete chain fields must have aligned batch, time, and state dimensions'
             )
+        valid = valid.align_batch(batch_shape)
+        valid.validate(self.state_log_potentials)
+
         if not batch_shape:
-            return _forward_backward(self).compute_marginals(self)
+            return _forward_backward(self).compute_marginals(self, valid)
+
         return batch.vmap_batch(
-            lambda chain: _forward_backward(chain).compute_marginals(chain),
+            lambda chain, mask: _forward_backward(chain).compute_marginals(chain, mask),
             self,
+            valid,
             batch_shape=self.batch_shape,
         )
 
@@ -179,6 +192,26 @@ class DiscreteChain(typing.NamedTuple):
         return self._replace(
             state_log_potentials=(self.state_log_potentials + potential.log_values)
         )
+
+
+def _masked_initial_probs(chain: DiscreteChain, valid: Mask) -> jax.Array:
+    """Return initial probabilities `(*B, K)`, replacing absent starts with ones.
+
+    Ones give a neutral log potential for empty valid prefixes. A temporary
+    length-one time axis lets the temporal mask apply to the initial state;
+    that axis is removed before returning. The result is for evaluating log
+    potentials, not a normalized distribution for absent starts.
+    """
+    first_step_valid = valid.materialize(chain.num_steps)[..., :1]
+
+    initial_valid = ArbitraryMask(first_step_valid)
+
+    initial_probs = initial_valid.apply(
+        chain.initial_probs[..., None, :],
+        fill=1,
+    )
+
+    return initial_probs[..., 0, :]
 
 
 class DiscreteChainMarginals(typing.NamedTuple):
@@ -237,67 +270,99 @@ class DiscreteChainMarginals(typing.NamedTuple):
         """State probabilities associated with incoming transitions."""
         return self.state_probs[..., 1:, :]
 
-    def entropy(self) -> jax.Array:
+    def entropy(self, valid: Mask = NO_MASK) -> jax.Array:
         """
         Entropy of the normalized chain distribution.
         """
 
+        valid = valid.align_batch(self.batch_shape)
+
+        states = valid.apply(self.state_probs)
+
         initial_entropy = -jnp.sum(
             jsp.special.xlogy(
-                self.state_probs[..., 0, :],
-                self.state_probs[..., 0, :],
+                states[..., 0, :],
+                states[..., 0, :],
             ),
             axis=-1,
         )
 
+        transitions = valid.adjacent_pairs()
+        pairs = transitions.apply(self.pair_probs)
+
         pair_entropy = -jnp.sum(
             jsp.special.xlogy(
-                self.pair_probs,
-                self.pair_probs,
-            ),
-            axis=(-3, -2, -1),
-        )
-
-        conditioning_entropy = jnp.sum(
-            jsp.special.xlogy(
-                self.state_probs[..., :-1, :],
-                self.state_probs[..., :-1, :],
+                pairs,
+                pairs,
             ),
             axis=(-2, -1),
         )
 
-        return initial_entropy + pair_entropy + conditioning_entropy
-
-    def expected_log_potential(
-        self,
-        chain: DiscreteChain,
-    ) -> jax.Array:
-        r"""Expected chain log potential $\mathbb{E}_q[\log f(z)]$."""
-
-        batch.require_same_shape(self.batch_shape, chain.batch_shape)
-        if self.state_probs.shape != chain.state_log_potentials.shape:
-            raise ValueError('chain and posterior time/state dimensions must match')
-        expected_initial = jnp.sum(
+        conditioning_entropy = jnp.sum(
             jsp.special.xlogy(
-                self.state_probs[..., 0, :],
-                chain.initial_probs,
+                states[..., :-1, :],
+                states[..., :-1, :],
             ),
             axis=-1,
         )
 
+        return initial_entropy + jnp.sum(
+            transitions.apply(pair_entropy + conditioning_entropy),
+            axis=-1,
+        )
+
+    def expected_log_potential(
+        self,
+        chain: DiscreteChain,
+        valid: Mask = NO_MASK,
+    ) -> jax.Array:
+        r"""Expected chain log potential $\mathbb{E}_q[\log f(z)]$."""
+
+        batch.require_same_shape(self.batch_shape, chain.batch_shape)
+
+        if self.state_probs.shape != chain.state_log_potentials.shape:
+            raise ValueError('chain and posterior time/state dimensions must match')
+
+        if self.pair_probs.shape != chain.transition_probs.shape:
+            raise ValueError('chain and posterior transition dimensions must match')
+
+        valid = valid.align_batch(self.batch_shape)
+
+        states = valid.apply(self.state_probs)
+
+        initial_probs = _masked_initial_probs(chain, valid)
+        expected_initial = jnp.sum(
+            jsp.special.xlogy(
+                states[..., 0, :],
+                initial_probs,
+            ),
+            axis=-1,
+        )
+
+        transitions = valid.adjacent_pairs()
+        pairs = transitions.apply(self.pair_probs)
+        transition_probs = transitions.apply(chain.transition_probs, fill=1)
+
         expected_transitions = jnp.sum(
             jsp.special.xlogy(
-                self.pair_probs,
-                chain.transition_probs,
+                pairs,
+                transition_probs,
             ),
-            axis=(-3, -2, -1),
+            axis=(-2, -1),
         )
 
+        # Zero-probability states contribute zero even for a -inf log potential.
+        local = jnp.where(states != 0, valid.apply(chain.state_log_potentials), 0)
         expected_local = jnp.sum(
-            self.state_probs * chain.state_log_potentials, axis=(-2, -1)
+            states * local,
+            axis=-1,
         )
 
-        return expected_initial + expected_transitions + expected_local
+        return (
+            expected_initial
+            + jnp.sum(transitions.apply(expected_transitions), axis=-1)
+            + jnp.sum(valid.apply(expected_local), axis=-1)
+        )
 
     def permute_states(self, permutation: jax.Array) -> typing.Self:
         """Relabel discrete states by permutation."""
@@ -325,6 +390,7 @@ class _DiscreteChainMessages(typing.NamedTuple):
     def compute_marginals(
         self,
         chain: DiscreteChain,
+        valid: Mask = NO_MASK,
     ) -> tuple[DiscreteChainMarginals, jax.Array]:
         """Compute normalized chain marginals and the log normalizer."""
 
@@ -333,7 +399,7 @@ class _DiscreteChainMessages(typing.NamedTuple):
             pair_probs=self.compute_pair_marginals(chain),
         )
 
-        log_normalizer = self.compute_log_normalizer()
+        log_normalizer = self.compute_log_normalizer(valid)
 
         return posterior, log_normalizer
 
@@ -394,9 +460,10 @@ class _DiscreteChainMessages(typing.NamedTuple):
             * scale[..., None, None]
         )
 
-    def compute_log_normalizer(self) -> jax.Array:
+    def compute_log_normalizer(self, valid: Mask = NO_MASK) -> jax.Array:
         """Compute the chain log normalizer from forward scaling factors."""
-        return jnp.sum(self.log_scaling_factors, axis=-1)
+        valid = valid.align_batch(self.log_scaling_factors.shape[:-1])
+        return jnp.sum(valid.apply(self.log_scaling_factors), axis=-1)
 
 
 def _forward_pass(
