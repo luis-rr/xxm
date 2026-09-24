@@ -408,24 +408,25 @@ class Sequences:
 @jax.tree_util.register_pytree_node_class
 @dataclasses.dataclass(frozen=True, eq=False)
 class Dataset:
-    """Known observations, inputs, and whole-timestep masks for trajectories.
+    """Known observations, inputs, and whole-timestep visibility for trajectories.
 
     Both temporal components share batch shape `*B`, padded time size `T`, and
-    contiguous valid prefixes. `mask` is an arbitrary boolean `Mask` controlling
+    contiguous valid prefixes. `visible` marks accessible observations with
+    `True` and deliberately withheld observations with `False`; it gates
     observation likelihoods only. Inputs at `t` affect `x[t-1] -> x[t]`; input
     zero is unused by an autonomous initial distribution.
 
-    Public construction validates compatibility, masks, and finite input values
+    Public construction validates compatibility, visibility, and finite input values
     on the host. Transformations and PyTree reconstruction skip those checks.
     """
 
     observations: Sequences
     inputs: Sequences
-    mask: ArbitraryMask
+    visible: ArbitraryMask
 
     def __post_init__(self) -> None:
-        if not isinstance(self.mask, ArbitraryMask):
-            object.__setattr__(self, 'mask', ArbitraryMask(self.mask))
+        if not isinstance(self.visible, ArbitraryMask):
+            object.__setattr__(self, 'visible', ArbitraryMask(self.visible))
         self.validate()
 
     @classmethod
@@ -433,17 +434,17 @@ class Dataset:
         cls,
         observations: Sequences,
         inputs: Sequences,
-        mask: ArbitraryMask,
+        visible: ArbitraryMask,
     ) -> typing.Self:
         """Reconstruct internal data without host-side value validation."""
         instance = object.__new__(cls)
         object.__setattr__(instance, 'observations', observations)
         object.__setattr__(instance, 'inputs', inputs)
-        object.__setattr__(instance, 'mask', mask)
+        object.__setattr__(instance, 'visible', visible)
         return instance
 
     def tree_flatten(self):
-        return (self.observations, self.inputs, self.mask), None
+        return (self.observations, self.inputs, self.visible), None
 
     @classmethod
     def tree_unflatten(cls, auxiliary, children) -> typing.Self:
@@ -475,7 +476,7 @@ class Dataset:
         return self.observations.values.dtype
 
     def astype(self, dtype: jax.typing.DTypeLike) -> typing.Self:
-        """Cast observations only, preserving inputs, prefixes, and masks.
+        """Cast observations only, preserving inputs, prefixes, and visibility.
 
         Structural invariants are preserved, but narrowing casts may overflow.
         Finiteness is validated at public construction, not after transformations.
@@ -487,7 +488,7 @@ class Dataset:
                 mask=self.observations.mask,
             ),
             inputs=self.inputs,
-            mask=self.mask,
+            visible=self.visible,
         )
 
     def validate(self) -> None:
@@ -499,16 +500,16 @@ class Dataset:
         if not bool(jnp.all(self.lengths == self.inputs.lengths)):
             raise ValueError('observations and inputs must share their lengths')
 
-        if self.mask.batch_shape != self.batch_shape:
-            raise ValueError('observation mask must share the dataset batch shape')
-        if self.mask.num_steps != self.num_steps:
-            raise ValueError('observation mask must share the dataset time dimension')
+        if self.visible.batch_shape != self.batch_shape:
+            raise ValueError('visibility must share the dataset batch shape')
+        if self.visible.num_steps != self.num_steps:
+            raise ValueError('visibility must share the dataset time dimension')
 
-        self.mask.validate(self.observations.values)
+        self.visible.validate(self.observations.values)
 
         valid = self.valid().materialize(self.num_steps)
-        if bool(jnp.any(self.mask.values & ~valid)):
-            raise ValueError('mask must be false outside valid sequence prefixes')
+        if bool(jnp.any(self.visible.values & ~valid)):
+            raise ValueError('visible must be false outside valid sequence prefixes')
 
         if not bool(jnp.all(jnp.isfinite(self.observations.values))):
             raise ValueError('observations must contain only finite values')
@@ -521,7 +522,7 @@ class Dataset:
         observations: jax.Array,
         *,
         inputs: jax.Array | None = None,
-        mask: jax.Array | ArbitraryMask | None = None,
+        visible: jax.Array | ArbitraryMask | None = None,
     ) -> typing.Self:
         """Construct one unbatched trajectory from `(T, D_y)` observations."""
         sequence = Sequences.from_sequence(observations)
@@ -529,7 +530,7 @@ class Dataset:
             sequence.values,
             sequence.lengths,
             inputs=inputs,
-            mask=mask,
+            visible=visible,
         )
 
     @classmethod
@@ -538,7 +539,7 @@ class Dataset:
         observations: jax.Array,
         *,
         inputs: jax.Array | None = None,
-        mask: jax.Array | ArbitraryMask | None = None,
+        visible: jax.Array | ArbitraryMask | None = None,
     ) -> typing.Self:
         """Construct equal-length trajectories with arbitrary batch shape."""
         sequences = Sequences.from_batch(observations)
@@ -546,7 +547,7 @@ class Dataset:
             sequences.values,
             sequences.lengths,
             inputs=inputs,
-            mask=mask,
+            visible=visible,
         )
 
     @classmethod
@@ -554,15 +555,15 @@ class Dataset:
         cls,
         observations: typing.Sequence[jax.Array],
         *,
-        inputs: typing.Sequence[jax.Array] = (),
-        mask: typing.Sequence[jax.Array] = (),
+        inputs: typing.Sequence[jax.Array] | None = None,
+        visible: typing.Sequence[jax.Array] | None = None,
     ) -> typing.Self:
         """Pad a flat collection of unequal-length observation trajectories."""
         observations = tuple(jnp.asarray(values) for values in observations)
         sequences = Sequences.from_sequences(observations)
 
         padded_inputs = None
-        if len(inputs):
+        if inputs is not None:
             inputs = tuple(jnp.asarray(values) for values in inputs)
             if any(values.ndim != 2 for values in inputs):
                 raise ValueError('each input sequence must have shape (T_i, D_u)')
@@ -573,27 +574,27 @@ class Dataset:
             )
             padded_inputs = Sequences.from_sequences(inputs).values
 
-        padded_mask = None
-        if len(mask):
-            mask = tuple(jnp.asarray(values) for values in mask)
-            if any(values.ndim != 1 for values in mask):
-                raise ValueError('each mask sequence must have shape (T_i,)')
-            if any(values.dtype != jnp.bool_ for values in mask):
-                raise ValueError('mask must have boolean dtype')
+        padded_visible = None
+        if visible is not None:
+            visible = tuple(jnp.asarray(values) for values in visible)
+            if any(values.ndim != 1 for values in visible):
+                raise ValueError('each visible sequence must have shape (T_i,)')
+            if any(values.dtype != jnp.bool_ for values in visible):
+                raise ValueError('visible must have boolean dtype')
             _require_matching_lengths(
-                mask,
+                visible,
                 observations,
-                name='mask',
+                name='visible',
             )
-            padded_mask = jnp.stack(
-                [_pad_time(values, sequences.num_steps) for values in mask],
+            padded_visible = jnp.stack(
+                [_pad_time(values, sequences.num_steps) for values in visible],
             )
 
         return cls.from_padded(
             sequences.values,
             sequences.lengths,
             inputs=padded_inputs,
-            mask=padded_mask,
+            visible=padded_visible,
         )
 
     @classmethod
@@ -603,7 +604,7 @@ class Dataset:
         lengths: jax.Array,
         *,
         inputs: jax.Array | None = None,
-        mask: jax.Array | ArbitraryMask | None = None,
+        visible: jax.Array | ArbitraryMask | None = None,
     ) -> typing.Self:
         """Construct explicitly padded trajectories `(*B, T, D_y)`."""
         observation_sequences = Sequences.from_padded(
@@ -622,22 +623,22 @@ class Dataset:
             observation_sequences.lengths,
         )
 
-        if mask is None:
-            observation_mask = observation_sequences.valid().materialize(
+        if visible is None:
+            visibility = observation_sequences.valid().materialize(
                 observation_sequences.num_steps
             )
 
-            observation_mask = ArbitraryMask(observation_mask)
+            visibility = ArbitraryMask(visibility)
 
-        elif isinstance(mask, ArbitraryMask):
-            observation_mask = mask
+        elif isinstance(visible, ArbitraryMask):
+            visibility = visible
         else:
-            observation_mask = ArbitraryMask(mask)
+            visibility = ArbitraryMask(visible)
 
         return cls(
             observation_sequences,
             input_sequences,
-            observation_mask,
+            visibility,
         )
 
     @classmethod
@@ -666,9 +667,9 @@ class Dataset:
             axis=axis,
         )
 
-        masks = [
+        visibility = [
             jnp.pad(
-                data.mask.values,
+                data.visible.values,
                 ((0, 0),) * len(data.batch_shape)
                 + ((0, observations.num_steps - data.num_steps),),
                 constant_values=False,
@@ -679,7 +680,7 @@ class Dataset:
         return cls._unchecked(
             observations,
             inputs,
-            ArbitraryMask._unchecked(jnp.stack(masks, axis=axis)),
+            ArbitraryMask._unchecked(jnp.stack(visibility, axis=axis)),
         )
 
     def select(self, index: batch.SelT) -> typing.Self:
@@ -702,10 +703,6 @@ class Dataset:
         """Move one batch axis to another batch position."""
         return batch.move_axis(self, source, destination)
 
-    def unpack(self) -> tuple[jax.Array, ...]:
-        """Crop observations in an unbatched or flat dataset on the host."""
-        return self.observations.unpack()
-
     def valid(self) -> ContiguousMask:
         """Contiguous timesteps belonging to each trajectory."""
         return self.observations.valid()
@@ -724,8 +721,8 @@ class Dataset:
         )
 
     def observation_weights(self) -> jax.Array:
-        """Boolean weights for valid timesteps with an available observation."""
-        return self.valid().apply(self.mask.values)
+        """Boolean weights combining structural validity and observation visibility."""
+        return self.valid().apply(self.visible.values)
 
     def weighted_observations(self) -> WeightedObservations:
         """Observation values with validity-aware weights."""

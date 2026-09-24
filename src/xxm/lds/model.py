@@ -46,51 +46,6 @@ _fit_laplace_em_jit = jax.jit(
 _elbo_jit = jax.jit(elbo)
 
 
-def _latent_components_from_params(
-    initial_mean: jax.Array,
-    initial_covariance: jax.Array,
-    dynamics_coefficients: jax.Array,
-    dynamics_input_coefficients: jax.Array | None,
-    dynamics_bias: jax.Array,
-    dynamics_covariance: jax.Array,
-) -> tuple[GaussianInitial, GaussianLinearDynamics]:
-    dynamics_coefficients = jnp.asarray(dynamics_coefficients)
-
-    if dynamics_input_coefficients is None:
-        dynamics_input_coefficients = jnp.empty(
-            (*dynamics_coefficients.shape[:-1], 0),
-            dtype=dynamics_coefficients.dtype,
-        )
-    else:
-        dynamics_input_coefficients = jnp.asarray(dynamics_input_coefficients)
-
-    coefficients = jnp.concatenate(
-        [
-            dynamics_coefficients,
-            dynamics_input_coefficients,
-        ],
-        axis=-1,
-    )
-
-    return (
-        GaussianInitial(
-            dist=Gaussian(
-                mean=initial_mean,
-                covariance=initial_covariance,
-            )
-        ),
-        GaussianLinearDynamics(
-            dist=LinearGaussian(
-                affine=Affine(
-                    coefficients=coefficients,
-                    bias=dynamics_bias,
-                ),
-                covariance=dynamics_covariance,
-            )
-        ),
-    )
-
-
 def _sampling_inputs(
     model: Model,
     num_steps: int,
@@ -161,10 +116,12 @@ class GaussianLDS:
         """Dimension $D_y$ of each observation."""
         return self._model.emissions.dist.output_dim
 
+    @property
     def input_dim(self) -> int:
         """Dimension $D_u$ of known dynamics inputs."""
         return self._model.dynamics.input_dim
 
+    @property
     def input_coefficients(self) -> jax.Array:
         """Known-input dynamics coefficients $B$."""
         return self._model.dynamics.input_coefficients
@@ -193,13 +150,14 @@ class GaussianLDS:
         dynamics_input_coefficients: jax.Array | None = None,
     ) -> typing.Self:
         """Construct a Gaussian LDS from explicit parameters."""
-        initial, dynamics = _latent_components_from_params(
-            initial_mean=initial_mean,
-            initial_covariance=initial_covariance,
-            dynamics_coefficients=dynamics_coefficients,
-            dynamics_input_coefficients=dynamics_input_coefficients,
-            dynamics_bias=dynamics_bias,
-            dynamics_covariance=dynamics_covariance,
+        initial = GaussianInitial(
+            dist=Gaussian(mean=initial_mean, covariance=initial_covariance)
+        )
+        dynamics = GaussianLinearDynamics.from_params(
+            latent_coefficients=dynamics_coefficients,
+            input_coefficients=dynamics_input_coefficients,
+            bias=dynamics_bias,
+            covariance=dynamics_covariance,
         )
 
         return cls(
@@ -331,10 +289,12 @@ class PoissonLDS:
         """Dimension $D_y$ of each observation."""
         return self._model.emissions.dist.output_dim
 
+    @property
     def input_dim(self) -> int:
         """Dimension $D_u$ of known dynamics inputs."""
         return self._model.dynamics.input_dim
 
+    @property
     def input_coefficients(self) -> jax.Array:
         """Known-input dynamics coefficients $B$."""
         return self._model.dynamics.input_coefficients
@@ -362,13 +322,14 @@ class PoissonLDS:
         dynamics_input_coefficients: jax.Array | None = None,
     ) -> typing.Self:
         """Construct a Poisson LDS from explicit parameters."""
-        initial, dynamics = _latent_components_from_params(
-            initial_mean=initial_mean,
-            initial_covariance=initial_covariance,
-            dynamics_coefficients=dynamics_coefficients,
-            dynamics_input_coefficients=dynamics_input_coefficients,
-            dynamics_bias=dynamics_bias,
-            dynamics_covariance=dynamics_covariance,
+        initial = GaussianInitial(
+            dist=Gaussian(mean=initial_mean, covariance=initial_covariance)
+        )
+        dynamics = GaussianLinearDynamics.from_params(
+            latent_coefficients=dynamics_coefficients,
+            input_coefficients=dynamics_input_coefficients,
+            bias=dynamics_bias,
+            covariance=dynamics_covariance,
         )
 
         return cls(

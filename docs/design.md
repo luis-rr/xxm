@@ -348,7 +348,7 @@ Low-level inference returns a numerical `InferenceState` containing the model, p
 
 The facades represent singular, unbatched models. Their `via_*`, `infer`, and `fit` methods accept a `Dataset`. Facade inference returns an immutable host-side `Inferred` owning the facade model, raw posterior, and exact source dataset. Fitting returns `Fit(inferred, objective_trace)`, including the initial objective in the trace.
 
-`Sequences` stores temporal values `(*B, T, D)` and lengths `(*B,)`. `Dataset` composes observations and inputs as matching `Sequences`, plus a whole-timestep mask `(*B, T)`. Public posterior batches match the dataset batch exactly; a single unbatched trajectory has no artificial sequence axis. Temporal accessors return `Sequences`, whose `get(index)` retrieves one cropped array on the host. `unpack()` is a convenience for unbatched or flat collections, and `stack()` constructs rectangular batch hierarchies.
+`Sequences` stores temporal values `(*B, T, D)` and lengths `(*B,)`. `Dataset` composes observations and inputs as matching `Sequences`, plus whole-timestep visibility `visible` with shape `(*B, T)`. Public posterior batches match the dataset batch exactly; a single unbatched trajectory has no artificial sequence axis. Temporal accessors return `Sequences`, whose `get(index)` retrieves one cropped array on the host. `unpack()` is a convenience for unbatched or flat collections, and `stack()` constructs rectangular batch hierarchies.
 
 
 ## JAX and model representation

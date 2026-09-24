@@ -10,7 +10,6 @@ from jax import numpy as jnp
 from xxm.core import batch
 from xxm.core.affine import Affine
 from xxm.core.chains.gaussian import GaussianChainMarginals as Posterior
-from xxm.core.chains.gaussian import GaussianPairPotential, GaussianPotential
 from xxm.core.data import Dataset
 from xxm.core.emissions.continuous import EmissionsT
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
@@ -63,18 +62,6 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         """Move one model batch axis to another batch position."""
         return batch.move_axis(self, source, destination)
 
-    def compute_initial_potential(self) -> GaussianPotential:
-        """Return the canonical potential for the initial latent distribution."""
-        return GaussianPotential.from_moments(self.initial.dist)
-
-    def compute_pair_potentials(
-        self,
-        inputs: jax.Array,
-    ) -> GaussianPairPotential:
-        """Return controlled pair potentials for transition-aligned inputs."""
-        conditional = self.dynamics.conditional(inputs)
-        return GaussianPairPotential.from_linear_conditional(conditional)
-
     def sample(
         self,
         key: jax.Array,
@@ -124,7 +111,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         r"""
         Compute the joint log density across independent sequences.
 
-        Observation factors are included only where `data.mask` is true.
+        Observation factors are included only where `data.visible` is true.
         Latent initial and transition factors are included throughout each valid
         sequence prefix. Independent sequence log densities are summed.
         """

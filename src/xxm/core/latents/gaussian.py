@@ -7,7 +7,7 @@ from jax import numpy as jnp
 
 from xxm.core import batch
 from xxm.core.affine import Affine
-from xxm.core.chains.gaussian import GaussianPotential
+from xxm.core.chains.gaussian import GaussianPairPotential, GaussianPotential
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian, PairedGaussian
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim.batch import filter_valid_batches
@@ -18,6 +18,10 @@ class GaussianInitial(typing.NamedTuple):
     r"""Initial distribution $p(x_0)$ for continuous latent state."""
 
     dist: Gaussian  # structural batch *B
+
+    def compute_potential(self) -> GaussianPotential:
+        """Return the canonical Gaussian potential for the initial distribution."""
+        return GaussianPotential.from_moments(self.dist)
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
@@ -155,6 +159,41 @@ class GaussianLinearDynamics(typing.NamedTuple):
     """
 
     dist: LinearGaussian
+
+    @classmethod
+    def from_params(
+        cls,
+        *,
+        latent_coefficients: jax.Array,
+        input_coefficients: jax.Array | None,
+        bias: jax.Array,
+        covariance: jax.Array,
+    ) -> typing.Self:
+        """Construct dynamics from latent and optional known-input coefficients."""
+        latent_coefficients = jnp.asarray(latent_coefficients)
+        if input_coefficients is None:
+            input_coefficients = jnp.empty(
+                (*latent_coefficients.shape[:-1], 0),
+                dtype=latent_coefficients.dtype,
+            )
+        else:
+            input_coefficients = jnp.asarray(input_coefficients)
+
+        return cls(
+            dist=LinearGaussian(
+                affine=Affine(
+                    coefficients=jnp.concatenate(
+                        [latent_coefficients, input_coefficients], axis=-1
+                    ),
+                    bias=bias,
+                ),
+                covariance=covariance,
+            )
+        )
+
+    def compute_pair_potentials(self, inputs: jax.Array) -> GaussianPairPotential:
+        """Return pair potentials after conditioning on known inputs."""
+        return GaussianPairPotential.from_linear_conditional(self.conditional(inputs))
 
     @property
     def batch_shape(self) -> tuple[int, ...]:

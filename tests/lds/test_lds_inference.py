@@ -1,12 +1,13 @@
 import jax
 import numpy as np
+import pytest
 from jax import numpy as jnp
 
 from xxm.core.affine import Affine
 from xxm.core.data import Dataset
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
-from xxm.core.emissions.continuous import PoissonEmissions
+from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
 from xxm.core.mask import NO_MASK
 from xxm.core.optim.laplace import (
@@ -68,6 +69,62 @@ def test_exact_inference_is_jittable():
         jitted.posterior.covariances, eager.posterior.covariances
     )
     np.testing.assert_allclose(jitted.objective, eager.objective)
+
+
+@pytest.mark.parametrize(
+    ('make', 'infer'),
+    [(make_model, infer_exact), (make_scalar_poisson_model, infer_laplace)],
+)
+def test_withheld_observations_do_not_change_inference(make, infer):
+    model = make()
+    dim = model.emissions.dist.output_dim
+    values = jnp.ones((3, dim))
+    visible = jnp.array([True, False, True])
+    original = Dataset.from_sequence(values, visible=visible)
+    changed = Dataset.from_sequence(values.at[1].set(100.0), visible=visible)
+    expected = infer(model, original)
+    actual = infer(model, changed)
+    np.testing.assert_allclose(
+        actual.posterior.means, expected.posterior.means, atol=1e-5
+    )
+    np.testing.assert_allclose(actual.objective, expected.objective, atol=1e-5)
+    np.testing.assert_allclose(
+        model.log_joint(original, expected.posterior.means),
+        model.log_joint(changed, expected.posterior.means),
+        atol=1e-5,
+    )
+
+
+def test_hidden_timesteps_keep_known_inputs_and_padding_excludes_transitions():
+    model = Model(
+        initial=GaussianInitial(Gaussian(jnp.zeros(1), jnp.eye(1))),
+        dynamics=GaussianLinearDynamics.from_params(
+            latent_coefficients=jnp.eye(1),
+            input_coefficients=jnp.array([[2.0]]),
+            bias=jnp.zeros(1),
+            covariance=jnp.eye(1),
+        ),
+        emissions=GaussianEmissions(
+            LinearGaussian(Affine(jnp.eye(1), jnp.zeros(1)), jnp.eye(1))
+        ),
+    )
+    data = Dataset.from_padded(
+        jnp.full((4, 1), 100.0),
+        jnp.array(3),
+        inputs=jnp.array([[99.0], [1.0], [2.0], [1000.0]]),
+        visible=jnp.zeros(4, dtype=bool),
+    )
+    result = jax.jit(infer_exact)(model, data)
+    np.testing.assert_allclose(
+        result.posterior.means[:3, 0], [0.0, 2.0, 6.0], atol=1e-5
+    )
+    np.testing.assert_allclose(result.objective, 0.0, atol=1e-5)
+    potential = model.initial.compute_potential()
+    np.testing.assert_allclose(potential.precision_blocks, [[1.0]])
+    np.testing.assert_allclose(potential.information_vectors, [0.0])
+    np.testing.assert_allclose(
+        potential.log_constant, -0.5 * np.log(2 * np.pi), atol=1e-6
+    )
 
 
 def test_laplace_recovers_known_scalar_map():

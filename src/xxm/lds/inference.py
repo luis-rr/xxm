@@ -29,20 +29,12 @@ def _prior_potentials(
     GaussianPairPotential,
 ]:
     """Construct the genuine initial and transition factors."""
-    initial_potential = GaussianPotential.from_moments(
-        working_model.initial.dist,
-    )
+    initial_potential = working_model.initial.compute_potential()
 
     valid_transitions = working_data.valid_transitions()
-    transition_inputs = working_data.transition_inputs()
+    safe_inputs = valid_transitions.apply(working_data.transition_inputs())
 
-    safe_inputs = valid_transitions.apply(transition_inputs)
-
-    transition_dist = working_model.dynamics.conditional(safe_inputs)
-
-    pair_potential = GaussianPairPotential.from_linear_conditional(
-        transition_dist,
-    )
+    pair_potential = working_model.dynamics.compute_pair_potentials(safe_inputs)
 
     pair_potential = pair_potential.scale(
         valid_transitions.materialize(working_data.num_steps - 1)
