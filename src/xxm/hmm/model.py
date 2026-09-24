@@ -252,13 +252,6 @@ class PoissonHMM:
         """State-conditional Poisson emission distributions."""
         return self._model.emissions.dist
 
-    def most_likely_states(self, posterior: Posterior) -> jax.Array:
-        """Return the marginally most likely state at each time point."""
-        return jnp.argmax(
-            posterior.state_probs,
-            axis=-1,
-        )
-
     @classmethod
     def from_params(
         cls,
@@ -378,12 +371,38 @@ class Inferred(typing.Generic[HMMFacadeT]):
             self.data.lengths,
         )
 
-    def observation_mean(self, posterior: Posterior) -> jax.Array:
+    def observation_mean(self) -> Sequences:
         """Return the posterior mean observation at each time point."""
-        return self.model.model.emissions.broadcast(
-            posterior.batch_shape
+        means = self.model.model.emissions.broadcast(
+            self.posterior.batch_shape
         ).observation_mean(
-            posterior,
+            self.posterior,
+        )
+
+        return Sequences.from_padded(
+            means,
+            self.data.lengths,
+        )
+
+    def permute_states(self, permutation: jax.Array) -> Inferred[HMMFacadeT]:
+        """Relabel discrete states by permutation."""
+        return Inferred(
+            model=self.model.permute_states(permutation),
+            posterior=self.posterior.permute_states(permutation),
+            data=self.data,
+        )
+
+    def most_likely_states(self) -> Sequences:
+        """Return the marginally most likely state at each time point."""
+        most_likely = jnp.argmax(
+            self.posterior.state_probs,
+            axis=-1,
+            keepdims=True,
+        )
+
+        return Sequences.from_padded(
+            most_likely,
+            self.data.lengths,
         )
 
 

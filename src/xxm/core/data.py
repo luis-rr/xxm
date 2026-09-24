@@ -259,20 +259,32 @@ class Sequences:
     def validate(self) -> None:
         """Validate shapes and sequence-prefix lengths on the host."""
         if self.values.ndim < 2:
-            raise ValueError('values must have shape (*B, T, D)')
+            raise ValueError(
+                f'values must have shape (*B, T, D). Got {self.values.shape}'
+            )
+
         if self.num_steps < 1:
-            raise ValueError('sequences must contain at least one timestep')
+            raise ValueError(
+                f'sequences must contain at least one timestep. Got {self.num_steps}'
+            )
+
         if self.mask.batch_shape != self.batch_shape:
-            raise ValueError('mask lengths must have shape matching batch_shape')
+            raise ValueError(
+                f'mask lengths must have shape matching batch_shape. Got {self.mask.batch_shape}, expected {self.batch_shape}'
+            )
+
         if bool(jnp.any((self.lengths < 1) | (self.lengths > self.num_steps))):
-            raise ValueError('lengths must lie between 1 and T')
+            raise ValueError(
+                f'lengths must lie between 1 and T. Got {self.lengths}, expected 1 to {self.num_steps}'
+            )
 
     @classmethod
     def from_sequence(cls, values: jax.Array) -> typing.Self:
         """Construct one unbatched sequence `(T, D)`."""
         values = jnp.asarray(values)
         if values.ndim != 2:
-            raise ValueError('values must have shape (T, D)')
+            raise ValueError(f'values must have shape (T, D). Got {values.shape}')
+
         return cls.from_padded(
             values,
             jnp.asarray(values.shape[0], dtype=jnp.int32),
@@ -283,7 +295,8 @@ class Sequences:
         """Construct equal-length temporal values `(*B, T, D)`."""
         values = jnp.asarray(values)
         if values.ndim < 2:
-            raise ValueError('values must have shape (*B, T, D)')
+            raise ValueError(f'values must have shape (*B, T, D). Got {values.shape}')
+
         return cls.from_padded(
             values,
             jnp.full(
