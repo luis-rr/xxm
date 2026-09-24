@@ -349,6 +349,10 @@ class GaussianEmissions(typing.NamedTuple):
             posterior.means,
         )
 
+    def conditional_mean(self, latents: jax.Array) -> jax.Array:
+        """Expected observations at deterministic latent values."""
+        return self.dist.conditional_mean(latents)
+
     def compose_input(
         self,
         alignment: Affine,
@@ -617,6 +621,10 @@ class PoissonEmissions(typing.NamedTuple):
                 covariance=posterior.covariances,
             )
         )
+
+    def conditional_mean(self, latents: jax.Array) -> jax.Array:
+        """Expected counts at deterministic latent values."""
+        return self.dist.conditional(latents).rates
 
     def compose_input(
         self,

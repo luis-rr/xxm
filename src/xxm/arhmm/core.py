@@ -1,4 +1,4 @@
-r"""Single-sequence autoregressive Hidden Markov Model."""
+r"""Autoregressive Hidden Markov Model."""
 
 from __future__ import annotations
 
@@ -6,49 +6,86 @@ import typing
 
 import jax
 
-from xxm.core.chains.discrete import DiscreteChainMarginals as Posterior
-from xxm.core.latents.discrete import CategoricalInitial, CategoricalTransitions
+from xxm.core import batch
+from xxm.core.chains.discrete import (
+    DiscreteChainMarginals as Posterior,
+)
+from xxm.core.latents.discrete import (
+    CategoricalInitial,
+    CategoricalTransitions,
+)
 
-from .data import ARObservations
+from .data import ARDataset
 from .emissions import AREmissions, ConditionalDistT
 
 
-class Model(typing.NamedTuple, typing.Generic[ConditionalDistT]):
-    r"""
-    HMM whose state selects an autoregressive conditional distribution.
-
-    For history length $L$, posterior row $r$ selects the regression producing
-    $y_{L+r}$ from $(y_{L+r-1}, ..., y_r)$. The first $L$ observations are
-    fixed conditioning history; the chain has $T-L$ states.
-
-    Sampling uses zero prehistory or explicit chronological continuation history.
-    """
+class Model(
+    typing.NamedTuple,
+    typing.Generic[ConditionalDistT],
+):
+    """HMM whose state selects an autoregressive conditional distribution."""
 
     initial: CategoricalInitial
     transitions: CategoricalTransitions
     emissions: AREmissions[ConditionalDistT]
 
     @property
+    def batch_shape(self) -> tuple[int, ...]:
+        batch.require_same_shape(
+            self.initial.batch_shape,
+            self.transitions.batch_shape,
+            self.emissions.batch_shape,
+        )
+        return self.initial.batch_shape
+
+    def select(self, index: batch.SelT) -> typing.Self:
+        return batch.select(self, index)
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        return batch.broadcast(self, shape, axis=axis)
+
+    def squeeze(self, axis=None) -> typing.Self:
+        return batch.squeeze(self, axis=axis)
+
+    def permute(
+        self,
+        permutation,
+        axis: int = 0,
+    ) -> typing.Self:
+        return batch.permute(
+            self,
+            permutation,
+            axis=axis,
+        )
+
+    def move_axis(
+        self,
+        source: int,
+        destination: int,
+    ) -> typing.Self:
+        return batch.move_axis(
+            self,
+            source,
+            destination,
+        )
+
+    @property
     def num_states(self) -> int:
-        """Number of discrete states $K$."""
         return self.initial.num_states
 
     @property
     def num_lags(self) -> int:
-        """Number of autoregressive lags $L$."""
         return self.emissions.num_lags
 
     @property
-    def output_dim(self) -> int:
-        """Observation dimension $D_y$."""
-        return self.emissions.output_dim
+    def observation_dim(self) -> int:
+        return self.emissions.observation_dim
 
     def permute_states(
         self,
         permutation: jax.Array,
-    ) -> Model[ConditionalDistT]:
-        """Relabel discrete states by permutation."""
-        return Model(
+    ) -> typing.Self:
+        return self._replace(
             initial=self.initial.permute_states(permutation),
             transitions=self.transitions.permute_states(permutation),
             emissions=self.emissions.permute_states(permutation),
@@ -59,7 +96,6 @@ class Model(typing.NamedTuple, typing.Generic[ConditionalDistT]):
         key: jax.Array,
         num_steps: int,
     ) -> jax.Array:
-        """Sample state trajectory $z_{0:T-1}$ from the prior."""
         key_initial, key_transitions = jax.random.split(key)
 
         initial_state = self.initial.sample(
@@ -77,7 +113,6 @@ class Model(typing.NamedTuple, typing.Generic[ConditionalDistT]):
         key: jax.Array,
         num_steps: int,
     ) -> tuple[jax.Array, jax.Array]:
-        r"""Sample complete trajectory $(z_{0:T-1}, y_{0:T-1})$ autonomously."""
         key_states, key_observations = jax.random.split(key)
 
         states = self.sample_states(
@@ -85,7 +120,10 @@ class Model(typing.NamedTuple, typing.Generic[ConditionalDistT]):
             num_steps,
         )
 
-        observations = self.emissions.sample(key_observations, states)
+        observations = self.emissions.sample(
+            key_observations,
+            states,
+        )
 
         return states, observations
 
@@ -95,30 +133,57 @@ class Model(typing.NamedTuple, typing.Generic[ConditionalDistT]):
         num_steps: int,
         initial_history: jax.Array,
     ) -> tuple[jax.Array, jax.Array]:
-        """Sample states and observations conditional on an explicit history."""
         key_states, key_observations = jax.random.split(key)
 
-        states = self.sample_states(key_states, num_steps)
+        states = self.sample_states(
+            key_states,
+            num_steps,
+        )
 
         observations = self.emissions.sample_continuation(
-            key_observations, states, initial_history
+            key_observations,
+            states,
+            initial_history,
         )
 
         return states, observations
 
     def fit_params(
         self,
-        data: ARObservations,
+        data: ARDataset,
         posterior: Posterior,
-    ) -> Model[ConditionalDistT]:
-        """
-        Perform the EM M-step from posterior state and pair marginals.
-        """
-        return Model(
-            initial=self.initial.fit_params(posterior),
-            transitions=self.transitions.fit_params(posterior),
+    ) -> typing.Self:
+        """Pool independent AR sequences while preserving model batch."""
+        expected_batch = (
+            *self.batch_shape,
+            *data.batch_shape,
+        )
+
+        if posterior.batch_shape != expected_batch:
+            raise ValueError(
+                f'posterior batch must be {expected_batch}; got {posterior.batch_shape}'
+            )
+
+        working_data = data
+
+        if self.batch_shape:
+            working_data = data.broadcast(
+                self.batch_shape,
+                axis=0,
+            )
+
+        return self._replace(
+            initial=self.initial.fit_params(
+                posterior,
+            ),
+            transitions=self.transitions.fit_params(
+                posterior,
+                weights=working_data.valid_transitions().materialize(
+                    working_data.num_steps - 1
+                ),
+            ),
             emissions=self.emissions.fit_params(
-                data,
+                working_data,
                 posterior,
             ),
         )

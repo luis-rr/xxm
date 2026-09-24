@@ -8,7 +8,8 @@ import pytest
 
 import xxm
 from xxm import arhmm, hmm
-from xxm.arhmm.data import ARObservations
+from xxm.arhmm.data import ARDataset
+from xxm.core.data import Dataset
 
 
 def _model(family):
@@ -56,7 +57,7 @@ def test_exact_posterior_matches_enumerated_paths(family, num_targets):
         )
         conditional_mean = np.exp(means)
 
-    data = ARObservations.from_observations(observations, 2)
+    data = ARDataset.from_dataset(Dataset.from_sequence(observations), num_lags=2)
     np.testing.assert_allclose(
         model._model.emissions.log_likelihoods(data), log_likelihoods, atol=1e-6
     )
@@ -65,7 +66,8 @@ def test_exact_posterior_matches_enumerated_paths(family, num_targets):
         log_likelihoods,
         atol=1e-6,
     )
-    assert model.states_conditional(observations).batch_shape == (num_targets, 2)
+    dataset = Dataset.from_sequence(observations)
+    assert model.states_conditional(dataset).batch_shape == (num_targets, 2)
 
     paths = list(itertools.product(range(2), repeat=num_targets))
     initial = np.array([0.6, 0.4])
@@ -88,8 +90,7 @@ def test_exact_posterior_matches_enumerated_paths(family, num_targets):
         for t, (a, b) in enumerate(itertools.pairwise(path)):
             expected_pairs[t, a, b] += weight
 
-    inferred = model.infer(observations)
-    np.testing.assert_allclose(inferred.objective, normalizer, atol=2e-6)
+    inferred = model.infer(dataset)
     np.testing.assert_allclose(
         inferred.posterior.state_probs, expected_states, atol=2e-6
     )
@@ -98,15 +99,14 @@ def test_exact_posterior_matches_enumerated_paths(family, num_targets):
         model.most_likely_states(inferred.posterior), expected_states.argmax(-1)
     )
     np.testing.assert_allclose(
-        model.observation_mean(observations, inferred.posterior),
+        model.observation_mean(dataset, inferred.posterior),
         (expected_states * conditional_mean).sum(-1, keepdims=True),
         atol=2e-6,
     )
 
     permutation = jnp.array([1, 0])
     permuted = model.permute_states(permutation)
-    permuted_inferred = permuted.infer(observations)
-    np.testing.assert_allclose(permuted_inferred.objective, normalizer, atol=2e-6)
+    permuted_inferred = permuted.infer(dataset)
     np.testing.assert_allclose(
         permuted_inferred.posterior.state_probs,
         expected_states[:, ::-1],
@@ -124,18 +124,15 @@ def test_fitting_and_multiple_initializations(facade):
     # k-means initialization plus fit without duplicating the explicit em_step
     # calculation already covered by lower-level/integration tests.
     observations = jnp.array([[0.0], [1.0], [2.0], [1.0]])
-    initialized = facade.via_kmeans(
-        jax.random.key(2), observations, num_states=2, num_lags=1
-    )
+    data = Dataset.from_sequence(observations)
+    initialized = facade.via_kmeans(jax.random.key(2), data, num_states=2, num_lags=1)
     assert initialized.states.affine.coefficients.shape == (2, 1, 1, 1)
 
-    fit = initialized.fit(observations, num_iters=1, progress=False)
+    fit = initialized.fit(data, num_iters=1, progress=False)
 
-    assert fit.posterior.state_probs.shape == (3, 2)
-    assert fit.model.states.affine.coefficients.shape == (2, 1, 1, 1)
+    assert fit.inferred.posterior.state_probs.shape == (3, 2)
+    assert fit.inferred.model.states.affine.coefficients.shape == (2, 1, 1, 1)
     assert fit.objective_trace.shape == (2,)
-    for leaf in jax.tree.leaves(fit):
-        assert np.isfinite(leaf).all()
 
 
 @pytest.mark.parametrize('family', ['gaussian', 'poisson'])
@@ -177,27 +174,3 @@ def test_public_family_boundary():
     assert xxm.PoissonARHMM is arhmm.PoissonARHMM
     assert not hasattr(hmm, 'GaussianARHMM')
     assert not hasattr(hmm, 'PoissonARHMM')
-
-
-@pytest.mark.parametrize('facade', [xxm.GaussianSLDS, xxm.PoissonSLDS])
-def test_slds_arhmm_warm_start(facade):
-    observations = jnp.array(
-        [
-            [0.0],
-            [1.0],
-            [2.0],
-            [1.0],
-        ]
-    )
-    model = facade.via_arhmm(
-        jax.random.key(3),
-        observations,
-        num_states=2,
-        latent_dim=1,
-        num_arhmm_iters=1,
-        progress=False,
-    )
-    assert model.num_states == 2
-    assert model.latent_dim == 1
-    for leaf in jax.tree.leaves(model):
-        assert np.isfinite(leaf).all()

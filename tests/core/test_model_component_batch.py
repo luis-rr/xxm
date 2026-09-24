@@ -7,13 +7,13 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from xxm.arhmm.data import ARObservations
+from xxm.arhmm.data import ARDataset
 from xxm.arhmm.emissions import AREmissions
 from xxm.core import batch
 from xxm.core.affine import Affine
 from xxm.core.chains.discrete import DiscreteChainMarginals
 from xxm.core.chains.gaussian import GaussianChainMarginals
-from xxm.core.data import WeightedObservations
+from xxm.core.data import Dataset, WeightedObservations
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
@@ -272,7 +272,12 @@ def test_gaussian_latent_sampling_and_potentials(kind, component):
         initial = posterior.means[..., 0, :]
         if kind == 'switching':
             states = jnp.zeros(FIT_B + (T - 1,), dtype=jnp.int32)
-            sampled = component.sample(key, initial, states)
+            sampled = component.sample(
+                key,
+                initial,
+                states,
+                inputs=jnp.empty(FIT_B + (T - 1, 0), dtype=initial.dtype),
+            )
         else:
             sampled = component.sample(
                 key, initial, T, inputs=jnp.empty(FIT_B + (T, 0), dtype=initial.dtype)
@@ -280,7 +285,9 @@ def test_gaussian_latent_sampling_and_potentials(kind, component):
         assert sampled.shape == FIT_B + (T, D)
         np.testing.assert_array_equal(sampled[..., 0, :], initial)
     if kind == 'switching':
-        assert component.compute_pair_potentials().batch_shape == FIT_B + (K,)
+        assert component.compute_pair_potentials(
+            jnp.empty(FIT_B + (T - 1, 0), dtype=posterior.means.dtype)
+        ).batch_shape == FIT_B + (T - 1, K)
 
 
 def test_gaussian_latent_fit_requires_receiver_batch_prefix():
@@ -323,7 +330,7 @@ def test_state_emission_likelihood_and_sampling(kind, component):
     ).astype(jnp.float32)
     is_ar = kind.startswith('ar_')
     data = (
-        ARObservations.from_observations(observations, L)
+        ARDataset.from_dataset(Dataset.from_batch(observations), L)
         if is_ar
         else WeightedObservations(observations, jnp.ones(FIT_B + (T,), dtype=bool))
     )
@@ -332,7 +339,7 @@ def test_state_emission_likelihood_and_sampling(kind, component):
     for index in FIT_INDICES:
         standalone = component.select(index)
         data_i = (
-            ARObservations.from_observations(observations[index], L)
+            ARDataset.from_sequence(observations[index], L)
             if is_ar
             else WeightedObservations.from_sequence(observations[index])
         )
@@ -342,7 +349,7 @@ def test_state_emission_likelihood_and_sampling(kind, component):
     states = jnp.zeros(FIT_B + (T,), dtype=jnp.int32)
     assert component.sample(jax.random.key(3), states).shape == FIT_B + (T, O)
     if is_ar:
-        assert isinstance(data, ARObservations)
+        assert isinstance(data, ARDataset)
         assert component.conditional(data.predictors).batch_shape == FIT_B + (T - L, K)
         assert component.sample_continuation(
             jax.random.key(3), states, observations[..., :L, :]
@@ -536,11 +543,16 @@ def test_unoccupied_states_retain_each_batchs_parameters(kind, component):
         state_probs[..., :-1, :, None] * state_probs[..., 1:, None, :],
     )
     if kind == 'switching':
-        fitted = component.fit_params(posterior, _continuous_posterior())
+        fitted = component.fit_params(
+            posterior,
+            _continuous_posterior(),
+            inputs=jnp.empty(B + (T - 1, 0)),
+            weights=jnp.ones(B + (T - 1,)),
+        )
     else:
         observations = 2.0 + _values(B + (T, O))
         data = (
-            ARObservations.from_observations(observations, L)
+            ARDataset.from_dataset(Dataset.from_batch(observations), L)
             if kind.startswith('ar_')
             else WeightedObservations(observations, jnp.ones(B + (T,), dtype=bool))
         )

@@ -4,6 +4,7 @@ import numpy as np
 from xxm.core.affine import Affine
 from xxm.core.chains.discrete import DiscreteChainMarginals
 from xxm.core.chains.gaussian import GaussianChainMarginals
+from xxm.core.data import Dataset
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.emissions.continuous import GaussianEmissions
@@ -13,6 +14,7 @@ from xxm.core.latents.discrete import (
     CategoricalTransitions,
 )
 from xxm.core.latents.gaussian import StateConditionedGaussian
+from xxm.core.optim import gaussian as gaussian_fit
 from xxm.slds.core import (
     GaussianLinearSwitchingDynamics,
     Model,
@@ -113,6 +115,8 @@ def test_switching_dynamics_fit_recovers_known_linear_gaussian_model():
     fitted = _dynamics().fit_params(
         discrete=post.discrete,
         continuous=post.continuous,
+        inputs=jnp.empty((2, 0)),
+        weights=jnp.ones(2),
         covariance_floor=0.0,
     )
 
@@ -134,47 +138,64 @@ def test_switching_dynamics_fit_recovers_known_linear_gaussian_model():
     )
 
 
-def test_model_fit_params_keeps_latent_initial_fixed():
+def test_model_fit_params_updates_latent_initial_from_posterior():
     model = _model()
 
     fitted = model.fit_params(
-        observations=jnp.array(
-            [
-                [0.0],
-                [1.0],
-                [3.0],
-            ]
+        data=Dataset.from_sequence(
+            jnp.array(
+                [
+                    [0.0],
+                    [1.0],
+                    [3.0],
+                ]
+            )
         ),
         posterior=_posterior(),
     )
 
-    np.testing.assert_allclose(
-        fitted.latent_initial.dist.mean,
-        model.latent_initial.dist.mean,
+    posterior = _posterior().continuous
+    np.testing.assert_allclose(fitted.latent_initial.dist.mean, posterior.means[0:1])
+    initial_covariance = posterior.covariances[0:1]
+
+    expected_covariance = gaussian_fit.add_covariance_floor(
+        initial_covariance,
+        reference_covariance=initial_covariance,
+        covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
     )
+
     np.testing.assert_allclose(
         fitted.latent_initial.dist.covariance,
-        model.latent_initial.dist.covariance,
+        expected_covariance,
     )
 
 
 def test_variational_em_step_returns_finite_objective():
     model = _model()
-    observations = jnp.array([[0.0], [1.0], [3.0]])
+    data = Dataset.from_sequence(jnp.array([[0.0], [1.0], [3.0]]))
 
     inferred = variational_em_step(
         InferenceState(model=model, posterior=_posterior(), objective=jnp.array(0.0)),
-        observations,
+        data,
         num_inference_iters=1,
     )
 
     assert np.isfinite(inferred.objective)
 
+    posterior = _posterior().continuous
     np.testing.assert_allclose(
         inferred.model.latent_initial.dist.mean,
-        model.latent_initial.dist.mean,
+        posterior.means[0:1],
     )
+    initial_covariance = posterior.covariances[0:1]
+
+    expected_covariance = gaussian_fit.add_covariance_floor(
+        initial_covariance,
+        reference_covariance=initial_covariance,
+        covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
+    )
+
     np.testing.assert_allclose(
         inferred.model.latent_initial.dist.covariance,
-        model.latent_initial.dist.covariance,
+        expected_covariance,
     )

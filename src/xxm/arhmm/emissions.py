@@ -29,7 +29,7 @@ from xxm.core.optim import poisson as poisson_fit
 from xxm.core.optim.batch import filter_valid_batches
 from xxm.core.posteriors import DiscretePosterior
 
-from .data import ARObservations
+from .data import ARDataset
 
 ConditionalDistT = typing.TypeVar(
     'ConditionalDistT',
@@ -124,7 +124,7 @@ class AREmissions(
         return self.dist.batch_shape[-1]
 
     @property
-    def output_dim(self) -> int:
+    def observation_dim(self) -> int:
         """Observation dimension $D_y$."""
         return self.dist.output_dim
 
@@ -139,11 +139,11 @@ class AREmissions(
 
         num_lags, input_dim = self.dist.input_shape
 
-        if input_dim != self.output_dim:
+        if input_dim != self.observation_dim:
             raise ValueError(
                 'autoregressive input variable dimension must match output '
                 f'dimension; got input shape {self.dist.input_shape} '
-                f'and output dimension {self.output_dim}'
+                f'and output dimension {self.observation_dim}'
             )
 
         return num_lags
@@ -179,61 +179,124 @@ class AREmissions(
 
     def log_likelihoods(
         self,
-        data: ARObservations,
-    ) -> jax.Array:  # (*B, T-L, K)
-        """Emission log likelihoods conditional on the initial history."""
+        data: ARDataset,
+    ) -> jax.Array:
+        """Evaluate complete-window AR likelihoods for every state."""
+        observations = data.weighted_observations()
+
         conditional = self.conditional(
-            data.predictors,
+            data.safe_predictors(),
         )
 
         values = jnp.broadcast_to(
-            data.targets[..., None, :],
-            conditional.batch_shape + (self.output_dim,),
+            observations.safe_values()[..., None, :],
+            conditional.batch_shape + (self.observation_dim,),
         )
-        return conditional.log_prob(values)
+
+        log_probs = conditional.log_prob(values)
+
+        return observations.safe_aligned(log_probs)
 
     def compute_potential(
         self,
-        data: ARObservations,
+        data: ARDataset,
     ) -> DiscretePotential:
-        """Construct potentials only for observations after the history."""
+        """Construct neutral factors where an AR row is not observable."""
         return DiscretePotential(
             log_values=self.log_likelihoods(data),
         )
 
     def fit_params(
         self,
-        data: ARObservations,
+        data: ARDataset,
         posterior: DiscretePosterior,
         ridge: float | None = None,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
     ) -> typing.Self:
-        """Fit AR parameters conditional on the initial observation history."""
+        """
+        Fit AR emissions while preserving the receiver model batch.
 
-        batch_shape = self.batch_shape
+        Dataset replicate axes and compact AR time are pooled into samples.
+        """
+        replicate_shape = batch.split_prefix(
+            data.batch_shape,
+            self.batch_shape,
+            name='AR dataset batch shape',
+        )
 
-        def fit_one(predictors_i, targets_i, state_probs_i, current_i):
-            weights = jnp.moveaxis(state_probs_i, -1, 0)  # (K, T-L)
+        batch.require_same_shape(
+            data.batch_shape,
+            posterior.batch_shape,
+        )
+
+        if data.num_steps != posterior.num_steps:
+            raise ValueError(
+                'posterior and AR dataset must have the same number of steps'
+            )
+
+        observations = data.weighted_observations()
+
+        predictors = data.safe_predictors()
+        targets = observations.safe_values()
+
+        weights = posterior.state_probs * observations.weights[..., None]
+
+        sample_shape = (
+            *replicate_shape,
+            data.num_steps,
+        )
+
+        if 0 in sample_shape:
+            return self
+
+        predictors, targets, weights = batch.pool_samples(
+            (
+                predictors,
+                targets,
+                weights,
+            ),
+            self.batch_shape,
+            sample_shape,
+        )
+
+        # (*B, S, K) -> (*B, K, S)
+        weights = jnp.moveaxis(
+            weights,
+            -1,
+            -2,
+        )
+
+        def fit_one(
+            predictors_i,
+            targets_i,
+            weights_i,
+            current_i,
+        ):
             fitted = _fit_ar_model(
                 dist=current_i,
                 inputs=predictors_i,
                 outputs=targets_i,
-                weights=weights,
+                weights=weights_i,
                 ridge=ridge,
                 covariance_floor=covariance_floor,
             )
+
             return filter_valid_batches(
-                fitted, current_i, weights, min_expected_count=1.0
+                fitted,
+                current_i,
+                weights_i,
+                min_expected_count=1.0,
             )
 
         fitted = batch.vmap_batch(
             fit_one,
-            data.predictors,
-            data.targets,
-            posterior.state_probs,
+            predictors,
+            targets,
+            weights,
             self.dist,
-            batch_shape=batch_shape,
+            batch_shape=self.batch_shape,
         )
+
         return self._replace(
             dist=fitted,
         )
@@ -261,7 +324,7 @@ class AREmissions(
         """
         expected_history_shape = self.batch_shape + (
             self.num_lags,
-            self.output_dim,
+            self.observation_dim,
         )
         if initial_history.shape != expected_history_shape:
             raise ValueError(
@@ -320,7 +383,7 @@ class AREmissions(
             self.batch_shape
             + (
                 self.num_lags,
-                self.output_dim,
+                self.observation_dim,
             ),
             dtype=self.dist.dtype,
         )

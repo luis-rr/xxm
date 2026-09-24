@@ -1,7 +1,7 @@
 """Switching linear dynamical system public API."""
 
-from .core import Posterior
-from .inference import infer_variational
+from .core import Model, Posterior
+from .inference import infer_laplace, infer_variational
 from .init import (
     init_gaussian_via_arhmm,
     init_gaussian_via_pca,
@@ -12,14 +12,18 @@ from .learning import (
     fit_laplace_em,
     fit_variational_em,
 )
-from .model import GaussianSLDS, PoissonSLDS
+from .model import Fit, GaussianSLDS, Inferred, PoissonSLDS
 
 __all__ = [
+    'Fit',
     'GaussianSLDS',
+    'Inferred',
+    'Model',
     'PoissonSLDS',
     'Posterior',
     'fit_laplace_em',
     'fit_variational_em',
+    'infer_laplace',
     'infer_variational',
     'init_gaussian_via_arhmm',
     'init_gaussian_via_pca',

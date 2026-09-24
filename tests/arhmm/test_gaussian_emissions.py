@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from xxm.arhmm.data import ARObservations, lagged_observations
+from xxm.arhmm.data import ARDataset, lagged_observations
 from xxm.arhmm.emissions import AREmissions
 from xxm.core.affine import Affine
 from xxm.core.chains.discrete import DiscreteChainMarginals
@@ -55,7 +55,7 @@ def test_ar_gaussian_properties():
 
     assert emissions.num_states == 3
     assert emissions.num_lags == 2
-    assert emissions.output_dim == 4
+    assert emissions.observation_dim == 4
     assert emissions.dist.input_shape == (2, 4)
 
 
@@ -124,7 +124,7 @@ def test_ar_gaussian_conditional_means_known_solution():
     )
 
     means = emissions.conditional(
-        ARObservations.from_observations(observations, emissions.num_lags).predictors
+        ARDataset.from_sequence(observations, emissions.num_lags).predictors
     ).mean
 
     expected = jnp.array(
@@ -157,7 +157,7 @@ def test_ar_gaussian_log_likelihoods_known_solution():
     )
 
     log_likelihoods = emissions.log_likelihoods(
-        ARObservations.from_observations(observations, emissions.num_lags)
+        ARDataset.from_sequence(observations, emissions.num_lags)
     )
 
     # y1 | y0 ~ N(1, 4), residual = 1
@@ -203,7 +203,7 @@ def test_ar_gaussian_log_likelihoods_shortest_valid_sequence():
     )
 
     log_likelihoods = emissions.log_likelihoods(
-        ARObservations.from_observations(observations, emissions.num_lags)
+        ARDataset.from_sequence(observations, emissions.num_lags)
     )
 
     # history = (y1, y0) = (2, 1)
@@ -252,7 +252,7 @@ def test_ar_gaussian_fit_recovers_known_ar2_parameters():
     )
 
     fitted = emissions.fit_params(
-        ARObservations.from_observations(observations, emissions.num_lags),
+        ARDataset.from_sequence(observations, emissions.num_lags),
         posterior,
     )
 
@@ -394,28 +394,18 @@ def test_ar_gaussian_methods_are_jittable():
 
     states = jnp.zeros(5, dtype=int)
     key = jax.random.key(0)
+    data = ARDataset.from_sequence(observations, emissions.num_lags)
 
     conditional_means_jit = jax.jit(
-        lambda emissions, observations: (
-            emissions.conditional(
-                ARObservations.from_observations(
-                    observations, emissions.num_lags
-                ).predictors
-            ).mean
-        )
+        lambda emissions, data: emissions.conditional(data.predictors).mean
     )
 
     log_likelihoods_jit = jax.jit(
-        lambda emissions, observations: emissions.log_likelihoods(
-            ARObservations.from_observations(observations, emissions.num_lags)
-        )
+        lambda emissions, data: emissions.log_likelihoods(data)
     )
 
     fit_params_jit = jax.jit(
-        lambda emissions, observations, posterior: emissions.fit_params(
-            ARObservations.from_observations(observations, emissions.num_lags),
-            posterior,
-        )
+        lambda emissions, data, posterior: emissions.fit_params(data, posterior)
     )
 
     sample_jit = jax.jit(
@@ -428,35 +418,29 @@ def test_ar_gaussian_methods_are_jittable():
     np.testing.assert_allclose(
         conditional_means_jit(
             emissions,
-            observations,
+            data,
         ),
-        emissions.conditional(
-            ARObservations.from_observations(
-                observations, emissions.num_lags
-            ).predictors
-        ).mean,
+        emissions.conditional(data.predictors).mean,
         atol=ATOL,
     )
 
     np.testing.assert_allclose(
         log_likelihoods_jit(
             emissions,
-            observations,
+            data,
         ),
-        emissions.log_likelihoods(
-            ARObservations.from_observations(observations, emissions.num_lags)
-        ),
+        emissions.log_likelihoods(data),
         atol=ATOL,
     )
 
     fitted_jit = fit_params_jit(
         emissions,
-        observations,
+        data,
         posterior,
     )
 
     fitted = emissions.fit_params(
-        ARObservations.from_observations(observations, emissions.num_lags),
+        data,
         posterior,
     )
 
@@ -507,7 +491,7 @@ def test_ar_gaussian_sample_uses_zero_history():
     initial_history = jnp.zeros(
         (
             emissions.num_lags,
-            emissions.output_dim,
+            emissions.observation_dim,
         )
     )
 

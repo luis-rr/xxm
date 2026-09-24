@@ -4,7 +4,7 @@ import numpy as np
 
 from xxm.core.affine import Affine
 from xxm.core.chains.gaussian import GaussianChain
-from xxm.core.data import WeightedObservations
+from xxm.core.data import Dataset, WeightedObservations
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.emissions.continuous import GaussianEmissions
@@ -132,10 +132,11 @@ def _two_state_model() -> Model:
 def test_single_state_slds_matches_gaussian_chain():
     model = _single_state_model()
     observations = jnp.array([[0.2], [1.0]])
+    data = Dataset.from_sequence(observations)
 
     posterior = infer_variational(
         model,
-        observations,
+        data,
         num_iters=0,
         initial_latents=jnp.zeros((observations.shape[0], 1)),
     ).posterior
@@ -145,11 +146,9 @@ def test_single_state_slds_matches_gaussian_chain():
     initial_potential = model.latent_initial.compute_potentials().weighted_sum(
         state_probs[0], axis=0
     )
-    pair_potentials = (
-        model.dynamics.compute_pair_potentials()
-        .broadcast(observations.shape[0] - 1)
-        .weighted_sum(state_probs[1:], axis=1)
-    )
+    pair_potentials = model.dynamics.compute_pair_potentials(
+        jnp.empty((observations.shape[0] - 1, 0))
+    ).weighted_sum(state_probs[1:], axis=1)
     observation_potential = model.emissions.compute_potential(
         WeightedObservations.from_sequence(observations)
     )
@@ -188,20 +187,18 @@ def test_single_state_slds_matches_gaussian_chain():
 def test_zero_iterations_uses_initial_latents():
     model = _two_state_model()
     observations = jnp.zeros((1, 1))
+    data = Dataset.from_sequence(observations)
     initial_latents = jnp.zeros((observations.shape[0], 1))
 
     posterior = infer_variational(
         model,
-        observations,
+        data,
         initial_latents=initial_latents,
         num_iters=0,
     ).posterior
 
-    switching = SwitchingFactors.from_model(model)
-    discrete = DiscreteFactors.from_model(
-        model,
-        num_steps=observations.shape[0],
-    )
+    switching = SwitchingFactors.from_model(model, data)
+    discrete = DiscreteFactors.from_model(model, data)
 
     expected_potential = switching.discrete_potential_from_latents(initial_latents)
     expected_posterior = discrete.infer(expected_potential)
@@ -225,11 +222,12 @@ def test_infer_variational_is_jittable():
 
     model = _two_state_model()
     observations = jnp.array([[0.0], [0.5]])
+    data = Dataset.from_sequence(observations)
     initial_latents = jnp.zeros((observations.shape[0], 1))
 
     eager = infer_variational(
         model,
-        observations,
+        data,
         num_iters=1,
         initial_latents=initial_latents,
     )
@@ -241,7 +239,7 @@ def test_infer_variational_is_jittable():
 
     jitted = inference_jit(
         model,
-        observations,
+        data,
         num_iters=1,
         initial_latents=initial_latents,
     )

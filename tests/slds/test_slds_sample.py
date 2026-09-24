@@ -130,6 +130,7 @@ def test_switching_dynamics_sample_includes_initial():
         jax.random.key(0),
         initial_latent,
         states,
+        inputs=jnp.empty((3, 0)),
     )
 
     assert latents.shape == (4, 1)
@@ -152,6 +153,7 @@ def test_sample():
     states, latents, observations = model.sample(
         jax.random.key(0),
         num_steps=4,
+        inputs=jnp.empty((4, 0)),
     )
 
     assert states.shape == (4,)
@@ -185,6 +187,7 @@ def test_sample_jittable():
     eager = model.sample(
         key,
         num_steps=4,
+        inputs=jnp.empty((4, 0)),
     )
 
     jitted = jax.jit(
@@ -193,6 +196,7 @@ def test_sample_jittable():
     )(
         key,
         num_steps=4,
+        inputs=jnp.empty((4, 0)),
     )
 
     for eager_value, jitted_value in zip(

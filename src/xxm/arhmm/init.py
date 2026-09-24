@@ -3,6 +3,7 @@
 import jax
 import jax.numpy as jnp
 
+from xxm.core.data import Dataset
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
@@ -12,10 +13,39 @@ from xxm.core.optim import poisson as poisson_fit
 from xxm.core.optim.kmeans import kmeans_assignments
 
 from .core import Model
-from .data import ARObservations
+from .data import ARDataset
 from .emissions import AREmissions, ConditionalDistT
 
 DEFAULT_SELF_TRANSITION_PROB = 0.9
+
+
+def _visible_rows(
+    data: ARDataset,
+) -> tuple[jax.Array, jax.Array]:
+    """Pool visible complete AR windows across independent sequences."""
+    observations = data.weighted_observations()
+
+    active = observations.weights.reshape(-1)
+
+    predictors = data.safe_predictors().reshape(
+        (
+            -1,
+            data.num_lags,
+            data.observation_dim,
+        )
+    )
+
+    targets = observations.safe_values().reshape(
+        (
+            -1,
+            data.observation_dim,
+        )
+    )
+
+    return (
+        predictors[active],
+        targets[active],
+    )
 
 
 def _init(
@@ -85,13 +115,18 @@ def _init_state_assignments(
 
 def _init_gaussian_emissions(
     key: jax.Array,
-    data: ARObservations,
+    data: ARDataset,
     num_states: int,
     ridge=gaussian_fit.DEFAULT_RIDGE,
     covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
 ) -> AREmissions[LinearGaussian]:
-    predictors = data.predictors
-    current = data.targets
+    predictors, current = _visible_rows(data)
+
+    if predictors.shape[0] < num_states:
+        raise ValueError(
+            f'AR-HMM initialization requires at least {num_states} '
+            f'visible complete regression rows; got {predictors.shape[0]}'
+        )
 
     assignments = _init_state_assignments(
         key=key,
@@ -114,15 +149,14 @@ def _init_gaussian_emissions(
 
 def init_gaussian_via_kmeans(
     key: jax.Array,
-    observations: jax.Array,
+    data: ARDataset,
     num_states: int,
-    num_lags: int,
     self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
     *,
     covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
 ) -> Model[LinearGaussian]:
     r"""Initialize Gaussian AR-HMM with first $L$ observations as fixed history."""
-    data = ARObservations.from_observations(observations, num_lags)
+
     emissions = _init_gaussian_emissions(
         key=key,
         data=data,
@@ -133,19 +167,24 @@ def init_gaussian_via_kmeans(
     return _init(
         emissions=emissions,
         num_states=num_states,
-        dtype=observations.dtype,
+        dtype=data.dtype,
         self_transition_prob=self_transition_prob,
     )
 
 
 def _init_poisson_emissions(
     key: jax.Array,
-    data: ARObservations,
+    data: ARDataset,
     num_states: int,
     ridge=poisson_fit.DEFAULT_RIDGE,
 ) -> AREmissions[LinearPoisson]:
-    predictors = data.predictors
-    current = data.targets
+    predictors, current = _visible_rows(data)
+
+    if predictors.shape[0] < num_states:
+        raise ValueError(
+            f'AR-HMM initialization requires at least {num_states} '
+            f'visible complete regression rows; got {predictors.shape[0]}'
+        )
 
     assignments = _init_state_assignments(
         key=key,
@@ -167,7 +206,7 @@ def _init_poisson_emissions(
 
 def init_poisson_via_kmeans(
     key: jax.Array,
-    observations: jax.Array,
+    data: Dataset,
     num_states: int,
     num_lags: int,
     self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
@@ -178,10 +217,14 @@ def init_poisson_via_kmeans(
     ``observations[:num_lags]`` provide the fixed autoregressive history.
     Latent states correspond only to ``observations[num_lags:]``.
     """
-    data = ARObservations.from_observations(observations, num_lags)
+    prepared = ARDataset.from_dataset(
+        data,
+        num_lags,
+    )
+
     emissions = _init_poisson_emissions(
         key=key,
-        data=data,
+        data=prepared,
         num_states=num_states,
     )
 
@@ -189,5 +232,5 @@ def init_poisson_via_kmeans(
         emissions=emissions,
         num_states=num_states,
         self_transition_prob=self_transition_prob,
-        dtype=jnp.result_type(observations, jnp.float32),
+        dtype=prepared.dtype,
     )

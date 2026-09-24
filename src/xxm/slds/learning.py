@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import jax
 
+from xxm.core.data import Dataset
 from xxm.core.emissions.continuous import LaplaceEmissionsT, QuadraticEmissionsT
 from xxm.core.inference import InferenceState
 from xxm.core.optim.loop import Fit
@@ -19,17 +20,17 @@ from .inference import infer_laplace, infer_variational
 
 def variational_em_step(
     inferred: InferenceState[Model[QuadraticEmissionsT], Posterior],
-    observations: jax.Array,
+    data: Dataset,
     *,
     num_inference_iters: int,
 ) -> InferenceState[Model[QuadraticEmissionsT], Posterior]:
     """Perform one structured variational EM update."""
 
-    model = inferred.model.fit_params(observations, inferred.posterior)
+    model = inferred.model.fit_params(data, inferred.posterior)
 
     return infer_variational(
         model,
-        observations,
+        data,
         num_iters=num_inference_iters,
         initial_latents=inferred.posterior.continuous.means,
     )
@@ -37,7 +38,7 @@ def variational_em_step(
 
 def fit_variational_em(
     model: Model[QuadraticEmissionsT],
-    observations: jax.Array,
+    data: Dataset,
     *,
     num_iters: int,
     num_inference_iters: int,
@@ -48,18 +49,18 @@ def fit_variational_em(
 
     inferred = infer_variational(
         model,
-        observations,
+        data,
         num_iters=num_inference_iters,
         initial_latents=initial_latents,
     )
 
     return _fit_one(
         inferred,
-        observations,
+        data,
         num_iters=num_iters,
-        step=lambda inferred, observations: variational_em_step(
+        step=lambda inferred, data: variational_em_step(
             inferred,
-            observations,
+            data,
             num_inference_iters=num_inference_iters,
         ),
         progress=progress,
@@ -72,7 +73,7 @@ def fit_variational_em(
 
 def laplace_em_step(
     inferred: InferenceState[Model[LaplaceEmissionsT], Posterior],
-    observations: jax.Array,
+    data: Dataset,
     *,
     num_inference_iters: int,
     params: OptimParams,
@@ -80,13 +81,13 @@ def laplace_em_step(
     """Perform one structured Laplace EM update."""
 
     model = inferred.model.fit_params(
-        observations,
+        data,
         inferred.posterior,
     )
 
     return infer_laplace(
         model,
-        observations,
+        data,
         num_iters=num_inference_iters,
         initial_latents=inferred.posterior.continuous.means,
         params=params,
@@ -95,7 +96,7 @@ def laplace_em_step(
 
 def fit_laplace_em(
     model: Model[LaplaceEmissionsT],
-    observations: jax.Array,
+    data: Dataset,
     *,
     num_iters: int,
     num_inference_iters: int,
@@ -107,7 +108,7 @@ def fit_laplace_em(
 
     inferred = infer_laplace(
         model,
-        observations,
+        data,
         num_iters=num_inference_iters,
         initial_latents=initial_latents,
         params=laplace_params,
@@ -115,11 +116,11 @@ def fit_laplace_em(
 
     return _fit_one(
         inferred,
-        observations,
+        data,
         num_iters=num_iters,
-        step=lambda inferred, observations: laplace_em_step(
+        step=lambda inferred, data: laplace_em_step(
             inferred,
-            observations,
+            data,
             num_inference_iters=num_inference_iters,
             params=laplace_params,
         ),

@@ -9,17 +9,17 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core.affine import Affine
+from xxm.core.data import Dataset, Sequences
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
-from xxm.core.inference import Fitted, InferenceState
 from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
 )
 
 from .core import Model, Posterior
-from .data import ARObservations
+from .data import ARDataset
 from .emissions import AREmissions
 from .inference import infer_exact
 from .init import (
@@ -92,14 +92,18 @@ class GaussianARHMM:
     _model: Model[LinearGaussian]
 
     @property
+    def model(self) -> Model[LinearGaussian]:
+        """Underlying core model."""
+        return self._model
+
+    @property
+    def observation_dim(self) -> int:
+        return self._model.emissions.observation_dim
+
+    @property
     def num_states(self) -> int:
         """Number of discrete states $K$."""
         return self._model.num_states
-
-    @property
-    def output_dim(self) -> int:
-        """Observation dimension $D_y$."""
-        return self._model.emissions.output_dim
 
     @property
     def num_lags(self) -> int:
@@ -122,7 +126,7 @@ class GaussianARHMM:
 
     def states_conditional(
         self,
-        observations: jax.Array,
+        data: Dataset,
     ) -> Gaussian:
         """
         Conditional distributions for observations following the AR history.
@@ -130,9 +134,9 @@ class GaussianARHMM:
         For an input sequence of length ``T``, the returned distributions have
         ``T - num_lags`` time steps.
         """
-        data = ARObservations.from_observations(observations, self.num_lags)
+        prepared = ARDataset.from_dataset(data, self.num_lags)
         return self._model.emissions.conditional(
-            data.predictors,
+            prepared.predictors,
         )
 
     def most_likely_states(self, posterior: Posterior) -> jax.Array:
@@ -144,12 +148,12 @@ class GaussianARHMM:
 
     def observation_mean(
         self,
-        observations: jax.Array,
+        data: Dataset,
         posterior: Posterior,
     ) -> jax.Array:
         """Return the posterior mean observation conditional on the AR history."""
         return self.states_conditional(
-            observations,
+            data,
         ).mixture_mean(
             posterior.state_probs,
             axis=1,
@@ -195,7 +199,7 @@ class GaussianARHMM:
     def via_kmeans(
         cls,
         key: jax.Array,
-        observations: jax.Array,
+        data: Dataset,
         num_states: int,
         num_lags: int,
         *,
@@ -207,11 +211,16 @@ class GaussianARHMM:
         The first ``num_lags`` observations are used only as fixed conditioning
         history.
         """
+
+        prepared = ARDataset.from_dataset(
+            data,
+            num_lags,
+        )
+
         model = init_gaussian_via_kmeans(
             key=key,
-            observations=observations,
+            data=prepared,
             num_states=num_states,
-            num_lags=num_lags,
             self_transition_prob=self_transition_prob,
         )
 
@@ -244,45 +253,57 @@ class GaussianARHMM:
             initial_history,
         )
 
-    def infer(
-        self,
-        observations: jax.Array,
-    ) -> InferenceState[typing.Self, Posterior]:
+    def infer(self, data: Dataset) -> Inferred[typing.Self]:
         """
         Infer states conditional on the first ``num_lags`` observations.
 
         For an input sequence of length ``T``, the posterior has
         ``T - num_lags`` latent steps.
         """
-        inferred = infer_exact(
-            self._model,
-            observations,
+
+        prepared = ARDataset.from_dataset(
+            data,
+            self.num_lags,
         )
 
-        return InferenceState(
+        inferred = infer_exact(
+            self._model,
+            data=prepared,
+        )
+
+        return Inferred(
             model=self.__class__(inferred.model),
             posterior=inferred.posterior,
-            objective=inferred.objective,
+            data=data,
         )
 
     def fit(
         self,
-        observations: jax.Array,
+        data: Dataset,
         *,
         num_iters: int,
         progress: bool | str = 'EM',
-    ) -> Fitted[typing.Self, Posterior]:
+    ) -> Fit[typing.Self]:
         """Fit the conditional AR-HMM with expectation maximization."""
+
+        prepared = ARDataset.from_dataset(
+            data,
+            self.num_lags,
+        )
+
         fit = fit_em(
             self._model,
-            observations,
+            data=prepared,
             num_iters=num_iters,
             progress=progress,
         )
 
-        return Fitted(
-            model=self.__class__(fit.state.model),
-            posterior=fit.state.posterior,
+        return Fit(
+            Inferred(
+                model=self.__class__(fit.state.model),
+                posterior=fit.state.posterior,
+                data=data,
+            ),
             objective_trace=fit.objective_trace,
         )
 
@@ -321,14 +342,18 @@ class PoissonARHMM:
     _model: Model[LinearPoisson]
 
     @property
+    def model(self) -> Model[LinearPoisson]:
+        """Underlying core model."""
+        return self._model
+
+    @property
+    def observation_dim(self) -> int:
+        return self._model.emissions.observation_dim
+
+    @property
     def num_states(self) -> int:
         """Number of discrete states $K$."""
         return self._model.num_states
-
-    @property
-    def output_dim(self) -> int:
-        """Observation dimension $D_y$."""
-        return self._model.emissions.output_dim
 
     @property
     def num_lags(self) -> int:
@@ -351,7 +376,7 @@ class PoissonARHMM:
 
     def states_conditional(
         self,
-        observations: jax.Array,
+        data: Dataset,
     ) -> Poisson:
         """
         Conditional distributions for observations following the AR history.
@@ -359,9 +384,9 @@ class PoissonARHMM:
         For an input sequence of length ``T``, the returned distributions have
         ``T - num_lags`` time steps.
         """
-        data = ARObservations.from_observations(observations, self.num_lags)
+        prepared = ARDataset.from_dataset(data, self.num_lags)
         return self._model.emissions.conditional(
-            data.predictors,
+            prepared.predictors,
         )
 
     def most_likely_states(self, posterior: Posterior) -> jax.Array:
@@ -373,12 +398,12 @@ class PoissonARHMM:
 
     def observation_mean(
         self,
-        observations: jax.Array,
+        data: Dataset,
         posterior: Posterior,
     ) -> jax.Array:
         """Return the posterior mean observation conditional on the AR history."""
         return self.states_conditional(
-            observations,
+            data,
         ).mixture_mean(
             posterior.state_probs,
             axis=1,
@@ -422,7 +447,7 @@ class PoissonARHMM:
     def via_kmeans(
         cls,
         key: jax.Array,
-        observations: jax.Array,
+        data: Dataset,
         num_states: int,
         num_lags: int,
         *,
@@ -436,7 +461,7 @@ class PoissonARHMM:
         """
         model = init_poisson_via_kmeans(
             key=key,
-            observations=observations,
+            data=data,
             num_states=num_states,
             num_lags=num_lags,
             self_transition_prob=self_transition_prob,
@@ -471,41 +496,137 @@ class PoissonARHMM:
             initial_history,
         )
 
-    def infer(self, observations: jax.Array) -> InferenceState[typing.Self, Posterior]:
+    def infer(self, data: Dataset) -> Inferred[typing.Self]:
         """
         Infer states conditional on the first ``num_lags`` observations.
 
         For an input sequence of length ``T``, the posterior has
         ``T - num_lags`` latent steps.
         """
-        inferred = _infer_exact_jit(
-            self._model,
-            observations,
+
+        prepared = ARDataset.from_dataset(
+            data,
+            self.num_lags,
         )
 
-        return InferenceState(
+        inferred = _infer_exact_jit(
+            model=self._model,
+            data=prepared,
+        )
+
+        return Inferred(
             model=self.__class__(inferred.model),
             posterior=inferred.posterior,
-            objective=inferred.objective,
+            data=data,
         )
 
     def fit(
         self,
-        observations: jax.Array,
+        data: Dataset,
         *,
         num_iters: int,
         progress: bool | str = 'EM',
-    ) -> Fitted[typing.Self, Posterior]:
+    ) -> Fit[typing.Self]:
         """Fit the conditional AR-HMM with expectation maximization."""
+
+        prepared = ARDataset.from_dataset(
+            data,
+            self.num_lags,
+        )
+
         fit = _fit_em_jit(
-            self._model,
-            observations,
+            model=self._model,
+            data=prepared,
             num_iters=num_iters,
             progress=progress,
         )
 
-        return Fitted(
-            model=self.__class__(fit.state.model),
-            posterior=fit.state.posterior,
+        return Fit(
+            Inferred(
+                model=self.__class__(fit.state.model),
+                posterior=fit.state.posterior,
+                data=data,
+            ),
             objective_trace=fit.objective_trace,
         )
+
+
+ARHMMFacadeT = typing.TypeVar('ARHMMFacadeT', GaussianARHMM, PoissonARHMM)
+
+
+@dataclasses.dataclass(frozen=True, eq=False)
+class Inferred(typing.Generic[ARHMMFacadeT]):
+    """AR-HMM, posterior, and exact source Dataset."""
+
+    model: ARHMMFacadeT
+    posterior: Posterior
+    data: Dataset
+
+    def __post_init__(self) -> None:
+        if self.posterior.batch_shape != self.data.batch_shape:
+            raise ValueError('posterior batch must match the source dataset')
+
+        expected_num_steps = self.data.num_steps - self.model.num_lags
+        if self.posterior.num_steps != expected_num_steps:
+            raise ValueError('posterior must match the modeled AR time dimension')
+
+        if self.posterior.num_states != self.model.num_states:
+            raise ValueError('posterior must match the model number of states')
+
+    def state_probs(self) -> Sequences:
+        """State probabilities on the compact AR timeline."""
+        return Sequences.from_padded(
+            self.posterior.state_probs,
+            self.data.lengths - self.model.num_lags,
+        )
+
+    def observation_mean(self) -> Sequences:
+        """Return posterior conditional means on the compact AR timeline."""
+        ar_data = ARDataset.from_dataset(
+            self.data,
+            self.model.num_lags,
+        )
+
+        conditional = self.model.model.emissions.broadcast(
+            self.posterior.batch_shape
+        ).conditional(
+            ar_data.safe_predictors(),
+        )
+
+        means = conditional.mixture_mean(
+            self.posterior.state_probs,
+            axis=-1,
+        )
+
+        return Sequences.from_padded(
+            means,
+            ar_data.lengths,
+        )
+
+    def permute_states(self, permutation: jax.Array) -> Inferred[ARHMMFacadeT]:
+        """Relabel discrete states by permutation."""
+        return Inferred(
+            model=self.model.permute_states(permutation),
+            posterior=self.posterior.permute_states(permutation),
+            data=self.data,
+        )
+
+    def most_likely_states(self) -> Sequences:
+        """Return the marginally most likely state on the compact AR timeline."""
+        most_likely = jnp.argmax(
+            self.posterior.state_probs,
+            axis=-1,
+            keepdims=True,
+        )
+
+        return Sequences.from_padded(
+            most_likely,
+            self.data.lengths - self.model.num_lags,
+        )
+
+
+class Fit(typing.NamedTuple, typing.Generic[ARHMMFacadeT]):
+    """Fitted result and objective trace, including the initial objective."""
+
+    inferred: Inferred[ARHMMFacadeT]
+    objective_trace: jax.Array

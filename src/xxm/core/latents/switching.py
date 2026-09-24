@@ -11,6 +11,8 @@ from xxm.core.chains.gaussian import (
     GaussianPairPotential,
 )
 from xxm.core.dists.gaussian import LinearGaussian
+from xxm.core.latents.gaussian import GaussianLinearDynamics
+from xxm.core.mask import ArbitraryMask
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim.batch import filter_valid_batches
 from xxm.core.posteriors import ContinuousPosterior, DiscretePosterior
@@ -24,6 +26,24 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
     """
 
     dist: LinearGaussian  # underlying batch (*B, K); K is the intrinsic state axis
+
+    @classmethod
+    def from_params(
+        cls,
+        *,
+        latent_coefficients: jax.Array,
+        bias: jax.Array,
+        covariance: jax.Array,
+        input_coefficients: jax.Array | None = None,
+    ) -> typing.Self:
+        """Construct state-specific controlled dynamics with predictors [x, u]."""
+        dynamics = GaussianLinearDynamics.from_params(
+            latent_coefficients=latent_coefficients,
+            input_coefficients=input_coefficients,
+            bias=bias,
+            covariance=covariance,
+        )
+        return cls(dynamics.dist)
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
@@ -51,16 +71,46 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         assert self.dist.batch_shape
         return self.dist.batch_shape[-1]
 
-    def compute_pair_potentials(self) -> GaussianPairPotential:
-        """Return one Gaussian transition potential per discrete state."""
+    @property
+    def latent_dim(self) -> int:
+        return self.dist.output_dim
+
+    @property
+    def input_dim(self) -> int:
+        return self.dist.input_size - self.latent_dim
+
+    @property
+    def latent_coefficients(self) -> jax.Array:
+        return GaussianLinearDynamics(self.dist).latent_coefficients
+
+    @property
+    def input_coefficients(self) -> jax.Array:
+        return GaussianLinearDynamics(self.dist).input_coefficients
+
+    def conditional(self, inputs: jax.Array) -> LinearGaussian:
+        """Condition on inputs `(*B, *Q, D_u)`, returning batch `(*B, *Q, K)`."""
+        batch.split_prefix(
+            inputs.shape[:-1], self.batch_shape, name='input batch shape'
+        )
+        state_inputs = batch.broadcast_array(
+            inputs, (self.num_states,), axis=len(self.batch_shape)
+        )
+        conditional = GaussianLinearDynamics(self.dist).conditional(state_inputs)
+        return conditional.move_axis(len(self.batch_shape), -1)
+
+    def compute_pair_potentials(self, inputs: jax.Array) -> GaussianPairPotential:
+        """Return transition potentials with batch `(*B, *Q, K)`."""
         return GaussianPairPotential.from_linear_conditional(
-            self.dist,
+            self.conditional(inputs),
         )
 
     def fit_params(
         self,
         discrete: DiscretePosterior,
         continuous: ContinuousPosterior,
+        *,
+        inputs: jax.Array,
+        weights: jax.Array,
         ridge=gaussian_fit.DEFAULT_RIDGE,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
     ) -> typing.Self:
@@ -72,45 +122,100 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         their current parameters.
         """
 
-        weights = jnp.moveaxis(discrete.state_probs[..., 1:, :], -1, -2)
-        # (*B, K, T - 1)
+        batch.require_same_shape(discrete.batch_shape, continuous.batch_shape)
 
-        paired = gaussian_fit.paired_from_moment_match(
-            continuous.paired_marginals(),
-            weights=weights,
-        )  # batch (*B, K)
+        if discrete.num_steps != continuous.num_steps or continuous.num_steps < 1:
+            raise ValueError('posteriors must share a nonempty time dimension')
+        if (
+            discrete.num_states != self.num_states
+            or continuous.variable_dim != self.latent_dim
+        ):
+            raise ValueError(
+                'posterior state and latent dimensions must match dynamics'
+            )
+        transition_shape = (*continuous.batch_shape, continuous.num_steps - 1)
+        if inputs.shape != (*transition_shape, self.input_dim):
+            raise ValueError(
+                'inputs must match posterior transitions and input dimension'
+            )
+        if weights.shape != transition_shape:
+            raise ValueError('weights must match posterior transitions')
 
-        fitted = gaussian_fit.linear_from_paired(
+        replicate_shape = batch.split_prefix(
+            continuous.batch_shape, self.batch_shape, name='posterior batch shape'
+        )
+        sample_shape = (*replicate_shape, continuous.num_steps - 1)
+        if 0 in sample_shape:
+            return self
+
+        active = ArbitraryMask(weights != 0)
+        state_weights = (
+            active.apply(discrete.state_probs[..., 1:, :]) * weights[..., None]
+        )
+        safe_inputs = active.apply(inputs)
+        paired = jax.tree.map(active.apply, continuous.paired_marginals())
+        paired, safe_inputs, state_weights = batch.pool_samples(
+            (paired, safe_inputs, state_weights),
+            self.batch_shape,
+            sample_shape,
+        )
+        state_weights = jnp.moveaxis(state_weights, -1, -2)  # (*B_model, K, S)
+
+        def fit_one(paired_i, inputs_i, weights_i):
+            return gaussian_fit.linear_from_paired_covariates(
+                paired_i,
+                inputs_i,
+                weights=weights_i,
+                ridge=ridge,
+                covariance_floor=covariance_floor,
+            )
+
+        fitted = batch.vmap_batch(
+            fit_one,
             paired,
-            ridge=ridge,
-            covariance_floor=covariance_floor,
+            safe_inputs,
+            state_weights,
+            batch_shape=self.batch_shape,
         )
 
         return self._replace(
             dist=filter_valid_batches(
                 fitted,
                 self.dist,
-                weights,
+                state_weights,
                 min_expected_count=1.0,
             ),
         )
 
     def sample_next(
-        self, key: jax.Array, previous: jax.Array, state: jax.Array
+        self, key: jax.Array, previous: jax.Array, state: jax.Array, inputs: jax.Array
     ) -> jax.Array:
         """Sample the next latent using the state being entered."""
-        conditional = batch.take_along_last_batch(
-            self.dist, self.dist.batch_shape, state
-        )
+        dynamics = self.conditional(inputs)
+        conditional = batch.take_along_last_batch(dynamics, dynamics.batch_shape, state)
         return conditional.sample(key, previous)
 
     def sample(
-        self, key: jax.Array, initial_latent: jax.Array, states: jax.Array
+        self,
+        key: jax.Array,
+        initial_latent: jax.Array,
+        states: jax.Array,
+        *,
+        inputs: jax.Array,
     ) -> jax.Array:
-        """Sample subsequent latents from their incoming switching states."""
+        """Sample from transition-aligned states and inputs, including the start."""
+        if states.shape[:-1] != self.batch_shape:
+            raise ValueError('states must have shape (*B, T - 1)')
+        if inputs.shape != (*states.shape, self.input_dim):
+            raise ValueError('inputs must have shape (*B, T - 1, D_u)')
+        if initial_latent.shape != (*self.batch_shape, self.latent_dim):
+            raise ValueError(
+                'initial_latent must match dynamics batch and latent dimension'
+            )
 
-        def step(carry, state):
+        def step(carry, args):
             latent, key = carry
+            state, step_inputs = args
 
             key, sample_key = jax.random.split(key)
 
@@ -118,6 +223,7 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
                 sample_key,
                 latent,
                 state,
+                step_inputs,
             )
 
             return (latent, key), latent
@@ -125,7 +231,7 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         _, subsequent_latents = jax.lax.scan(
             step,
             (initial_latent, key),
-            jnp.moveaxis(states, -1, 0),
+            (jnp.moveaxis(states, -1, 0), jnp.moveaxis(inputs, -2, 0)),
         )
 
         subsequent_latents = jnp.moveaxis(subsequent_latents, 0, -2)
@@ -156,8 +262,4 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
             (self.num_states,),
             axis=len(self.batch_shape),
         )
-        inverse = aligned.inverse()
-
-        return self._replace(
-            dist=(self.dist.compose_input(inverse).compose_output(aligned)),
-        )
+        return self._replace(dist=GaussianLinearDynamics(self.dist).align(aligned).dist)

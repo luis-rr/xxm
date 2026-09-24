@@ -1,7 +1,10 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
+import xxm
+from xxm.core.data import Dataset
 from xxm.slds.init import init_gaussian_via_pca
 
 
@@ -20,7 +23,7 @@ def test_gaussian_via_pca_returns_requested_model_structure():
 
     model = init_gaussian_via_pca(
         key=jax.random.key(0),
-        observations=observations,
+        data=Dataset.from_sequence(observations),
         num_states=2,
         latent_dim=1,
     )
@@ -44,3 +47,27 @@ def test_gaussian_via_pca_returns_requested_model_structure():
 
     for leaf in jax.tree_util.tree_leaves(model):
         assert jnp.all(jnp.isfinite(leaf))
+
+
+@pytest.mark.parametrize('facade', [xxm.GaussianSLDS, xxm.PoissonSLDS])
+def test_slds_arhmm_warm_start(facade):
+    observations = jnp.array(
+        [
+            [0.0],
+            [1.0],
+            [2.0],
+            [1.0],
+        ]
+    )
+    model = facade.via_arhmm(
+        jax.random.key(3),
+        Dataset.from_sequence(observations),
+        num_states=2,
+        latent_dim=1,
+        num_arhmm_iters=1,
+        progress=False,
+    )
+    assert model.num_states == 2
+    assert model.latent_dim == 1
+    for leaf in jax.tree.leaves(model):
+        assert np.isfinite(leaf).all()

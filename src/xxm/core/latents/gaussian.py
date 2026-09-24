@@ -11,7 +11,7 @@ from xxm.core.chains.gaussian import GaussianPairPotential, GaussianPotential
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian, PairedGaussian
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim.batch import filter_valid_batches
-from xxm.core.posteriors import ContinuousPosterior
+from xxm.core.posteriors import ContinuousPosterior, DiscretePosterior
 
 
 class GaussianInitial(typing.NamedTuple):
@@ -661,6 +661,59 @@ class StateConditionedGaussian(typing.NamedTuple):
         """Return one Gaussian potential per discrete state."""
         return GaussianPotential.from_moments(
             self.dist,
+        )
+
+    def fit_params(
+        self,
+        discrete: DiscretePosterior,
+        continuous: ContinuousPosterior,
+        *,
+        covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
+    ) -> typing.Self:
+        """Pool genuine sequence starts, weighted by initial state probabilities.
+
+        Preserve the receiver model batch and intrinsic state axis. A state
+        with expected initial occupancy below one retains its current Gaussian.
+        Every supplied sequence must contain at least one valid timestep.
+        """
+        batch.require_same_shape(discrete.batch_shape, continuous.batch_shape)
+
+        if discrete.num_steps != continuous.num_steps or continuous.num_steps < 1:
+            raise ValueError('posteriors must share a nonempty time dimension')
+        if discrete.num_states != self.num_states:
+            raise ValueError('posterior must match the number of states')
+        if continuous.variable_dim != self.dist.variable_dim:
+            raise ValueError('posterior must match the latent dimension')
+
+        replicate_shape = batch.split_prefix(
+            continuous.batch_shape, self.batch_shape, name='posterior batch shape'
+        )
+        if 0 in replicate_shape:
+            return self
+
+        starts, weights = batch.pool_samples(
+            (
+                Gaussian(
+                    continuous.means[..., 0, :], continuous.covariances[..., 0, :, :]
+                ),
+                discrete.state_probs[..., 0, :],
+            ),
+            self.batch_shape,
+            replicate_shape,
+        )
+        weights = jnp.moveaxis(weights, -1, -2)  # (*B_model, K, S)
+        fitted = gaussian_fit.from_moment_match(starts, weights=weights)
+        fitted = fitted._replace(
+            covariance=gaussian_fit.add_covariance_floor(
+                fitted.covariance,
+                reference_covariance=fitted.covariance,
+                covariance_floor=covariance_floor,
+            )
+        )
+        return self._replace(
+            dist=filter_valid_batches(
+                fitted, self.dist, weights, min_expected_count=1.0
+            )
         )
 
     def sample(
