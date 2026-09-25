@@ -14,7 +14,6 @@ from xxm.core.emissions.continuous import (
     QuadraticEmissionsT,
 )
 from xxm.core.inference import InferenceState
-from xxm.core.mask import Mask
 from xxm.core.optim.laplace import laplace_inference
 from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
 
@@ -31,13 +30,13 @@ def _prior_potentials(
     """Construct the genuine initial and transition factors."""
     initial_potential = working_model.initial.compute_potential()
 
-    valid_transitions = working_data.valid_transitions()
-    safe_inputs = valid_transitions.apply(working_data.transition_inputs())
+    valid_transitions = working_data.lengths.transitions()
+    safe_inputs = valid_transitions.clear(working_data.transition_inputs())
 
     pair_potential = working_model.dynamics.compute_pair_potentials(safe_inputs)
 
     pair_potential = pair_potential.scale(
-        valid_transitions.materialize(working_data.num_steps - 1)
+        valid_transitions.to_mask(working_data.max_steps - 1).values
     )
 
     return initial_potential, pair_potential
@@ -56,9 +55,10 @@ def to_chain(
     chain = Chain.from_pair_potentials(
         initial_potential,
         pair_potential,
+        lengths=data.lengths,
     )
 
-    valid = data.valid().materialize(data.num_steps)
+    valid = data.lengths.to_mask(data.max_steps).values
     latent_dim = model.dynamics.latent_dim
     dtype = model.initial.dist.covariance.dtype
 
@@ -105,9 +105,7 @@ def infer_exact(
         observation_potential,
     )
 
-    posterior, log_normalizer = posterior_chain.forward_backward(
-        valid=working_data.valid(),
-    )
+    posterior, log_normalizer = posterior_chain.forward_backward()
 
     data_axes = tuple(
         range(
@@ -146,14 +144,14 @@ def infer_laplace(
 
     expected_latent_shape = (
         *working_data.batch_shape,
-        working_data.num_steps,
+        working_data.max_steps,
         working_model.dynamics.latent_dim,
     )
 
-    valid: Mask = working_data.valid()
+    lengths = working_data.lengths
 
     if initial_latents is None:
-        prior, _ = chain.forward_backward(valid)
+        prior, _ = chain.forward_backward()
         latents = prior.means
     else:
         if initial_latents.shape != expected_latent_shape:
@@ -163,7 +161,7 @@ def infer_laplace(
             )
         latents = initial_latents
 
-    latents = valid.apply(latents)
+    latents = lengths.clear(latents)
 
     posterior, log_normalizer = laplace_inference(
         chain=chain,
@@ -171,7 +169,6 @@ def infer_laplace(
         observations=working_data.weighted_observations(),
         initial_latents=latents,
         search_params=params,
-        valid=valid,
     )
 
     data_axes = tuple(
@@ -219,7 +216,7 @@ def elbo_terms(
             f'got {posterior.batch_shape}'
         )
 
-    if posterior.num_steps != working_data.num_steps:
+    if posterior.max_steps != working_data.max_steps:
         raise ValueError('posterior and dataset must have the same number of timesteps')
 
     if posterior.variable_dim != working_model.dynamics.latent_dim:
@@ -251,9 +248,7 @@ def elbo_terms(
         posterior,
     )
 
-    entropy = posterior.entropy(
-        valid=working_data.valid(),
-    )
+    entropy = posterior.entropy()
 
     return (
         initial,

@@ -8,6 +8,7 @@ import jax.numpy as jnp
 from xxm.core import batch
 from xxm.core.chains.discrete import DiscreteChain
 from xxm.core.dists.categorical import Categorical
+from xxm.core.lengths import Lengths
 from xxm.core.optim import categorical as categorical_fit
 from xxm.core.optim.batch import filter_valid_batches
 from xxm.core.posteriors import DiscretePosterior
@@ -16,19 +17,21 @@ from xxm.core.posteriors import DiscretePosterior
 def homogeneous_chain(
     initial: 'CategoricalInitial',
     transitions: 'CategoricalTransitions',
-    num_steps: int,
+    lengths: Lengths,
+    max_steps: int,
 ) -> DiscreteChain:
-    """Construct a homogeneous Markov-chain prior over num_steps states."""
+    """Construct a padded homogeneous Markov-chain prior."""
     num_states = initial.num_states
     return DiscreteChain(
+        lengths=lengths.align_batch(initial.batch_shape),
         initial_probs=initial.dist.probs,
         transition_probs=batch.broadcast_array(
             transitions.dist.probs,
-            (num_steps - 1,),
+            (max_steps - 1,),
             axis=len(transitions.batch_shape),
         ),
         state_log_potentials=jnp.zeros(
-            initial.batch_shape + (num_steps, num_states),
+            initial.batch_shape + (max_steps, num_states),
             dtype=initial.dist.probs.dtype,
         ),
     )
@@ -88,7 +91,13 @@ class CategoricalInitial(typing.NamedTuple):
         )
 
         starts = batch.pool_samples(
-            posterior.state_probs[..., 0, :], self.batch_shape, replicate_shape
+            jnp.where(
+                posterior.lengths.values[..., None] > 0,
+                posterior.state_probs[..., 0, :],
+                0,
+            ),
+            self.batch_shape,
+            replicate_shape,
         )
         counts = jnp.sum(starts, axis=-2)
         fitted = categorical_fit.from_counts(counts, pseudocount=pseudocount)
@@ -181,8 +190,6 @@ class CategoricalTransitions(typing.NamedTuple):
         self,
         posterior: DiscretePosterior,
         pseudocount=categorical_fit.DEFAULT_PSEUDOCOUNT,
-        *,
-        weights: jax.Array | None = None,
     ) -> typing.Self:
         r"""Fit transition probabilities from posterior pair marginals $\xi_t(i,j)$."""
 
@@ -190,17 +197,12 @@ class CategoricalTransitions(typing.NamedTuple):
             raise ValueError('posterior and transitions must share states')
 
         pairs = posterior.pair_probs
-        expected_shape = (*posterior.batch_shape, posterior.num_steps - 1)
+        expected_shape = (*posterior.batch_shape, posterior.max_steps - 1)
 
         if pairs.shape != (*expected_shape, self.num_states, self.num_states):
             raise ValueError('posterior pair probabilities must match time and states')
 
-        if weights is not None:
-            if weights.shape != expected_shape:
-                raise ValueError(f'transition weights must have shape {expected_shape}')
-
-            expanded_weights = batch.expand_trailing(weights, pairs.ndim)
-            pairs = jnp.where(expanded_weights != 0, pairs, 0) * expanded_weights
+        pairs = posterior.lengths.transitions().clear(pairs)
 
         replicate_shape = batch.split_prefix(
             posterior.batch_shape, self.batch_shape, name='posterior batch shape'
@@ -209,7 +211,7 @@ class CategoricalTransitions(typing.NamedTuple):
         samples = batch.pool_samples(
             pairs,
             self.batch_shape,
-            (*replicate_shape, posterior.num_steps - 1),
+            (*replicate_shape, posterior.max_steps - 1),
         )
         expected_transitions = samples.sum(axis=-3)
 

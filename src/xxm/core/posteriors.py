@@ -5,6 +5,7 @@ import typing
 import jax
 
 from xxm.core.dists.gaussian import PairedGaussian
+from xxm.core.lengths import Lengths
 
 
 class DiscretePosterior(typing.Protocol):
@@ -17,7 +18,10 @@ class DiscretePosterior(typing.Protocol):
     """
 
     @property
-    def num_steps(self) -> int:
+    def lengths(self) -> Lengths: ...
+
+    @property
+    def max_steps(self) -> int:
         r"""Number of time steps $T$."""
         ...
 
@@ -52,7 +56,10 @@ class ContinuousPosterior(typing.Protocol):
     """
 
     @property
-    def num_steps(self) -> int:
+    def lengths(self) -> Lengths: ...
+
+    @property
+    def max_steps(self) -> int:
         r"""Number of time steps $T$."""
         ...
 

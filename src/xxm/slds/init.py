@@ -49,7 +49,7 @@ def _validate_initialization(
         latent_dim,
     )
 
-    if bool(jnp.any(data.lengths <= 1)):
+    if bool(jnp.any(data.lengths.values <= 1)):
         raise ValueError(
             'every sequence must contain at least 2 valid steps '
             'for lag-1 switching-dynamics initialization'
@@ -238,7 +238,7 @@ def _init_from_arhmm(
     # (*B, R, K)
 
     # One validity value per AR state / target row.
-    valid = latent_data.valid().materialize(latent_data.num_steps)
+    valid = latent_data.lengths.to_mask(latent_data.max_steps).values
     # (*B, R)
 
     if state_probs.shape[:-1] != valid.shape:

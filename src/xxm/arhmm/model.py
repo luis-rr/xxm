@@ -17,6 +17,7 @@ from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
 )
+from xxm.core.lengths import Lengths
 
 from .core import Model, Posterior
 from .data import ARDataset
@@ -566,8 +567,8 @@ class Inferred(typing.Generic[ARHMMFacadeT]):
         if self.posterior.batch_shape != self.data.batch_shape:
             raise ValueError('posterior batch must match the source dataset')
 
-        expected_num_steps = self.data.num_steps - self.model.num_lags
-        if self.posterior.num_steps != expected_num_steps:
+        expected_max_steps = self.data.max_steps - self.model.num_lags
+        if self.posterior.max_steps != expected_max_steps:
             raise ValueError('posterior must match the modeled AR time dimension')
 
         if self.posterior.num_states != self.model.num_states:
@@ -577,7 +578,7 @@ class Inferred(typing.Generic[ARHMMFacadeT]):
         """State probabilities on the compact AR timeline."""
         return Sequences.from_padded(
             self.posterior.state_probs,
-            self.data.lengths - self.model.num_lags,
+            Lengths(self.data.lengths.values - self.model.num_lags),
         )
 
     def observation_mean(self) -> Sequences:
@@ -621,7 +622,7 @@ class Inferred(typing.Generic[ARHMMFacadeT]):
 
         return Sequences.from_padded(
             most_likely,
-            self.data.lengths - self.model.num_lags,
+            Lengths(self.data.lengths.values - self.model.num_lags),
         )
 
 

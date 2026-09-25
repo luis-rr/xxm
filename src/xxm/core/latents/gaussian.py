@@ -45,7 +45,6 @@ class GaussianInitial(typing.NamedTuple):
     def fit_params(
         self,
         posterior: ContinuousPosterior,
-        weights: jax.Array,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
     ) -> typing.Self:
         r"""
@@ -53,21 +52,24 @@ class GaussianInitial(typing.NamedTuple):
 
         ``self.batch_shape`` is preserved. Any additional posterior batch axes
         are independent replicates and are pooled when fitting the initial
-        distribution. ``weights`` contains one validity weight per latent state.
+        distribution. Structural weights come from the posterior lengths.
         """
         posterior_batch = posterior.batch_shape
         replicate_shape = batch.split_prefix(
             posterior_batch, self.batch_shape, name='posterior batch shape'
         )
 
-        if weights.shape != posterior.means.shape[:-1]:
-            raise ValueError('weights must match posterior batch and time dimensions')
+        weights = posterior.lengths.to_mask(posterior.max_steps).values
+        if posterior.max_steps == 0:
+            return self
+        means = posterior.lengths.clear(posterior.means)
+        covariances = posterior.lengths.clear(posterior.covariances)
 
         initial_marginals, initial_weights = batch.pool_samples(
             (
                 Gaussian(
-                    mean=posterior.means[..., 0, :],
-                    covariance=posterior.covariances[..., 0, :, :],
+                    mean=means[..., 0, :],
+                    covariance=covariances[..., 0, :, :],
                 ),
                 weights[..., 0],
             ),
@@ -81,13 +83,13 @@ class GaussianInitial(typing.NamedTuple):
         reference_marginals, reference_weights = batch.pool_samples(
             (
                 Gaussian(
-                    mean=posterior.means,
-                    covariance=posterior.covariances,
+                    mean=means,
+                    covariance=covariances,
                 ),
                 weights,
             ),
             self.batch_shape,
-            (*replicate_shape, posterior.num_steps),
+            (*replicate_shape, posterior.max_steps),
         )
         reference = gaussian_fit.from_moment_match(
             reference_marginals, weights=reference_weights
@@ -280,7 +282,6 @@ class GaussianLinearDynamics(typing.NamedTuple):
         self,
         posterior: ContinuousPosterior,
         inputs: jax.Array,
-        weights: jax.Array,
         ridge=gaussian_fit.DEFAULT_RIDGE,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
     ) -> typing.Self:
@@ -288,15 +289,18 @@ class GaussianLinearDynamics(typing.NamedTuple):
         Fit dynamics while preserving the receiver batch prefix.
 
         ``self.batch_shape`` is preserved. Any additional posterior batch axes
-        are pooled together with the transition axis. ``inputs`` and ``weights``
-        contain one entry per transition.
+        are pooled together with the transition axis. ``inputs`` contains one
+        entry per transition; structural weights come from posterior lengths.
         """
         posterior_batch = posterior.batch_shape
         replicate_shape = batch.split_prefix(
             posterior_batch, self.batch_shape, name='posterior batch shape'
         )
 
-        num_transitions = posterior.num_steps - 1
+        num_transitions = posterior.max_steps - 1
+        transition_lengths = posterior.lengths.transitions()
+        weights = transition_lengths.to_mask(num_transitions).values
+        inputs = transition_lengths.clear(inputs)
         expected_inputs_shape = (
             *posterior_batch,
             num_transitions,
@@ -331,7 +335,11 @@ class GaussianLinearDynamics(typing.NamedTuple):
             return self
 
         paired, inputs, weights = batch.pool_samples(
-            (posterior.paired_marginals(), inputs, weights),
+            (
+                jax.tree.map(transition_lengths.clear, posterior.paired_marginals()),
+                inputs,
+                weights,
+            ),
             self.batch_shape,
             sample_shape,
         )
@@ -674,11 +682,11 @@ class StateConditionedGaussian(typing.NamedTuple):
 
         Preserve the receiver model batch and intrinsic state axis. A state
         with expected initial occupancy below one retains its current Gaussian.
-        Every supplied sequence must contain at least one valid timestep.
+        Zero-length sequences do not contribute initial-state statistics.
         """
         batch.require_same_shape(discrete.batch_shape, continuous.batch_shape)
 
-        if discrete.num_steps != continuous.num_steps or continuous.num_steps < 1:
+        if discrete.max_steps != continuous.max_steps or continuous.max_steps < 1:
             raise ValueError('posteriors must share a nonempty time dimension')
         if discrete.num_states != self.num_states:
             raise ValueError('posterior must match the number of states')
@@ -694,9 +702,14 @@ class StateConditionedGaussian(typing.NamedTuple):
         starts, weights = batch.pool_samples(
             (
                 Gaussian(
-                    continuous.means[..., 0, :], continuous.covariances[..., 0, :, :]
+                    continuous.lengths.clear(continuous.means)[..., 0, :],
+                    continuous.lengths.clear(continuous.covariances)[..., 0, :, :],
                 ),
-                discrete.state_probs[..., 0, :],
+                jnp.where(
+                    continuous.lengths.values[..., None] > 0,
+                    discrete.state_probs[..., 0, :],
+                    0,
+                ),
             ),
             self.batch_shape,
             replicate_shape,

@@ -17,6 +17,7 @@ from xxm.core.emissions.continuous import EmissionsT
 from xxm.core.latents.discrete import CategoricalInitial, CategoricalTransitions
 from xxm.core.latents.gaussian import StateConditionedGaussian
 from xxm.core.latents.switching import GaussianLinearSwitchingDynamics
+from xxm.core.lengths import Lengths
 
 
 class Posterior(typing.NamedTuple):
@@ -31,9 +32,17 @@ class Posterior(typing.NamedTuple):
     continuous: GaussianChainMarginals  # T continuous latents
 
     @property
+    def lengths(self) -> Lengths:
+        return self.continuous.lengths
+
+    @property
+    def max_steps(self) -> int:
+        return self.continuous.max_steps
+
+    @property
     def batch_shape(self) -> tuple[int, ...]:
         batch.require_same_shape(self.discrete.batch_shape, self.continuous.batch_shape)
-        if self.discrete.num_steps != self.continuous.num_steps:
+        if self.discrete.max_steps != self.continuous.max_steps:
             raise ValueError(
                 'discrete and continuous posteriors must share time dimensions'
             )
@@ -125,21 +134,17 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         expected_batch = (*self.batch_shape, *data.batch_shape)
         if posterior.batch_shape != expected_batch:
             raise ValueError(f'posterior batch must be {expected_batch}')
-        if posterior.continuous.num_steps != data.num_steps:
+        if posterior.continuous.max_steps != data.max_steps:
             raise ValueError('posterior and dataset time dimensions must match')
         if data.input_dim != self.dynamics.input_dim:
             raise ValueError('dataset input dimension must match dynamics')
         working_data = data.broadcast(self.batch_shape)
-        transition_weights = working_data.valid_transitions().materialize(
-            data.num_steps - 1
-        )
         return self.__class__(
             state_initial=self.state_initial.fit_params(
                 posterior.discrete,
             ),
             transitions=self.transitions.fit_params(
                 posterior.discrete,
-                weights=transition_weights,
             ),
             latent_initial=self.latent_initial.fit_params(
                 posterior.discrete,
@@ -148,8 +153,9 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
             dynamics=self.dynamics.fit_params(
                 discrete=posterior.discrete,
                 continuous=posterior.continuous,
-                inputs=working_data.transition_inputs(),
-                weights=transition_weights,
+                inputs=working_data.lengths.transitions().clear(
+                    working_data.transition_inputs()
+                ),
             ),
             emissions=self.emissions.fit_params(
                 working_data.weighted_observations(),

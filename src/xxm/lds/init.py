@@ -89,6 +89,7 @@ def _masked_pca_latents(
     observations = WeightedObservations(
         values=values,
         weights=data.observation_weights(),
+        lengths=data.lengths,
     )
     safe_values = observations.safe_values()
     projection = _pca_projection(safe_values[observations.weights], latent_dim)
@@ -170,7 +171,7 @@ def _init_dynamics(
     """Fit controlled dynamics where both PCA endpoint observations are available."""
     observed = data.observation_weights()
 
-    usable = data.valid_transitions().apply(observed[..., :-1] & observed[..., 1:])
+    usable = data.lengths.transitions().clear(observed[..., :-1] & observed[..., 1:])
 
     latent_dim = latents.shape[-1]
     input_dim = data.input_dim

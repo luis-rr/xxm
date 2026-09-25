@@ -80,7 +80,7 @@ def _initial_latents(
     if initial_latents is not None:
         return initial_latents
     emissions = emissions.broadcast(data.batch_shape)
-    return data.valid().apply(
+    return data.lengths.clear(
         initial_latent_trajectory(
             emissions, data.observations.values, data.observation_weights()[..., None]
         )
@@ -635,7 +635,7 @@ class Inferred(typing.Generic[SLDSFacadeT]):
     def __post_init__(self) -> None:
         if self.posterior.batch_shape != self.data.batch_shape:
             raise ValueError('posterior batch must match the source dataset')
-        if self.posterior.continuous.num_steps != self.data.num_steps:
+        if self.posterior.continuous.max_steps != self.data.max_steps:
             raise ValueError('posterior must match the padded time dimension')
         if self.posterior.continuous.variable_dim != self.model.latent_dim:
             raise ValueError('posterior must match the model latent dimension')

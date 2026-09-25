@@ -29,6 +29,7 @@ from xxm.core.latents.gaussian import (
     StateConditionedGaussian,
 )
 from xxm.core.latents.switching import GaussianLinearSwitchingDynamics
+from xxm.core.lengths import Lengths
 
 B = (2, 3)
 K, T, D, O, L = 2, 3, 2, 2, 1
@@ -72,6 +73,7 @@ def _discrete_posterior(batch=B, num_steps=T):
     return DiscreteChainMarginals(
         probs,
         probs[..., :-1, :, None] * probs[..., 1:, None, :],
+        Lengths(jnp.full(batch, num_steps)),
     )
 
 
@@ -84,6 +86,7 @@ def _continuous_posterior(batch=B, num_steps=T):
             batch + (num_steps, D, D),
         ),
         jnp.zeros(batch + (num_steps - 1, D, D), dtype=means.dtype),
+        Lengths(jnp.full(batch, num_steps)),
     )
 
 
@@ -235,7 +238,7 @@ def test_discrete_latent_fit_and_sampling():
     np.testing.assert_array_equal(trajectory[..., 0], states)
     assert bool(jnp.all((trajectory >= 0) & (trajectory < K)))
     assert transitions.sample(jax.random.key(1), states, 1).shape == FIT_B + (1,)
-    chain = homogeneous_chain(initial, transitions, T)
+    chain = homogeneous_chain(initial, transitions, Lengths(jnp.full(FIT_B, T)), T)
     assert chain.transition_probs.shape == FIT_B + (T - 1, K, K)
     assert chain.state_log_potentials.shape == FIT_B + (T, K)
 
@@ -294,23 +297,19 @@ def test_gaussian_latent_fit_requires_receiver_batch_prefix():
     posterior = _continuous_posterior(batch=(4,), num_steps=2)
 
     with pytest.raises(ValueError, match='posterior batch shape must begin with'):
-        GaussianInitial(_gaussian(B)).fit_params(posterior, weights=jnp.ones((4, 2)))
+        GaussianInitial(_gaussian(B)).fit_params(posterior)
 
     with pytest.raises(ValueError, match='posterior batch shape must begin with'):
         GaussianLinearDynamics(_linear(B)).fit_params(
             posterior,
             inputs=jnp.empty((4, 1, 0), dtype=posterior.means.dtype),
-            weights=jnp.ones((4, 1)),
         )
 
     matched = _continuous_posterior(batch=B, num_steps=2)
-    fitted_initial = GaussianInitial(_gaussian(B)).fit_params(
-        matched, weights=jnp.ones(B + (2,))
-    )
+    fitted_initial = GaussianInitial(_gaussian(B)).fit_params(matched)
     fitted_dynamics = GaussianLinearDynamics(_linear(B)).fit_params(
         matched,
         inputs=jnp.empty(B + (1, 0), dtype=matched.means.dtype),
-        weights=jnp.ones(B + (1,)),
     )
     assert fitted_initial.batch_shape == B
     assert fitted_dynamics.batch_shape == B
@@ -332,7 +331,11 @@ def test_state_emission_likelihood_and_sampling(kind, component):
     data = (
         ARDataset.from_dataset(Dataset.from_batch(observations), L)
         if is_ar
-        else WeightedObservations(observations, jnp.ones(FIT_B + (T,), dtype=bool))
+        else WeightedObservations(
+            observations,
+            jnp.ones(FIT_B + (T,), dtype=bool),
+            Lengths(jnp.full(FIT_B, T)),
+        )
     )
     likelihood = component.log_likelihoods(data)
     assert likelihood.shape == FIT_B + (T - L if is_ar else T, K)
@@ -371,7 +374,11 @@ def test_continuous_emission_evaluation(kind, component):
     observations = (
         jnp.arange(math.prod(FIT_B + (T, O))).reshape(FIT_B + (T, O)) % 3
     ).astype(jnp.float32)
-    data = WeightedObservations(observations, jnp.ones(FIT_B + (T,), dtype=bool))
+    data = WeightedObservations(
+        observations,
+        jnp.ones(FIT_B + (T,), dtype=bool),
+        Lengths(jnp.full(FIT_B, T)),
+    )
     likelihood = component.log_likelihood(data, latents)
     assert likelihood.shape == FIT_B
     assert component.conditional(latents).batch_shape == FIT_B + (T,)
@@ -541,20 +548,22 @@ def test_unoccupied_states_retain_each_batchs_parameters(kind, component):
     posterior = DiscreteChainMarginals(
         state_probs,
         state_probs[..., :-1, :, None] * state_probs[..., 1:, None, :],
+        Lengths(jnp.full(B, num_steps)),
     )
     if kind == 'switching':
         fitted = component.fit_params(
             posterior,
             _continuous_posterior(),
             inputs=jnp.empty(B + (T - 1, 0)),
-            weights=jnp.ones(B + (T - 1,)),
         )
     else:
         observations = 2.0 + _values(B + (T, O))
         data = (
             ARDataset.from_dataset(Dataset.from_batch(observations), L)
             if kind.startswith('ar_')
-            else WeightedObservations(observations, jnp.ones(B + (T,), dtype=bool))
+            else WeightedObservations(
+                observations, jnp.ones(B + (T,), dtype=bool), Lengths(jnp.full(B, T))
+            )
         )
         fitted = component.fit_params(data, posterior)
     unused = np.asarray(jnp.arange(K) != active[..., None])
@@ -579,18 +588,57 @@ def test_representative_batched_fits_are_jittable():
     posterior = _continuous_posterior()
     dynamics = GaussianLinearDynamics(_linear(B))
     inputs = jnp.empty(B + (T - 1, 0), dtype=posterior.means.dtype)
-    weights = jnp.ones(B + (T - 1,))
     _assert_tree_close(
-        jax.jit(lambda model, q, u, w: model.fit_params(q, inputs=u, weights=w))(
-            dynamics, posterior, inputs, weights
+        jax.jit(lambda model, q, u: model.fit_params(q, inputs=u))(
+            dynamics, posterior, inputs
         ),
-        dynamics.fit_params(posterior, inputs=inputs, weights=weights),
+        dynamics.fit_params(posterior, inputs=inputs),
     )
     emissions = discrete.GaussianEmissions(_gaussian(B + (K,), O))
     observations = _values(B + (T, O))
-    data = WeightedObservations(observations, jnp.ones(B + (T,), dtype=bool))
+    data = WeightedObservations(
+        observations, jnp.ones(B + (T,), dtype=bool), Lengths(jnp.full(B, T))
+    )
     states = _discrete_posterior()
     _assert_tree_close(
         jax.jit(lambda model, y, q: model.fit_params(y, q))(emissions, data, states),
         emissions.fit_params(data, states),
     )
+
+
+def test_gaussian_initial_excludes_zero_length_sequences_and_padded_moments():
+    posterior = GaussianChainMarginals(
+        means=jnp.array([[[jnp.nan], [jnp.nan]], [[2.0], [jnp.nan]]]),
+        covariances=jnp.array([[[[jnp.nan]], [[jnp.nan]]], [[[3.0]], [[jnp.nan]]]]),
+        cross_covariances=jnp.zeros((2, 1, 1, 1)),
+        lengths=Lengths(jnp.array([0, 1])),
+    )
+    initial = GaussianInitial(Gaussian(jnp.zeros(1), jnp.eye(1)))
+    fitted = jax.jit(lambda p: initial.fit_params(p, covariance_floor=0))(posterior)
+    np.testing.assert_allclose(fitted.dist.mean, [2.0], atol=1e-6)
+    np.testing.assert_allclose(fitted.dist.covariance, [[3.0]], atol=1e-6)
+
+
+def test_gaussian_dynamics_ignore_padded_transition_moments_and_inputs():
+    posterior = GaussianChainMarginals(
+        means=jnp.array([[0.0], [1.0], [2.0], [jnp.nan]]),
+        covariances=jnp.array([[[1.0]], [[1.0]], [[1.0]], [[jnp.nan]]]),
+        cross_covariances=jnp.array([[[0.0]], [[0.0]], [[jnp.nan]]]),
+        lengths=Lengths(jnp.array(3)),
+    )
+    dynamics = GaussianLinearDynamics.from_params(
+        latent_coefficients=jnp.eye(1),
+        input_coefficients=jnp.ones((1, 1)),
+        bias=jnp.zeros(1),
+        covariance=jnp.eye(1),
+    )
+    inputs = jnp.array([[0.0], [1.0], [jnp.nan]])
+    actual = jax.jit(lambda p, u: dynamics.fit_params(p, inputs=u))(posterior, inputs)
+    cropped = GaussianChainMarginals(
+        posterior.means[:3],
+        posterior.covariances[:3],
+        posterior.cross_covariances[:2],
+        posterior.lengths,
+    )
+    expected = dynamics.fit_params(cropped, inputs=inputs[:2])
+    _assert_tree_close(actual, expected)

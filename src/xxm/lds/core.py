@@ -121,7 +121,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
         expected_latent_shape = (
             *working_data.batch_shape,
-            working_data.num_steps,
+            working_data.max_steps,
             working_model.dynamics.latent_dim,
         )
         if latents.shape != expected_latent_shape:
@@ -131,17 +131,17 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
         initial_log_prob = working_model.initial.dist.log_prob(latents[..., 0, :])
 
-        valid_transitions = working_data.valid_transitions()
+        valid_transitions = working_data.lengths.transitions()
         transition_inputs = working_data.transition_inputs()
-        safe_inputs = valid_transitions.apply(transition_inputs)
-        safe_previous = valid_transitions.apply(latents[..., :-1, :])
-        safe_next = valid_transitions.apply(latents[..., 1:, :])
+        safe_inputs = valid_transitions.clear(transition_inputs)
+        safe_previous = valid_transitions.clear(latents[..., :-1, :])
+        safe_next = valid_transitions.clear(latents[..., 1:, :])
 
         dynamics = working_model.dynamics.conditional(safe_inputs)
         dynamics = dynamics.conditional(safe_previous)
 
         transition_log_probs = dynamics.log_prob(safe_next)
-        transition_log_probs = valid_transitions.apply(transition_log_probs)
+        transition_log_probs = valid_transitions.clear(transition_log_probs)
 
         dynamics_log_prob = jnp.sum(transition_log_probs, axis=-1)
 
@@ -185,13 +185,11 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         return self.__class__(
             initial=self.initial.fit_params(
                 posterior,
-                weights=working_data.valid().materialize(working_data.num_steps),
             ),
             dynamics=self.dynamics.fit_params(
                 posterior,
-                inputs=working_data.transition_inputs(),
-                weights=working_data.valid_transitions().materialize(
-                    working_data.num_steps - 1
+                inputs=working_data.lengths.transitions().clear(
+                    working_data.transition_inputs()
                 ),
             ),
             emissions=self.emissions.fit_params(

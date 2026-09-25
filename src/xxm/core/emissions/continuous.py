@@ -159,7 +159,7 @@ def _flatten_fit_data(
         posterior_batch,
     )
 
-    if observations.num_steps != posterior.num_steps:
+    if observations.max_steps != posterior.max_steps:
         raise ValueError(
             'posterior and observations must have the same number of timesteps'
         )
@@ -172,7 +172,7 @@ def _flatten_fit_data(
             posterior.covariances,
         ),
         batch_shape,
-        (*replicate_shape, observations.num_steps),
+        (*replicate_shape, observations.max_steps),
     )
 
 
@@ -238,7 +238,7 @@ class GaussianEmissions(typing.NamedTuple):
             posterior.batch_shape,
         )
 
-        if observations.num_steps != posterior.num_steps:
+        if observations.max_steps != posterior.max_steps:
             raise ValueError(
                 'posterior and observations must have the same number of timesteps'
             )
@@ -476,7 +476,7 @@ class PoissonEmissions(typing.NamedTuple):
         )
 
         dist = self.dist.broadcast(
-            (observations.num_steps,),
+            (observations.max_steps,),
             axis=len(self.batch_shape),
         )
 
@@ -608,10 +608,10 @@ class PoissonEmissions(typing.NamedTuple):
             posterior.batch_shape,
         )
 
-        num_steps = posterior.num_steps
+        max_steps = posterior.max_steps
 
         dist = self.dist.broadcast(
-            (num_steps,),
+            (max_steps,),
             axis=len(self.batch_shape),
         )
 

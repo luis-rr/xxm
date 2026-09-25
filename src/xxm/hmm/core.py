@@ -129,7 +129,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
                 f'posterior batch must be {expected_batch}; got {posterior.batch_shape}'
             )
 
-        if posterior.num_steps != data.num_steps:
+        if posterior.max_steps != data.max_steps:
             raise ValueError('posterior and dataset must share their time dimension')
 
         if posterior.num_states != self.num_states:
@@ -141,9 +141,6 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
             initial=self.initial.fit_params(posterior),
             transitions=self.transitions.fit_params(
                 posterior,
-                weights=working_data.valid_transitions().materialize(
-                    data.num_steps - 1
-                ),
             ),
             emissions=self.emissions.fit_params(
                 working_data.weighted_observations(),

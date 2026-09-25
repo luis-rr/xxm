@@ -9,6 +9,7 @@ from xxm.core.chains.gaussian import (
     GaussianPotential,
 )
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.lengths import Lengths
 
 jax.config.update('jax_enable_x64', True)
 
@@ -38,6 +39,7 @@ def make_chain() -> GaussianChain:
         ]
     )
     return GaussianChain(
+        lengths=Lengths(jnp.array(3)),
         diagonal_precision_blocks=diagonal_precision_blocks,
         lower_precision_blocks=lower_precision_blocks,
         information_vectors=information_vectors,
@@ -117,6 +119,7 @@ def test_gaussian_chain_cross_covariances_match_dense_inverse():
 
 def test_gaussian_chain_single_time_step():
     chain = GaussianChain(
+        lengths=Lengths(jnp.array(1)),
         diagonal_precision_blocks=jnp.array([[[3.0, 0.2], [0.2, 4.0]]]),
         lower_precision_blocks=jnp.zeros((0, 2, 2)),
         information_vectors=jnp.array([[0.5, -0.3]]),
@@ -144,6 +147,7 @@ def test_gaussian_chain_single_time_step():
 
 def test_gaussian_chain_scalar_latent():
     chain = GaussianChain(
+        lengths=Lengths(jnp.array(3)),
         diagonal_precision_blocks=jnp.array([[[4.0]], [[5.0]], [[6.0]]]),
         lower_precision_blocks=jnp.array([[[0.3]], [[0.2]]]),
         information_vectors=jnp.array([[1.0], [0.5], [-0.25]]),

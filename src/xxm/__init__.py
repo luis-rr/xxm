@@ -8,6 +8,7 @@ from xxm.core.data import (
     Dataset,
     Sequences,
 )
+from xxm.core.lengths import Lengths
 from xxm.hmm import (
     GaussianHMM,
     PoissonHMM,
@@ -27,6 +28,7 @@ __all__ = [
     'GaussianHMM',
     'GaussianLDS',
     'GaussianSLDS',
+    'Lengths',
     'PoissonARHMM',
     'PoissonHMM',
     'PoissonLDS',

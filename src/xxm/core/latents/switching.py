@@ -12,7 +12,6 @@ from xxm.core.chains.gaussian import (
 )
 from xxm.core.dists.gaussian import LinearGaussian
 from xxm.core.latents.gaussian import GaussianLinearDynamics
-from xxm.core.mask import ArbitraryMask
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim.batch import filter_valid_batches
 from xxm.core.posteriors import ContinuousPosterior, DiscretePosterior
@@ -110,7 +109,6 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         continuous: ContinuousPosterior,
         *,
         inputs: jax.Array,
-        weights: jax.Array,
         ridge=gaussian_fit.DEFAULT_RIDGE,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
     ) -> typing.Self:
@@ -124,7 +122,7 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
 
         batch.require_same_shape(discrete.batch_shape, continuous.batch_shape)
 
-        if discrete.num_steps != continuous.num_steps or continuous.num_steps < 1:
+        if discrete.max_steps != continuous.max_steps or continuous.max_steps < 1:
             raise ValueError('posteriors must share a nonempty time dimension')
         if (
             discrete.num_states != self.num_states
@@ -133,27 +131,23 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
             raise ValueError(
                 'posterior state and latent dimensions must match dynamics'
             )
-        transition_shape = (*continuous.batch_shape, continuous.num_steps - 1)
+        transition_shape = (*continuous.batch_shape, continuous.max_steps - 1)
         if inputs.shape != (*transition_shape, self.input_dim):
             raise ValueError(
                 'inputs must match posterior transitions and input dimension'
             )
-        if weights.shape != transition_shape:
-            raise ValueError('weights must match posterior transitions')
 
         replicate_shape = batch.split_prefix(
             continuous.batch_shape, self.batch_shape, name='posterior batch shape'
         )
-        sample_shape = (*replicate_shape, continuous.num_steps - 1)
+        sample_shape = (*replicate_shape, continuous.max_steps - 1)
         if 0 in sample_shape:
             return self
 
-        active = ArbitraryMask(weights != 0)
-        state_weights = (
-            active.apply(discrete.state_probs[..., 1:, :]) * weights[..., None]
-        )
-        safe_inputs = active.apply(inputs)
-        paired = jax.tree.map(active.apply, continuous.paired_marginals())
+        lengths = continuous.lengths.transitions()
+        state_weights = lengths.clear(discrete.state_probs[..., 1:, :])
+        safe_inputs = lengths.clear(inputs)
+        paired = jax.tree.map(lengths.clear, continuous.paired_marginals())
         paired, safe_inputs, state_weights = batch.pool_samples(
             (paired, safe_inputs, state_weights),
             self.batch_shape,

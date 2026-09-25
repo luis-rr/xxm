@@ -90,6 +90,10 @@ temporal values  (*B, T, ...)
 
 For unbatched objects, `*B=()`, so familiar shapes such as `(T, D)` remain unchanged.
 
+Generic `batch.concatenate` joins an existing batch axis; `batch.split` preserves that axis in each part.
+
+
+
 #### Batch API
 
 Objects exposing `batch_shape` should, where mathematically applicable, support a consistent batch-manipulation API:
@@ -348,7 +352,9 @@ Low-level inference returns a numerical `InferenceState` containing the model, p
 
 The facades represent singular, unbatched models. Their `via_*`, `infer`, and `fit` methods accept a `Dataset`. Facade inference returns an immutable host-side `Inferred` owning the facade model, raw posterior, and exact source dataset. Fitting returns `Fit(inferred, objective_trace)`, including the initial objective in the trace.
 
-`Sequences` stores temporal values `(*B, T, D)` and lengths `(*B,)`. `Dataset` composes observations and inputs as matching `Sequences`, plus whole-timestep visibility `visible` with shape `(*B, T)`. Public posterior batches match the dataset batch exactly; a single unbatched trajectory has no artificial sequence axis. Temporal accessors return `Sequences`, whose `get(index)` retrieves one cropped array on the host. `unpack()` is a convenience for unbatched or flat collections, and `stack()` constructs rectangular batch hierarchies.
+Temporal object store temporal values `(*B, T, *D)`, exposes the dense horizon as `max_steps`, and owns a `Lengths` object with `values` shaped `(*B,)`. Use `lengths.transitions()` for transition time and `lengths.clear(values)` to exclude padding.
+
+`Dataset` composes observations and inputs as matching `Sequences`, plus whole-timestep visibility `visible` with shape `(*B, T)`. Public posterior batches match the dataset batch exactly; a single unbatched trajectory has no artificial sequence axis. Temporal accessors return `Sequences`, whose `get(index)` retrieves one cropped array on the host. `unpack()` is a convenience for unbatched or flat collections, and `stack()` constructs rectangular batch hierarchies.
 
 
 ## JAX and model representation
@@ -430,7 +436,7 @@ Names should follow standard statistical terminology while remaining readable to
 * Prefer descriptive names such as `forward_probs` over one-letter algorithm names such as `alpha`.
 * Use `prob` and `probs` consistently as abbreviations.
 * Use zero-based indexing in mathematical explanations and implementation comments.
-* Prefer `num_states`, `num_steps`, `num_lags`, `latent_dim`, `input_dim`, `output_dim`, and `variable_dim` consistently according to meaning.
+* Prefer `num_states`, `num_lags`, `latent_dim`, `input_dim`, `output_dim`, and `variable_dim` consistently according to meaning. Use `max_steps` for the dense horizon of a realized temporal object and `num_steps` when requesting or constructing exactly N new positions.
 * Distinguish parameters, moments, potentials, messages, and marginals rather than using generic names such as `values` where the distinction matters.
 
 ### Function families

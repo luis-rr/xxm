@@ -92,6 +92,62 @@ def select(batchable: _BatchableT, index: SelT) -> _BatchableT:
     return _map_batch_leaves(batchable, lambda values: values[index])
 
 
+def concatenate(
+    batchables: typing.Sequence[_BatchableT],
+    axis: int = 0,
+) -> _BatchableT:
+    """Concatenate an existing batch axis without padding intrinsic axes."""
+    if not batchables:
+        raise ValueError('batchables must contain at least one item')
+    first = batchables[0]
+    shape = first.batch_shape
+    axis = axis_index(axis, len(shape))
+    leaves, structure = jax.tree_util.tree_flatten(first)
+    for item in batchables:
+        if type(item) is not type(first):
+            raise ValueError('batchables must have the same concrete type')
+        other_shape = item.batch_shape
+        if len(other_shape) != len(shape) or any(
+            size != other_shape[i] for i, size in enumerate(shape) if i != axis
+        ):
+            raise ValueError('non-concatenated batch dimensions must match')
+        other_leaves, other_structure = jax.tree_util.tree_flatten(item)
+        if other_structure != structure:
+            raise ValueError('batchables must have matching PyTree structure')
+        for left, right in zip(leaves, other_leaves, strict=True):
+            intrinsic = split_prefix(left.shape, shape, name='PyTree leaf shape')
+            other_intrinsic = split_prefix(
+                right.shape, other_shape, name='PyTree leaf shape'
+            )
+            if intrinsic != other_intrinsic:
+                raise ValueError('batchables must have matching intrinsic shapes')
+    return typing.cast(
+        _BatchableT,
+        jax.tree.map(lambda *values: jnp.concatenate(values, axis=axis), *batchables),
+    )
+
+
+def split(
+    batchable: _BatchableT,
+    sizes: typing.Sequence[int],
+    axis: int = 0,
+) -> tuple[_BatchableT, ...]:
+    """Split a structural batch axis into static, axis-preserving slices."""
+    axis = axis_index(axis, len(batchable.batch_shape))
+    sizes = tuple(operator.index(size) for size in sizes)
+    if any(size < 0 for size in sizes):
+        raise ValueError('split sizes must be nonnegative')
+    if sum(sizes) != batchable.batch_shape[axis]:
+        raise ValueError('split sizes must sum to the selected batch dimension')
+    parts = []
+    start = 0
+    for size in sizes:
+        index = (slice(None),) * axis + (slice(start, start + size),)
+        parts.append(select(batchable, index))
+        start += size
+    return tuple(parts)
+
+
 def broadcast(batchable: _BatchableT, shape, axis: int) -> _BatchableT:
     """Insert replicated dimensions into a batchable PyTree."""
     shape, axis = insertion(shape, axis, len(batchable.batch_shape))

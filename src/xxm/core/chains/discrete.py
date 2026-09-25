@@ -9,7 +9,7 @@ import jax.numpy as jnp
 import jax.scipy as jsp
 
 from xxm.core import batch
-from xxm.core.mask import NO_MASK, ArbitraryMask, Mask
+from xxm.core.lengths import Lengths
 
 
 class DiscretePotential(typing.NamedTuple):
@@ -72,6 +72,7 @@ class DiscreteChain(typing.NamedTuple):
     initial_probs: jax.Array  # (*B, K)
     transition_probs: jax.Array  # (*B, T - 1, K, K)
     state_log_potentials: jax.Array  # (*B, T, K)
+    lengths: Lengths
 
     @property
     def num_states(self) -> int:
@@ -79,7 +80,7 @@ class DiscreteChain(typing.NamedTuple):
         return self.initial_probs.shape[-1]
 
     @property
-    def num_steps(self) -> int:
+    def max_steps(self) -> int:
         """Number of time steps $T$."""
         return self.state_log_potentials.shape[-2]
 
@@ -88,6 +89,7 @@ class DiscreteChain(typing.NamedTuple):
         cls,
         initial_probs: jax.Array,
         transition_probs: jax.Array,
+        lengths: Lengths,
     ) -> typing.Self:
         """Construct chain from Markov model with uniform potentials."""
 
@@ -96,18 +98,19 @@ class DiscreteChain(typing.NamedTuple):
                 'initial and transition probabilities need intrinsic state/time axes'
             )
         batch = initial_probs.shape[:-1]
-        num_steps = transition_probs.shape[-3] + 1
+        max_steps = transition_probs.shape[-3] + 1
         num_states = initial_probs.shape[-1]
-        if transition_probs.shape != batch + (num_steps - 1, num_states, num_states):
+        if transition_probs.shape != batch + (max_steps - 1, num_states, num_states):
             raise ValueError(
                 'transition_probs must have shape (*B, T - 1, K, K) matching initial_probs'
             )
 
         return cls(
+            lengths=lengths.align_batch(batch),
             initial_probs=initial_probs,
             transition_probs=transition_probs,
             state_log_potentials=jnp.zeros(
-                batch + (num_steps, num_states),
+                batch + (max_steps, num_states),
                 dtype=initial_probs.dtype,
             ),
         )
@@ -117,19 +120,22 @@ class DiscreteChain(typing.NamedTuple):
         """Leading independent-chain dimensions."""
         return self.initial_probs.shape[:-1]
 
+    def validate(self) -> None:
+        """Validate structural lengths at an explicit host boundary."""
+        self.lengths.align_batch(self.batch_shape)
+        self.lengths.validate(max_steps=self.max_steps)
+
     def forward_backward(
         self,
-        valid: Mask = NO_MASK,
     ) -> tuple[DiscreteChainMarginals, jax.Array]:
         """Infer chains with neutral padded factors and exclude invalid suffixes.
 
-        Callers supply neutral local potentials in padded suffixes. Validity
-        denotes a contiguous sequence prefix, never observation visibility.
+        Owned lengths denote sequence prefixes, never observation visibility.
         """
-        if self.num_steps < 1:
+        if self.max_steps < 1:
             raise ValueError('Discrete chain inference requires at least one time step')
         batch_shape = self.batch_shape
-        t, k = self.num_steps, self.num_states
+        t, k = self.max_steps, self.num_states
         if self.transition_probs.shape != batch_shape + (
             t - 1,
             k,
@@ -138,16 +144,24 @@ class DiscreteChain(typing.NamedTuple):
             raise ValueError(
                 'Discrete chain fields must have aligned batch, time, and state dimensions'
             )
-        valid = valid.align_batch(batch_shape)
-        valid.validate(self.state_log_potentials)
+        self.lengths.align_batch(batch_shape)
+        chain = self._replace(
+            initial_probs=jnp.where(
+                self.lengths.values[..., None] > 0, self.initial_probs, 1.0 / k
+            ),
+            state_log_potentials=self.lengths.clear(self.state_log_potentials),
+            transition_probs=self.lengths.transitions().clear(
+                self.transition_probs,
+                fill=jnp.eye(k, dtype=self.transition_probs.dtype),
+            ),
+        )
 
         if not batch_shape:
-            return _forward_backward(self).compute_marginals(self, valid)
+            return _forward_backward(chain).compute_marginals(chain)
 
         return batch.vmap_batch(
-            lambda chain, mask: _forward_backward(chain).compute_marginals(chain, mask),
-            self,
-            valid,
+            lambda item: _forward_backward(item).compute_marginals(item),
+            chain,
             batch_shape=self.batch_shape,
         )
 
@@ -176,10 +190,10 @@ class DiscreteChain(typing.NamedTuple):
         potential: DiscretePotential,
     ) -> DiscreteChain:
         """Add unary log potentials to each state."""
-        if potential.batch_shape != self.batch_shape + (self.num_steps,):
+        if potential.batch_shape != self.batch_shape + (self.max_steps,):
             raise ValueError(
                 'Potential must have batch shape '
-                f'{self.batch_shape + (self.num_steps,)}; '
+                f'{self.batch_shape + (self.max_steps,)}; '
                 f'got {potential.batch_shape}'
             )
 
@@ -194,24 +208,13 @@ class DiscreteChain(typing.NamedTuple):
         )
 
 
-def _masked_initial_probs(chain: DiscreteChain, valid: Mask) -> jax.Array:
+def _masked_initial_probs(chain: DiscreteChain) -> jax.Array:
     """Return initial probabilities `(*B, K)`, replacing absent starts with ones.
 
-    Ones give a neutral log potential for empty valid prefixes. A temporary
-    length-one time axis lets the temporal mask apply to the initial state;
-    that axis is removed before returning. The result is for evaluating log
-    potentials, not a normalized distribution for absent starts.
+    Ones give a neutral log potential for empty valid prefixes. The result is
+    for evaluating log potentials, not a distribution for absent starts.
     """
-    first_step_valid = valid.materialize(chain.num_steps)[..., :1]
-
-    initial_valid = ArbitraryMask(first_step_valid)
-
-    initial_probs = initial_valid.apply(
-        chain.initial_probs[..., None, :],
-        fill=1,
-    )
-
-    return initial_probs[..., 0, :]
+    return jnp.where(chain.lengths.values[..., None] > 0, chain.initial_probs, 1)
 
 
 class DiscreteChainMarginals(typing.NamedTuple):
@@ -228,6 +231,7 @@ class DiscreteChainMarginals(typing.NamedTuple):
 
     state_probs: jax.Array  # (*B, T, K)
     pair_probs: jax.Array  # (*B, T - 1, K, K)
+    lengths: Lengths
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
@@ -235,7 +239,7 @@ class DiscreteChainMarginals(typing.NamedTuple):
         return self.state_probs.shape[:-2]
 
     @property
-    def num_steps(self) -> int:
+    def max_steps(self) -> int:
         """Number of time steps."""
         return self.state_probs.shape[-2]
 
@@ -270,14 +274,14 @@ class DiscreteChainMarginals(typing.NamedTuple):
         """State probabilities associated with incoming transitions."""
         return self.state_probs[..., 1:, :]
 
-    def entropy(self, valid: Mask = NO_MASK) -> jax.Array:
+    def entropy(self) -> jax.Array:
         """
         Entropy of the normalized chain distribution.
         """
 
-        valid = valid.align_batch(self.batch_shape)
+        valid = self.lengths.align_batch(self.batch_shape)
 
-        states = valid.apply(self.state_probs)
+        states = valid.clear(self.state_probs)
 
         initial_entropy = -jnp.sum(
             jsp.special.xlogy(
@@ -287,8 +291,8 @@ class DiscreteChainMarginals(typing.NamedTuple):
             axis=-1,
         )
 
-        transitions = valid.adjacent_pairs()
-        pairs = transitions.apply(self.pair_probs)
+        transitions = valid.transitions()
+        pairs = transitions.clear(self.pair_probs)
 
         pair_entropy = -jnp.sum(
             jsp.special.xlogy(
@@ -307,14 +311,13 @@ class DiscreteChainMarginals(typing.NamedTuple):
         )
 
         return initial_entropy + jnp.sum(
-            transitions.apply(pair_entropy + conditioning_entropy),
+            transitions.clear(pair_entropy + conditioning_entropy),
             axis=-1,
         )
 
     def expected_log_potential(
         self,
         chain: DiscreteChain,
-        valid: Mask = NO_MASK,
     ) -> jax.Array:
         r"""Expected chain log potential $\mathbb{E}_q[\log f(z)]$."""
 
@@ -326,11 +329,11 @@ class DiscreteChainMarginals(typing.NamedTuple):
         if self.pair_probs.shape != chain.transition_probs.shape:
             raise ValueError('chain and posterior transition dimensions must match')
 
-        valid = valid.align_batch(self.batch_shape)
+        valid = self.lengths.align_batch(self.batch_shape)
 
-        states = valid.apply(self.state_probs)
+        states = valid.clear(self.state_probs)
 
-        initial_probs = _masked_initial_probs(chain, valid)
+        initial_probs = _masked_initial_probs(chain)
         expected_initial = jnp.sum(
             jsp.special.xlogy(
                 states[..., 0, :],
@@ -339,9 +342,9 @@ class DiscreteChainMarginals(typing.NamedTuple):
             axis=-1,
         )
 
-        transitions = valid.adjacent_pairs()
-        pairs = transitions.apply(self.pair_probs)
-        transition_probs = transitions.apply(chain.transition_probs, fill=1)
+        transitions = valid.transitions()
+        pairs = transitions.clear(self.pair_probs)
+        transition_probs = transitions.clear(chain.transition_probs, fill=1)
 
         expected_transitions = jnp.sum(
             jsp.special.xlogy(
@@ -352,7 +355,7 @@ class DiscreteChainMarginals(typing.NamedTuple):
         )
 
         # Zero-probability states contribute zero even for a -inf log potential.
-        local = jnp.where(states != 0, valid.apply(chain.state_log_potentials), 0)
+        local = jnp.where(states != 0, valid.clear(chain.state_log_potentials), 0)
         expected_local = jnp.sum(
             states * local,
             axis=-1,
@@ -360,8 +363,8 @@ class DiscreteChainMarginals(typing.NamedTuple):
 
         return (
             expected_initial
-            + jnp.sum(transitions.apply(expected_transitions), axis=-1)
-            + jnp.sum(valid.apply(expected_local), axis=-1)
+            + jnp.sum(transitions.clear(expected_transitions), axis=-1)
+            + jnp.sum(valid.clear(expected_local), axis=-1)
         )
 
     def permute_states(self, permutation: jax.Array) -> typing.Self:
@@ -390,16 +393,16 @@ class _DiscreteChainMessages(typing.NamedTuple):
     def compute_marginals(
         self,
         chain: DiscreteChain,
-        valid: Mask = NO_MASK,
     ) -> tuple[DiscreteChainMarginals, jax.Array]:
         """Compute normalized chain marginals and the log normalizer."""
 
         posterior = DiscreteChainMarginals(
+            lengths=chain.lengths,
             state_probs=self.compute_state_marginals(),
             pair_probs=self.compute_pair_marginals(chain),
         )
 
-        log_normalizer = self.compute_log_normalizer(valid)
+        log_normalizer = self.compute_log_normalizer(chain.lengths)
 
         return posterior, log_normalizer
 
@@ -460,17 +463,17 @@ class _DiscreteChainMessages(typing.NamedTuple):
             * scale[..., None, None]
         )
 
-    def compute_log_normalizer(self, valid: Mask = NO_MASK) -> jax.Array:
+    def compute_log_normalizer(self, lengths: Lengths) -> jax.Array:
         """Compute the chain log normalizer from forward scaling factors."""
-        valid = valid.align_batch(self.log_scaling_factors.shape[:-1])
-        return jnp.sum(valid.apply(self.log_scaling_factors), axis=-1)
+        lengths = lengths.align_batch(self.log_scaling_factors.shape[:-1])
+        return jnp.sum(lengths.clear(self.log_scaling_factors), axis=-1)
 
 
 def _forward_pass(
     chain: DiscreteChain,
 ) -> tuple[jax.Array, jax.Array]:
     """Run a normalized probability-space forward recursion."""
-    t = chain.num_steps
+    t = chain.max_steps
 
     min_normalizer = jnp.finfo(chain.state_log_potentials.dtype).tiny
 
@@ -579,7 +582,7 @@ def _backward_pass(
 ) -> jax.Array:
     """Run the backward recursion consistent with forward normalizers."""
     k = chain.num_states
-    t = chain.num_steps
+    t = chain.max_steps
 
     if log_scaling_factors.shape != (t,):
         raise ValueError('log_scaling_factors must have shape (T,)')

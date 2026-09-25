@@ -6,7 +6,7 @@ import pytest
 from xxm.core import batch
 from xxm.core.data import Dataset, Sequences
 from xxm.core.dists.gaussian import Gaussian, PairedGaussian
-from xxm.core.mask import ArbitraryMask, ContiguousMask, NoMask
+from xxm.core.lengths import Lengths
 
 
 def _gaussian():
@@ -147,17 +147,17 @@ def test_take_along_last_batch_rejects_invalid_indices(shape, indices, message):
         batch.take_along_last_batch(jnp.zeros(shape + (4,)), shape, indices)
 
 
-@pytest.mark.parametrize('kind', ['sequences', 'dataset', 'arbitrary', 'contiguous'])
+@pytest.mark.parametrize('kind', ['sequences', 'dataset', 'arbitrary', 'lengths'])
 def test_custom_pytrees_transform_under_jit(kind):
-    lengths = ContiguousMask(jnp.array([[3, 2, 1], [1, 2, 3]]))
+    lengths = Lengths(jnp.array([[3, 2, 1], [1, 2, 3]]))
     values = jnp.arange(36.0).reshape(2, 3, 3, 2)
     sequences = Sequences(values, lengths)
-    mask = ArbitraryMask(lengths.materialize(3))
+    mask = lengths.to_mask(3)
     obj = {
         'sequences': sequences,
         'dataset': Dataset(sequences, sequences, mask),
         'arbitrary': mask,
-        'contiguous': lengths,
+        'lengths': lengths,
     }[kind]
 
     @jax.jit
@@ -179,17 +179,55 @@ def test_custom_pytrees_transform_under_jit(kind):
         np.testing.assert_array_equal(actual, original[1, jnp.array([2, 0, 1])])
 
 
-@pytest.mark.parametrize('kind', ['none', 'arbitrary', 'contiguous'])
+@pytest.mark.parametrize('kind', ['arbitrary', 'lengths'])
 def test_mask_flatten_preserves_type_and_values(kind):
-    lengths = ContiguousMask(jnp.array([[3, 2, 1], [1, 2, 3]]))
+    lengths = Lengths(jnp.array([[3, 2, 1], [1, 2, 3]]))
     mask = {
-        'none': NoMask(jnp.empty((2, 3, 0), dtype=bool)),
-        'arbitrary': ArbitraryMask(lengths.materialize(3)),
-        'contiguous': lengths,
+        'arbitrary': lengths.to_mask(3),
+        'lengths': lengths,
     }[kind]
     flat = jax.jit(lambda m: m.flatten())(mask)
     assert type(flat) is type(mask)
     assert flat.batch_shape == (6,)
     np.testing.assert_array_equal(
-        flat.materialize(3), mask.materialize(3).reshape(6, 3)
+        flat.values, mask.values.reshape((6,) + mask.values.shape[2:])
     )
+
+
+def test_concatenate_and_split_preserve_lengths_and_singleton_axes_under_jit():
+    values = jnp.arange(36.0).reshape(2, 3, 3, 2)
+    sequences = Sequences.from_padded(
+        values, Lengths(jnp.array([[3, 2, 1], [1, 2, 3]]))
+    )
+    parts = jax.jit(lambda item: batch.split(item, (1, 0, 2), axis=-1))(sequences)
+    assert tuple(part.batch_shape for part in parts) == ((2, 1), (2, 0), (2, 2))
+    restored = jax.jit(lambda *items: batch.concatenate(items, axis=1))(*parts)
+    assert type(restored) is Sequences
+    np.testing.assert_array_equal(restored.values, values)
+    np.testing.assert_array_equal(restored.lengths.values, sequences.lengths.values)
+
+
+def test_concatenate_rejects_batch_and_intrinsic_mismatches_without_padding():
+    sequences = Sequences.from_batch(jnp.zeros((2, 3, 1)))
+    with pytest.raises(ValueError):
+        batch.concatenate([])
+    with pytest.raises(ValueError):
+        batch.concatenate([sequences.select(0)])
+    with pytest.raises(ValueError):
+        batch.concatenate([sequences, sequences.broadcast(1)])
+    with pytest.raises(ValueError):
+        batch.concatenate([sequences, Lengths(jnp.ones(2, dtype=int))])
+    with pytest.raises(ValueError, match='intrinsic'):
+        batch.concatenate([sequences, Sequences.from_batch(jnp.zeros((1, 4, 1)))])
+    with pytest.raises(ValueError):
+        batch.concatenate([_gaussian(), _gaussian().select((slice(None), slice(1)))])
+
+
+@pytest.mark.parametrize('sizes', [(1,), (1, -1, 2), (0.5, 1.5)])
+def test_split_requires_static_nonnegative_sizes_covering_the_axis(sizes):
+    with pytest.raises((ValueError, TypeError)):
+        batch.split(_gaussian(), sizes)
+
+
+def test_split_empty_axis_accepts_empty_sizes():
+    assert batch.split(Lengths(jnp.zeros(0, dtype=int)), ()) == ()

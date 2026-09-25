@@ -9,7 +9,7 @@ from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
-from xxm.core.mask import NO_MASK
+from xxm.core.lengths import Lengths
 from xxm.core.optim.laplace import (
     _NewtonSearchModel,
     _NewtonSearchParams,
@@ -110,7 +110,7 @@ def test_hidden_timesteps_keep_known_inputs_and_padding_excludes_transitions():
     )
     data = Dataset.from_padded(
         jnp.full((4, 1), 100.0),
-        jnp.array(3),
+        Lengths(jnp.array(3)),
         inputs=jnp.array([[99.0], [1.0], [2.0], [1000.0]]),
         visible=jnp.zeros(4, dtype=bool),
     )
@@ -149,7 +149,6 @@ def test_laplace_newton_steps_do_not_decrease_objective():
         latent_chain=to_chain(model=model, data=data),
         emissions=model.emissions,
         observations=data.weighted_observations(),
-        valid=NO_MASK,
     )
 
     initial_params = _NewtonSearchParams(

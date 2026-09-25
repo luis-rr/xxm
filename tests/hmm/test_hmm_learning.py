@@ -9,6 +9,7 @@ from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
 from xxm.core.emissions.discrete import GaussianEmissions, PoissonEmissions
 from xxm.core.latents.discrete import CategoricalInitial, CategoricalTransitions
+from xxm.core.lengths import Lengths
 from xxm.hmm.core import Model
 from xxm.hmm.inference import infer_exact
 from xxm.hmm.learning import em_step
@@ -19,6 +20,36 @@ RTOL = 1e-7
 ATOL = 1e-6
 
 
+def test_categorical_fitting_uses_posterior_lengths_for_starts_and_transitions():
+    posterior = DiscreteChainMarginals(
+        state_probs=jnp.array(
+            [
+                [[0.0, 1.0], [0.0, 1.0], [0.0, 1.0]],
+                [[1.0, 0.0], [0.0, 1.0], [0.0, 1.0]],
+                [[0.5, 0.5], [0.5, 0.5], [0.0, 1.0]],
+            ]
+        ),
+        pair_probs=jnp.array(
+            [
+                [[[0.0, 0.0], [0.0, 1.0]], [[0.0, 0.0], [0.0, 1.0]]],
+                [[[0.0, 1.0], [0.0, 0.0]], [[0.0, 0.0], [0.0, 1.0]]],
+                [[[0.1, 0.4], [0.4, 0.1]], [[0.0, 0.5], [0.0, 0.5]]],
+            ]
+        ),
+        lengths=Lengths(jnp.array([0, 1, 2])),
+    )
+    initial = CategoricalInitial(Categorical(jnp.array([0.5, 0.5])))
+    transitions = CategoricalTransitions(Categorical(jnp.full((2, 2), 0.5)))
+    fitted_initial = jax.jit(lambda p: initial.fit_params(p, pseudocount=0))(posterior)
+    fitted_transitions = jax.jit(lambda p: transitions.fit_params(p, pseudocount=0))(
+        posterior
+    )
+    np.testing.assert_allclose(fitted_initial.dist.probs, [0.75, 0.25], atol=ATOL)
+    np.testing.assert_allclose(
+        fitted_transitions.dist.probs, [[0.2, 0.8], [0.8, 0.2]], atol=ATOL
+    )
+
+
 def make_posterior(
     state_marginals: jnp.ndarray,
     pair_marginals: jnp.ndarray,
@@ -27,6 +58,7 @@ def make_posterior(
 
     return (
         DiscreteChainMarginals(
+            lengths=Lengths(jnp.asarray(_T)),
             # forward_probs=jnp.zeros((T, K)),
             # backward_probs=jnp.zeros((T, K)),
             # log_scaling_factors=jnp.zeros(T),

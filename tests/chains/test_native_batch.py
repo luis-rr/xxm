@@ -20,6 +20,7 @@ from xxm.core.chains.gaussian import (
     GaussianPotential,
 )
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.lengths import Lengths
 
 
 def gaussian_chain(batch, steps):
@@ -39,6 +40,7 @@ def gaussian_chain(batch, steps):
     chain = GaussianChain.from_pair_potentials(
         GaussianPotential.from_moments(initial),
         GaussianPairPotential.from_linear_conditional(pairs),
+        Lengths(jnp.full(batch, steps)),
     )
     local = GaussianPotential.from_moments(
         Gaussian(
@@ -57,14 +59,15 @@ def discrete_chain(batch, steps):
         jnp.asarray(rng.normal(size=batch + (steps - 1, k, k))), axis=-1
     )
     local = DiscretePotential(jnp.asarray(rng.normal(size=batch + (steps, k))))
-    return DiscreteChain.from_markov_prior(initial, transitions).add_local_potential(
-        local
-    )
+    return DiscreteChain.from_markov_prior(
+        initial, transitions, Lengths(jnp.full(batch, steps))
+    ).add_local_potential(local)
 
 
 def gaussian_chain_structure(batch, steps):
     d = 2
     return GaussianChain(
+        lengths=Lengths(jnp.full(batch, steps)),
         diagonal_precision_blocks=jnp.broadcast_to(jnp.eye(d), batch + (steps, d, d)),
         lower_precision_blocks=jnp.zeros(batch + (steps - 1, d, d)),
         information_vectors=jnp.zeros(batch + (steps, d)),
@@ -75,6 +78,7 @@ def gaussian_chain_structure(batch, steps):
 def discrete_chain_structure(batch, steps):
     k = 3
     return DiscreteChain(
+        lengths=Lengths(jnp.full(batch, steps)),
         initial_probs=jnp.full(batch + (k,), 1.0 / k),
         transition_probs=jnp.full(batch + (steps - 1, k, k), 1.0 / k),
         state_log_potentials=jnp.zeros(batch + (steps, k)),
@@ -84,6 +88,7 @@ def discrete_chain_structure(batch, steps):
 def gaussian_marginals(batch, steps):
     d = 2
     return GaussianChainMarginals(
+        lengths=Lengths(jnp.full(batch, steps)),
         means=jnp.zeros(batch + (steps, d)),
         covariances=jnp.broadcast_to(jnp.eye(d), batch + (steps, d, d)),
         cross_covariances=jnp.zeros(batch + (steps - 1, d, d)),
@@ -94,7 +99,9 @@ def discrete_marginals(batch, steps):
     k = 3
     state_probs = jnp.full(batch + (steps, k), 1.0 / k)
     pair_probs = state_probs[..., :-1, :, None] * state_probs[..., 1:, None, :]
-    return DiscreteChainMarginals(state_probs, pair_probs)
+    return DiscreteChainMarginals(
+        state_probs, pair_probs, Lengths(jnp.full(batch, steps))
+    )
 
 
 # Pair the meaningful edge cases rather than compiling the Cartesian product of
@@ -167,7 +174,7 @@ def test_discrete_batch_matches_enumerated_paths(batch, steps):
         posterior.expected_log_potential(chain) + posterior.entropy(), logz, atol=2e-6
     )
     for index in np.ndindex(batch):
-        initial, transition, local = (np.asarray(x[index]) for x in chain)
+        initial, transition, local = (np.asarray(x[index]) for x in chain[:3])
         paths = np.array(list(itertools.product(range(3), repeat=steps)))
         scores = np.log(initial[paths[:, 0]]) + local[np.arange(steps), paths].sum(
             axis=-1
@@ -221,7 +228,9 @@ def test_batch_transformations_and_scalar_selection(make_chain, make_marginals):
         expected = obj.select((1, 0))
         assert type(transformed) is type(obj)
         assert transformed.batch_shape == ()
-        for actual, wanted in zip(transformed, expected):
+        for actual, wanted in zip(
+            jax.tree.leaves(transformed), jax.tree.leaves(expected)
+        ):
             np.testing.assert_array_equal(actual, wanted)
         with pytest.raises(IndexError):
             obj.select((0, 0, 0))
@@ -267,7 +276,93 @@ def test_state_permutation_is_distinct_from_batch_permutation():
         chain.initial_probs[..., p],
         chain.transition_probs[..., p, :][..., p],
         chain.state_log_potentials[..., p],
+        chain.lengths,
     ).forward_backward()
     np.testing.assert_allclose(relabeled.state_probs, expected.state_probs, atol=2e-6)
     np.testing.assert_allclose(relabeled.pair_probs, expected.pair_probs, atol=2e-6)
     assert relabeled.batch_shape == (2,)
+
+
+def test_discrete_owned_lengths_exclude_empty_and_padded_factors_under_jit():
+    lengths = Lengths(jnp.array([0, 1, 3]))
+    initial = jnp.broadcast_to(jnp.array([0.25, 0.75]), (3, 2))
+    initial = initial.at[0].set(jnp.nan)
+    chain = DiscreteChain(
+        initial_probs=initial,
+        transition_probs=lengths.transitions().clear(
+            jnp.full((3, 3, 2, 2), 0.5), fill=jnp.nan
+        ),
+        state_log_potentials=lengths.clear(jnp.zeros((3, 4, 2)), fill=jnp.nan),
+        lengths=lengths,
+    )
+    chain.validate()
+    posterior, logz = jax.jit(DiscreteChain.forward_backward)(chain)
+    np.testing.assert_allclose(logz, 0, atol=1e-6)
+    initial_entropy = -0.25 * np.log(0.25) - 0.75 * np.log(0.75)
+    np.testing.assert_allclose(
+        posterior.entropy(),
+        [0, initial_entropy, initial_entropy + 2 * np.log(2)],
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        posterior.expected_log_potential(chain) + posterior.entropy(),
+        logz,
+        atol=1e-6,
+    )
+    np.testing.assert_array_equal(posterior.lengths.values, lengths.values)
+    np.testing.assert_allclose(posterior.state_probs[2, 0], [0.25, 0.75], atol=1e-6)
+    np.testing.assert_allclose(posterior.state_probs[2, 1:3], 0.5, atol=1e-6)
+
+
+def test_gaussian_owned_lengths_reduce_only_genuine_unary_and_pair_terms():
+    lengths = Lengths(jnp.array([0, 1, 3]))
+    chain = GaussianChain(
+        diagonal_precision_blocks=jnp.ones((3, 4, 1, 1)),
+        lower_precision_blocks=jnp.zeros((3, 3, 1, 1)),
+        information_vectors=jnp.zeros((3, 4, 1)),
+        log_constant=-0.5 * lengths.values * jnp.log(2 * jnp.pi),
+        lengths=lengths,
+    )
+    chain.validate()
+    posterior, logz = jax.jit(GaussianChain.forward_backward)(chain)
+    np.testing.assert_allclose(logz, 0, atol=1e-6)
+    expected_entropy = 0.5 * lengths.values * (1 + np.log(2 * np.pi))
+    np.testing.assert_allclose(posterior.entropy(), expected_entropy, atol=1e-6)
+    np.testing.assert_allclose(
+        posterior.expected_log_potential(chain), -expected_entropy, atol=1e-6
+    )
+    dirty = chain._replace(
+        diagonal_precision_blocks=lengths.clear(
+            chain.diagonal_precision_blocks, fill=jnp.nan
+        ),
+        lower_precision_blocks=lengths.transitions().clear(
+            chain.lower_precision_blocks, fill=jnp.nan
+        ),
+    )
+    np.testing.assert_allclose(
+        posterior.expected_log_potential(dirty), -expected_entropy, atol=1e-6
+    )
+    shifted = posterior.affine(Affine(jnp.ones((3, 1, 1)), jnp.ones((3, 1))))
+    assert shifted.lengths is posterior.lengths
+
+
+def test_empty_gaussian_marginals_keep_zero_lengths_and_entropy():
+    posterior = GaussianChainMarginals(
+        means=jnp.zeros((2, 0, 1)),
+        covariances=jnp.zeros((2, 0, 1, 1)),
+        cross_covariances=jnp.zeros((2, 0, 1, 1)),
+        lengths=Lengths(jnp.zeros(2, dtype=int)),
+    )
+    assert posterior.max_steps == 0
+    np.testing.assert_array_equal(jax.jit(lambda p: p.entropy())(posterior), [0, 0])
+
+
+@pytest.mark.parametrize(
+    'make_chain', [gaussian_chain_structure, discrete_chain_structure]
+)
+def test_chain_length_bounds_are_checked_at_explicit_host_boundary(make_chain):
+    chain = make_chain((2,), 3)
+    with pytest.raises(ValueError):
+        chain._replace(lengths=Lengths(jnp.array([1, 4]))).validate()
+    with pytest.raises(ValueError):
+        chain._replace(lengths=Lengths(jnp.array(3))).forward_backward()

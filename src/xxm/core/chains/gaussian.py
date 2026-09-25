@@ -19,7 +19,7 @@ import jax.scipy.linalg as jsp_linalg
 from xxm.core import batch
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian, PairedGaussian
-from xxm.core.mask import NO_MASK, Mask
+from xxm.core.lengths import Lengths
 
 
 def _precision_and_log_det(
@@ -689,30 +689,35 @@ class GaussianChain(typing.NamedTuple):
     lower_precision_blocks: jax.Array  # (*B, T - 1, N, N)
     information_vectors: jax.Array  # (*B, T, N)
     log_constant: jax.Array  # (*B,)
+    lengths: Lengths
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
         """Leading independent-chain dimensions."""
         return self.diagonal_precision_blocks.shape[:-3]
 
+    def validate(self) -> None:
+        """Validate structural lengths at an explicit host boundary."""
+        self.lengths.align_batch(self.batch_shape)
+        self.lengths.validate(max_steps=self.max_steps)
+
     def forward_backward(
         self,
-        valid: Mask = NO_MASK,
     ) -> tuple[GaussianChainMarginals, jax.Array]:
-        """Infer each chain and optionally exclude invalid suffixes from its log normalizer."""
-        if self.num_steps < 1:
+        """Infer each chain, excluding padded suffixes from its log normalizer."""
+        if self.max_steps < 1:
             raise ValueError('Gaussian chain inference requires at least one time step')
 
         batch_shape = self.batch_shape
-        t = self.num_steps
+        t = self.max_steps
         d = self.variable_dim
 
-        valid = valid.align_batch(batch_shape)
+        self.lengths.align_batch(batch_shape)
 
         batch.require_same_shape(
             batch_shape,
             self.log_constant.shape,
-            valid.batch_shape,
+            self.lengths.batch_shape,
         )
 
         if (
@@ -726,12 +731,11 @@ class GaussianChain(typing.NamedTuple):
             )
 
         if not batch_shape:
-            return self._forward_backward_single(valid)
+            return self._forward_backward_single()
 
         return batch.vmap_batch(
             GaussianChain._forward_backward_single,
             self,
-            valid,
             batch_shape=self.batch_shape,
         )
 
@@ -760,6 +764,7 @@ class GaussianChain(typing.NamedTuple):
         cls,
         initial_potential: GaussianPotential,  # batch *B
         pair_potentials: GaussianPairPotential,  # batch (*B, T - 1)
+        lengths: Lengths,
     ) -> GaussianChain:
         """Construct chains from potential batches `*B` and `(*B, T - 1)`."""
 
@@ -770,6 +775,7 @@ class GaussianChain(typing.NamedTuple):
             )
 
         batch_shape = initial_potential.batch_shape
+        lengths.align_batch(batch_shape)
         if (
             len(pair_potentials.batch_shape) != len(batch_shape) + 1
             or pair_potentials.batch_shape[:-1] != batch_shape
@@ -777,12 +783,12 @@ class GaussianChain(typing.NamedTuple):
             raise ValueError(
                 'pair potentials must have batch shape (*B, T - 1) matching the initial potential'
             )
-        num_steps = pair_potentials.batch_shape[-1] + 1
+        max_steps = pair_potentials.batch_shape[-1] + 1
         latent_dim = initial_potential.variable_dim
         dtype = initial_potential.precision_blocks.dtype
 
         diagonal = jnp.zeros(
-            batch_shape + (num_steps, latent_dim, latent_dim),
+            batch_shape + (max_steps, latent_dim, latent_dim),
             dtype=dtype,
         )
         diagonal = diagonal.at[..., 0, :, :].add(initial_potential.precision_blocks)
@@ -790,7 +796,7 @@ class GaussianChain(typing.NamedTuple):
         diagonal = diagonal.at[..., 1:, :, :].add(pair_potentials.right_precision)
 
         information_vectors = jnp.zeros(
-            batch_shape + (num_steps, latent_dim),
+            batch_shape + (max_steps, latent_dim),
             dtype=dtype,
         )
         information_vectors = information_vectors.at[..., 0, :].add(
@@ -812,10 +818,11 @@ class GaussianChain(typing.NamedTuple):
             lower_precision_blocks=pair_potentials.lower_precision,
             information_vectors=information_vectors,
             log_constant=log_constant,
+            lengths=lengths,
         )
 
     @property
-    def num_steps(self) -> int:
+    def max_steps(self) -> int:
         """Number of time steps $T$."""
         return self.diagonal_precision_blocks.shape[-3]
 
@@ -830,7 +837,7 @@ class GaussianChain(typing.NamedTuple):
     ) -> GaussianChain:
         """Add one unary Gaussian potential at each time step."""
 
-        expected_batch_shape = self.batch_shape + (self.num_steps,)
+        expected_batch_shape = self.batch_shape + (self.max_steps,)
 
         if potential.batch_shape != expected_batch_shape:
             raise ValueError(
@@ -846,6 +853,7 @@ class GaussianChain(typing.NamedTuple):
             )
 
         return GaussianChain(
+            lengths=self.lengths,
             diagonal_precision_blocks=(
                 self.diagonal_precision_blocks + potential.precision_blocks
             ),
@@ -862,7 +870,7 @@ class GaussianChain(typing.NamedTuple):
     ) -> jax.Array:
         r"""Compute $\log f(x)$ for a latent trajectory."""
 
-        expected_shape = self.batch_shape + (self.num_steps, self.variable_dim)
+        expected_shape = self.batch_shape + (self.max_steps, self.variable_dim)
 
         if latent.shape != expected_shape:
             raise ValueError(
@@ -981,7 +989,6 @@ class GaussianChain(typing.NamedTuple):
 
     def _forward_backward_single(
         self,
-        valid: Mask,
     ) -> tuple[GaussianChainMarginals, jax.Array]:
         """Compute moments and a validity-aware log normalizer."""
 
@@ -997,13 +1004,13 @@ class GaussianChain(typing.NamedTuple):
 
         quadratic_terms = jnp.sum(self.information_vectors * means, axis=-1)
 
-        quadratic_terms = valid.apply(quadratic_terms)
+        quadratic_terms = self.lengths.clear(quadratic_terms)
         quadratic_term = jnp.sum(quadratic_terms)
 
-        log_det_terms = valid.apply(log_det_terms)
+        log_det_terms = self.lengths.clear(log_det_terms)
         log_det_precision = jnp.sum(log_det_terms)
 
-        num_valid = valid.num_valid(self.num_steps)
+        num_valid = self.lengths.values
         num_valid = num_valid.astype(self.diagonal_precision_blocks.dtype)
 
         total_dimension = num_valid * self.variable_dim
@@ -1023,6 +1030,7 @@ class GaussianChain(typing.NamedTuple):
         )
 
         posterior = GaussianChainMarginals(
+            lengths=self.lengths,
             means=means,
             covariances=covariances,
             cross_covariances=cross_covariances,
@@ -1228,6 +1236,7 @@ class GaussianChainMarginals(typing.NamedTuple):
     means: jax.Array  # (*B, T, D)
     covariances: jax.Array  # (*B, T, D, D)
     cross_covariances: jax.Array  # (*B, T - 1, D, D)
+    lengths: Lengths
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
@@ -1235,7 +1244,7 @@ class GaussianChainMarginals(typing.NamedTuple):
         return self.means.shape[:-2]
 
     @property
-    def num_steps(self) -> int:
+    def max_steps(self) -> int:
         """Number of time steps."""
         return self.means.shape[-2]
 
@@ -1258,7 +1267,7 @@ class GaussianChainMarginals(typing.NamedTuple):
 
         with shape `(*B, T)`.
         """
-        if self.num_steps == 0:
+        if self.max_steps == 0:
             return jnp.zeros(
                 (*self.batch_shape, 0),
                 dtype=self.means.dtype,
@@ -1288,11 +1297,10 @@ class GaussianChainMarginals(typing.NamedTuple):
 
     def entropy(
         self,
-        valid: Mask = NO_MASK,
     ) -> jax.Array:
-        """Entropy per chain, optionally restricted to a valid time prefix."""
+        """Entropy per chain over its genuine temporal prefix."""
         terms = self.entropy_terms()
-        terms = valid.apply(terms)
+        terms = self.lengths.clear(terms)
         return jnp.sum(terms, axis=-1)
 
     def affine(self, affine: Affine) -> typing.Self:
@@ -1323,6 +1331,7 @@ class GaussianChainMarginals(typing.NamedTuple):
         )
 
         return self.__class__(
+            lengths=self.lengths,
             means=means,
             covariances=covariances,
             cross_covariances=cross_covariances,
@@ -1392,7 +1401,7 @@ class GaussianChainMarginals(typing.NamedTuple):
     ) -> jax.Array:
         r"""Compute the expected chain log potential $\mathbb{E}_q[\log f(x)]$."""
         batch.require_same_shape(self.batch_shape, chain.batch_shape)
-        if chain.num_steps != self.num_steps:
+        if chain.max_steps != self.max_steps:
             raise ValueError('chain and posterior must have the same number of steps')
 
         if chain.variable_dim != self.means.shape[-1]:
@@ -1402,24 +1411,28 @@ class GaussianChainMarginals(typing.NamedTuple):
         cross_moments = self.raw_cross_moments()
 
         unary_quadratic = jnp.einsum(
-            '...tij,...tij->...',
+            '...tij,...tij->...t',
             chain.diagonal_precision_blocks,
             second_moments,
         )
 
         pair_quadratic = jnp.einsum(
-            '...tij,...tji->...',
+            '...tij,...tji->...t',
             chain.lower_precision_blocks,
             cross_moments,
         )
 
         linear = jnp.einsum(
-            '...ti,...ti->...',
+            '...ti,...ti->...t',
             chain.information_vectors,
             self.means,
         )
 
-        return -0.5 * unary_quadratic - pair_quadratic + linear + chain.log_constant
+        return (
+            jnp.sum(self.lengths.clear(-0.5 * unary_quadratic + linear), axis=-1)
+            - jnp.sum(self.lengths.transitions().clear(pair_quadratic), axis=-1)
+            + chain.log_constant
+        )
 
 
 def _solve_from_cholesky(

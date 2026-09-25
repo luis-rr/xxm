@@ -8,6 +8,7 @@ from xxm.core.data import WeightedObservations
 from xxm.core.dists.gaussian import LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
+from xxm.core.lengths import Lengths
 from xxm.core.optim import gaussian as gaussian_fit
 
 # ---------------------------------------------------------------------
@@ -110,6 +111,7 @@ def test_gaussian_fit_recovers_known_parameters():
 
     posterior = GaussianChainMarginals(
         means=latents,
+        lengths=Lengths(jnp.asarray(latents.shape[0])),
         covariances=jnp.zeros((6, 1, 1)),
         cross_covariances=jnp.zeros((5, 1, 1)),
     )
@@ -334,6 +336,7 @@ def test_poisson_fit_recovers_known_parameters():
 
     posterior = GaussianChainMarginals(
         means=latents,
+        lengths=Lengths(jnp.asarray(latents.shape[0])),
         covariances=jnp.zeros((latents.shape[0], 1, 1)),
         cross_covariances=jnp.zeros((latents.shape[0] - 1, 1, 1)),
     )
@@ -394,6 +397,7 @@ def test_gaussian_methods_are_jittable():
     latents = jnp.zeros((3, 2))
     posterior = GaussianChainMarginals(
         means=latents,
+        lengths=Lengths(jnp.asarray(latents.shape[0])),
         covariances=jnp.broadcast_to(jnp.eye(2), (3, 2, 2)),
         cross_covariances=jnp.zeros((2, 2, 2)),
     )
@@ -415,6 +419,7 @@ def test_poisson_methods_are_jittable():
     latents = jnp.zeros((3, 2))
     posterior = GaussianChainMarginals(
         means=latents,
+        lengths=Lengths(jnp.asarray(latents.shape[0])),
         covariances=jnp.broadcast_to(jnp.eye(2), (3, 2, 2)),
         cross_covariances=jnp.zeros((2, 2, 2)),
     )

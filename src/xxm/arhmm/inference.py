@@ -30,7 +30,8 @@ def _infer_prepared(
     chain = homogeneous_chain(
         working_model.initial,
         working_model.transitions,
-        working_data.num_steps,
+        working_data.lengths,
+        working_data.max_steps,
     )
 
     posterior_chain = chain.add_local_potential(
@@ -39,9 +40,7 @@ def _infer_prepared(
         )
     )
 
-    posterior, log_normalizer = posterior_chain.forward_backward(
-        valid=working_data.valid(),
-    )
+    posterior, log_normalizer = posterior_chain.forward_backward()
 
     data_axes = tuple(
         range(

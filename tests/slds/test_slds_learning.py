@@ -14,6 +14,7 @@ from xxm.core.latents.discrete import (
     CategoricalTransitions,
 )
 from xxm.core.latents.gaussian import StateConditionedGaussian
+from xxm.core.lengths import Lengths
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.slds.core import (
     GaussianLinearSwitchingDynamics,
@@ -34,6 +35,7 @@ def _posterior() -> Posterior:
     #   Cov(x0, x1) = 2
     #   Cov(x1, x2) = 9
     continuous = GaussianChainMarginals(
+        lengths=Lengths(jnp.array(3)),
         means=jnp.array(
             [
                 [0.0],
@@ -57,6 +59,7 @@ def _posterior() -> Posterior:
     )
 
     discrete = DiscreteChainMarginals(
+        lengths=continuous.lengths,
         state_probs=jnp.ones((3, 1)),
         pair_probs=jnp.ones((2, 1, 1)),
     )
@@ -116,7 +119,6 @@ def test_switching_dynamics_fit_recovers_known_linear_gaussian_model():
         discrete=post.discrete,
         continuous=post.continuous,
         inputs=jnp.empty((2, 0)),
-        weights=jnp.ones(2),
         covariance_floor=0.0,
     )
 

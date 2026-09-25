@@ -178,9 +178,6 @@ class Model(
             ),
             transitions=self.transitions.fit_params(
                 posterior,
-                weights=working_data.valid_transitions().materialize(
-                    working_data.num_steps - 1
-                ),
             ),
             emissions=self.emissions.fit_params(
                 working_data,

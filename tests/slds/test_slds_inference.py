@@ -13,6 +13,7 @@ from xxm.core.latents.discrete import (
     CategoricalTransitions,
 )
 from xxm.core.latents.gaussian import StateConditionedGaussian
+from xxm.core.lengths import Lengths
 from xxm.slds.core import GaussianLinearSwitchingDynamics, Model
 from xxm.slds.inference import DiscreteFactors, SwitchingFactors, infer_variational
 
@@ -157,6 +158,7 @@ def test_single_state_slds_matches_gaussian_chain():
         GaussianChain.from_pair_potentials(
             initial_potential,
             pair_potentials,
+            Lengths(jnp.asarray(observations.shape[0])),
         )
         .add_local_potential(observation_potential)
         .forward_backward()

@@ -229,7 +229,7 @@ class AREmissions(
             posterior.batch_shape,
         )
 
-        if data.num_steps != posterior.num_steps:
+        if data.max_steps != posterior.max_steps:
             raise ValueError(
                 'posterior and AR dataset must have the same number of steps'
             )
@@ -243,7 +243,7 @@ class AREmissions(
 
         sample_shape = (
             *replicate_shape,
-            data.num_steps,
+            data.max_steps,
         )
 
         if 0 in sample_shape:

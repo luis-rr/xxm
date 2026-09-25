@@ -25,7 +25,7 @@ def _validate_weighted_samples(
 ):
     """Require observations and posterior states to align with the emissions."""
 
-    observations.validate()
+    observations.validate_shapes()
 
     batch.require_same_shape(observations.batch_shape, posterior.batch_shape)
     batch.split_prefix(
@@ -61,7 +61,7 @@ def _prepare_weighted_samples(
     return batch.pool_samples(
         (observations.safe_values(), state_weights),
         model_batch_shape,
-        (*replicate_shape, observations.num_steps),
+        (*replicate_shape, observations.max_steps),
     )
 
 
@@ -169,7 +169,7 @@ class GaussianEmissions(typing.NamedTuple):
 
     def log_likelihoods(self, observations: WeightedObservations) -> jax.Array:
         r"""Evaluate weighted $\log p(y_t|z_t=k)$ for all states and time."""
-        observations.validate()
+        observations.validate_shapes()
         batch.require_same_shape(self.batch_shape, observations.batch_shape)
 
         values = batch.broadcast_array(
@@ -235,7 +235,7 @@ class GaussianEmissions(typing.NamedTuple):
     def observation_mean(self, posterior: DiscretePosterior) -> jax.Array:
         """Average state means under the posterior at every timestep."""
         batch.require_same_shape(self.batch_shape, posterior.batch_shape)
-        states = self.dist.broadcast(posterior.num_steps, axis=len(self.batch_shape))
+        states = self.dist.broadcast(posterior.max_steps, axis=len(self.batch_shape))
         return states.mixture_mean(posterior.state_probs, axis=-1)
 
     def sample(self, key: jax.Array, states: jax.Array) -> jax.Array:
@@ -293,7 +293,7 @@ class PoissonEmissions(typing.NamedTuple):
 
     def log_likelihoods(self, observations: WeightedObservations) -> jax.Array:
         r"""Evaluate weighted $\log p(y_t\mid z_t=k)$ for all states and time."""
-        observations.validate()
+        observations.validate_shapes()
         batch.require_same_shape(self.batch_shape, observations.batch_shape)
         values = batch.broadcast_array(
             observations.safe_values(), (self.num_states,), axis=len(self.batch_shape)
@@ -347,7 +347,7 @@ class PoissonEmissions(typing.NamedTuple):
     def observation_mean(self, posterior: DiscretePosterior) -> jax.Array:
         """Average state rates under the posterior at every timestep."""
         batch.require_same_shape(self.batch_shape, posterior.batch_shape)
-        states = self.dist.broadcast(posterior.num_steps, axis=len(self.batch_shape))
+        states = self.dist.broadcast(posterior.max_steps, axis=len(self.batch_shape))
         return states.mixture_mean(posterior.state_probs, axis=-1)
 
     def permute_states(

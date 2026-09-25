@@ -7,7 +7,8 @@ import jax.numpy as jnp
 
 from xxm.core import batch
 from xxm.core.data import Dataset, Sequences, WeightedObservations
-from xxm.core.mask import ArbitraryMask, ContiguousMask
+from xxm.core.lengths import Lengths
+from xxm.core.mask import ArbitraryMask
 
 
 def lagged_observations(
@@ -56,25 +57,24 @@ class ARDataset(typing.NamedTuple):
         if num_lags < 1:
             raise ValueError('num_lags must be at least 1')
 
-        if data.num_steps <= num_lags:
+        if data.max_steps <= num_lags:
             raise ValueError('dataset must contain more than num_lags padded steps')
 
-        if bool(jnp.any(data.lengths <= num_lags)):
+        if bool(jnp.any(data.lengths.values <= num_lags)):
             raise ValueError(
                 'every sequence must contain more than num_lags valid steps'
             )
 
-        lengths = data.lengths - num_lags
-        valid = ContiguousMask._unchecked(lengths)
+        lengths = Lengths(data.lengths.values - num_lags)
 
         observations = Sequences._unchecked(
             values=data.observations.values[..., num_lags:, :],
-            mask=valid,
+            lengths=lengths,
         )
 
         inputs = Sequences._unchecked(
             values=data.inputs.values[..., num_lags:, :],
-            mask=valid,
+            lengths=lengths,
         )
 
         predictors = lagged_observations(
@@ -88,7 +88,7 @@ class ARDataset(typing.NamedTuple):
             [
                 raw_visible[
                     ...,
-                    num_lags - offset : data.num_steps - offset,
+                    num_lags - offset : data.max_steps - offset,
                 ]
                 for offset in range(num_lags + 1)
             ],
@@ -136,13 +136,13 @@ class ARDataset(typing.NamedTuple):
         return self.observations.batch_shape
 
     @property
-    def lengths(self) -> jax.Array:
+    def lengths(self) -> Lengths:
         return self.observations.lengths
 
     @property
-    def num_steps(self) -> int:
+    def max_steps(self) -> int:
         """Number of compact modeled steps R = T - L."""
-        return self.observations.num_steps
+        return self.observations.max_steps
 
     @property
     def num_lags(self) -> int:
@@ -173,7 +173,7 @@ class ARDataset(typing.NamedTuple):
     def validate(self) -> None:
         expected_predictors = (
             *self.batch_shape,
-            self.num_steps,
+            self.max_steps,
             self.num_lags,
             self.observation_dim,
         )
@@ -187,21 +187,21 @@ class ARDataset(typing.NamedTuple):
         if self.inputs.batch_shape != self.batch_shape:
             raise ValueError('observations and inputs must share their batch shape')
 
-        if self.inputs.num_steps != self.num_steps:
+        if self.inputs.max_steps != self.max_steps:
             raise ValueError('observations and inputs must share their time dimension')
 
-        if not bool(jnp.all(self.inputs.lengths == self.lengths)):
+        if not bool(jnp.all(self.inputs.lengths.values == self.lengths.values)):
             raise ValueError('observations and inputs must share their lengths')
 
         if self.visible.batch_shape != self.batch_shape:
             raise ValueError('visibility must share the AR dataset batch shape')
 
-        if self.visible.num_steps != self.num_steps:
+        if self.visible.max_steps != self.max_steps:
             raise ValueError('visibility must share the AR dataset time dimension')
 
         self.visible.validate(self.observations.values)
 
-        valid = self.valid().materialize(self.num_steps)
+        valid = self.lengths.to_mask(self.max_steps).values
 
         if bool(jnp.any(self.visible.values & ~valid)):
             raise ValueError('visible must be false outside valid AR prefixes')
@@ -237,20 +237,6 @@ class ARDataset(typing.NamedTuple):
             destination,
         )
 
-    def valid(self) -> ContiguousMask:
-        return self.observations.valid()
-
-    def valid_transitions(self) -> ContiguousMask:
-        return ContiguousMask._unchecked(
-            jnp.maximum(
-                self.lengths - 1,
-                jnp.zeros(
-                    (),
-                    dtype=self.lengths.dtype,
-                ),
-            )
-        )
-
     def transition_inputs(self) -> jax.Array:
         """
         Inputs associated with transitions into compact AR states 1:R.
@@ -260,7 +246,7 @@ class ARDataset(typing.NamedTuple):
         return self.inputs.values[..., 1:, :]
 
     def observation_weights(self) -> jax.Array:
-        return self.valid().apply(
+        return self.lengths.clear(
             self.visible.values,
         )
 
@@ -268,6 +254,7 @@ class ARDataset(typing.NamedTuple):
         return WeightedObservations(
             values=self.observations.values,
             weights=self.observation_weights(),
+            lengths=self.lengths,
         )
 
     def safe_predictors(self) -> jax.Array:

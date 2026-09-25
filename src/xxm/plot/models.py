@@ -814,9 +814,9 @@ def plot_gated_drift_weights(states, weights, figsize=None):
         raise ValueError(
             f'expected weights with shape (K, T - 1, P), got {weights.shape}'
         )
-    num_states, num_steps, num_motifs = weights.shape
+    num_states, max_steps, num_motifs = weights.shape
     transition_states = states[1:]
-    if transition_states.shape != (num_steps,):
+    if transition_states.shape != (max_steps,):
         raise ValueError('states and temporal weights have incompatible lengths')
     figsize = figsize or (4, 1 + 1 * num_states)
     _, axs = plt.subplots(
@@ -832,7 +832,7 @@ def plot_gated_drift_weights(states, weights, figsize=None):
         ax.sharey(axs[1])
     plot.plot_state_1d(axs[0], transition_states, num_states=num_states, alpha=0.5)
     axs[0].set(title='Active dynamics state', ylabel='state', xlabel='')
-    time = np.arange(num_steps)
+    time = np.arange(max_steps)
     cmap = plot.state_cmap(num_states)
     for state in range(num_states):
         ax = axs[state + 1]

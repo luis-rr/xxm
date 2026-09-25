@@ -53,10 +53,10 @@ def _nearest_visible_indices(
     visible: jax.Array,
 ) -> tuple[jax.Array, jax.Array]:
     """Return nearest visible time indices on the left and right."""
-    num_steps = visible.shape[-2]
+    max_steps = visible.shape[-2]
     time_axis = _time_axis(visible)
 
-    times = jnp.arange(num_steps)[:, None]
+    times = jnp.arange(max_steps)[:, None]
 
     previous = jax.lax.associative_scan(
         jnp.maximum,
@@ -73,7 +73,7 @@ def _nearest_visible_indices(
         jnp.where(
             visible,
             times,
-            num_steps,
+            max_steps,
         ),
         axis=time_axis,
         reverse=True,
@@ -86,7 +86,7 @@ def _nearest_visible_indices(
     )
 
     right = jnp.where(
-        following < num_steps,
+        following < max_steps,
         following,
         previous,
     )
@@ -95,12 +95,12 @@ def _nearest_visible_indices(
         jnp.clip(
             left,
             0,
-            num_steps - 1,
+            max_steps - 1,
         ),
         jnp.clip(
             right,
             0,
-            num_steps - 1,
+            max_steps - 1,
         ),
     )
 
@@ -124,9 +124,9 @@ def _interpolation_fraction(
     dtype: jax.typing.DTypeLike,
 ) -> jax.Array:
     """Return linear interpolation weights between neighboring times."""
-    num_steps = left.shape[-2]
+    max_steps = left.shape[-2]
 
-    times = jnp.arange(num_steps)[:, None]
+    times = jnp.arange(max_steps)[:, None]
     span = jnp.maximum(
         right - left,
         1,

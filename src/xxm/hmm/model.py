@@ -359,7 +359,7 @@ class Inferred(typing.Generic[HMMFacadeT]):
     def __post_init__(self) -> None:
         if self.posterior.batch_shape != self.data.batch_shape:
             raise ValueError('posterior batch must match the source dataset')
-        if self.posterior.num_steps != self.data.num_steps:
+        if self.posterior.max_steps != self.data.max_steps:
             raise ValueError('posterior must match the padded time dimension')
         if self.posterior.num_states != self.model.num_states:
             raise ValueError('posterior must match the model number of states')

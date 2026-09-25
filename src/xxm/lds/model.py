@@ -468,7 +468,7 @@ class Inferred(typing.Generic[LDSFacadeT]):
                 f'got {self.posterior.batch_shape}'
             )
 
-        if self.posterior.num_steps != self.data.num_steps:
+        if self.posterior.max_steps != self.data.max_steps:
             raise ValueError('posterior must match the padded time dimension')
 
         if self.posterior.variable_dim != self.model.latent_dim:

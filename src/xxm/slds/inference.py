@@ -24,7 +24,7 @@ from xxm.core.emissions.continuous import (
 )
 from xxm.core.inference import InferenceState
 from xxm.core.latents.discrete import homogeneous_chain
-from xxm.core.mask import Mask
+from xxm.core.lengths import Lengths
 from xxm.core.optim.laplace import laplace_inference, local_gaussian_approximation
 from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
 
@@ -34,15 +34,15 @@ from .core import Model, Posterior
 def _continuous_chain(
     initial: GaussianPotential,
     dynamics: GaussianPairPotential,
-    valid: Mask,
+    lengths: Lengths,
 ) -> GaussianChain:
     """Build a chain with independent unit-precision padding, as in LDS inference.
 
     Dynamics already exclude invalid transitions. Padding stabilizes numerical
     factorization; validity excludes it from normalizers and entropy.
     """
-    chain = GaussianChain.from_pair_potentials(initial, dynamics)
-    shape = (*chain.batch_shape, chain.num_steps)
+    chain = GaussianChain.from_pair_potentials(initial, dynamics, lengths)
+    shape = (*chain.batch_shape, chain.max_steps)
     dim = chain.variable_dim
     dtype = chain.diagonal_precision_blocks.dtype
     stabilizer = GaussianPotential(
@@ -51,7 +51,7 @@ def _continuous_chain(
         ),
         information_vectors=jnp.zeros((*shape, dim), dtype=dtype),
         log_constant=jnp.zeros(shape, dtype=dtype),
-    ).scale(~valid.materialize(chain.num_steps))
+    ).scale(~lengths.to_mask(chain.max_steps).values)
     return chain.add_local_potential(stabilizer)
 
 
@@ -59,7 +59,7 @@ class QuadraticContinuousFactors(typing.NamedTuple):
     """Quadratic observation factors and structural sequence validity."""
 
     observations: GaussianPotential
-    valid: Mask
+    lengths: Lengths
 
     @classmethod
     def from_model(
@@ -67,7 +67,7 @@ class QuadraticContinuousFactors(typing.NamedTuple):
     ) -> typing.Self:
         return cls(
             model.emissions.compute_potential(data.weighted_observations()),
-            data.valid(),
+            data.lengths,
         )
 
     def infer(
@@ -75,10 +75,8 @@ class QuadraticContinuousFactors(typing.NamedTuple):
         initial_potential: GaussianPotential,
         dynamics_potential: GaussianPairPotential,
     ) -> tuple[ContinuousPosterior, jax.Array]:
-        chain = _continuous_chain(initial_potential, dynamics_potential, self.valid)
-        return chain.add_local_potential(self.observations).forward_backward(
-            valid=self.valid
-        )
+        chain = _continuous_chain(initial_potential, dynamics_potential, self.lengths)
+        return chain.add_local_potential(self.observations).forward_backward()
 
 
 class LaplaceContinuousFactors(typing.NamedTuple, typing.Generic[LaplaceEmissionsT]):
@@ -86,7 +84,6 @@ class LaplaceContinuousFactors(typing.NamedTuple, typing.Generic[LaplaceEmission
 
     emissions: LaplaceEmissionsT
     observations: WeightedObservations
-    valid: Mask
     search_params: OptimParams
 
     @classmethod
@@ -96,9 +93,7 @@ class LaplaceContinuousFactors(typing.NamedTuple, typing.Generic[LaplaceEmission
         data: Dataset,
         search_params: OptimParams,
     ) -> typing.Self:
-        return cls(
-            model.emissions, data.weighted_observations(), data.valid(), search_params
-        )
+        return cls(model.emissions, data.weighted_observations(), search_params)
 
     def approximate(
         self,
@@ -106,13 +101,14 @@ class LaplaceContinuousFactors(typing.NamedTuple, typing.Generic[LaplaceEmission
         dynamics_potential: GaussianPairPotential,
         latents: jax.Array,
     ) -> tuple[ContinuousPosterior, jax.Array]:
-        chain = _continuous_chain(initial_potential, dynamics_potential, self.valid)
+        chain = _continuous_chain(
+            initial_potential, dynamics_potential, self.observations.lengths
+        )
         return local_gaussian_approximation(
             chain=chain,
             emissions=self.emissions,
             observations=self.observations,
-            latents=self.valid.apply(latents),
-            valid=self.valid,
+            latents=self.observations.lengths.clear(latents),
         )
 
     def infer(
@@ -121,14 +117,15 @@ class LaplaceContinuousFactors(typing.NamedTuple, typing.Generic[LaplaceEmission
         dynamics_potential: GaussianPairPotential,
         initial_latents: jax.Array,
     ) -> tuple[ContinuousPosterior, jax.Array]:
-        chain = _continuous_chain(initial_potential, dynamics_potential, self.valid)
+        chain = _continuous_chain(
+            initial_potential, dynamics_potential, self.observations.lengths
+        )
         return laplace_inference(
             chain=chain,
             emissions=self.emissions,
             observations=self.observations,
-            initial_latents=self.valid.apply(initial_latents),
+            initial_latents=self.observations.lengths.clear(initial_latents),
             search_params=self.search_params,
-            valid=self.valid,
         )
 
 
@@ -136,18 +133,18 @@ class DiscreteFactors(typing.NamedTuple):
     """Markov-chain factors and structural sequence validity."""
 
     chain: DiscreteChain
-    valid: Mask
 
     @classmethod
     def from_model(cls, model: Model[EmissionsT], data: Dataset) -> typing.Self:
         return cls(
-            homogeneous_chain(model.state_initial, model.transitions, data.num_steps),
-            data.valid(),
+            homogeneous_chain(
+                model.state_initial, model.transitions, data.lengths, data.max_steps
+            ),
         )
 
     def infer(self, discrete_potential: DiscretePotential) -> DiscretePosterior:
         chain = self.chain.add_local_potential(discrete_potential)
-        posterior, _ = chain.forward_backward(valid=self.valid)
+        posterior, _ = chain.forward_backward()
         return posterior
 
 
@@ -156,25 +153,25 @@ class SwitchingFactors(typing.NamedTuple):
 
     initial_potential: GaussianPotential
     dynamics_potential: GaussianPairPotential
-    valid: Mask
+    lengths: Lengths
 
     @classmethod
     def from_model(cls, model: Model[EmissionsT], data: Dataset) -> typing.Self:
-        transitions = data.valid_transitions()
-        safe_inputs = transitions.apply(data.transition_inputs())
+        transitions = data.lengths.transitions()
+        safe_inputs = transitions.clear(data.transition_inputs())
         dynamics = model.dynamics.compute_pair_potentials(safe_inputs)
         # The mask owns time, while state and Gaussian coordinates are event axes.
-        dynamics = jax.tree.map(transitions.apply, dynamics)
-        return cls(model.latent_initial.compute_potentials(), dynamics, data.valid())
+        dynamics = jax.tree.map(transitions.clear, dynamics)
+        return cls(model.latent_initial.compute_potentials(), dynamics, data.lengths)
 
     def continuous_potentials(
         self,
         discrete_posterior: DiscretePosterior,
     ) -> tuple[GaussianPotential, GaussianPairPotential]:
         """Average state-specific Gaussian factors under q(z)."""
-        states = self.valid.apply(discrete_posterior.state_probs)
+        states = self.lengths.clear(discrete_posterior.state_probs)
         initial = self.initial_potential.weighted_sum(states[..., 0, :], axis=-1)
-        weights = self.valid.adjacent_pairs().apply(states[..., 1:, :])
+        weights = self.lengths.transitions().clear(states[..., 1:, :])
         dynamics = self.dynamics_potential.weighted_sum(weights, axis=-1)
         return initial, dynamics
 
@@ -182,8 +179,8 @@ class SwitchingFactors(typing.NamedTuple):
         self, continuous_posterior: ContinuousPosterior
     ) -> DiscretePotential:
         """Expected switching log factors, zero outside valid sequence prefixes."""
-        means = self.valid.apply(continuous_posterior.means)
-        covariances = self.valid.apply(continuous_posterior.covariances)
+        means = self.lengths.clear(continuous_posterior.means)
+        covariances = self.lengths.clear(continuous_posterior.covariances)
         num_states = self.initial_potential.batch_shape[-1]
         state_axis = len(continuous_posterior.batch_shape)
         initial_mean = batch.broadcast_array(
@@ -199,15 +196,15 @@ class SwitchingFactors(typing.NamedTuple):
             initial_mean, initial_second
         )
 
-        transitions = self.valid.adjacent_pairs()
+        transitions = self.lengths.transitions()
         paired = jax.tree.map(
-            transitions.apply, continuous_posterior.paired_marginals()
+            transitions.clear, continuous_posterior.paired_marginals()
         )
         paired = paired.broadcast((num_states,), axis=-1)
         dynamics_values = self.dynamics_potential.expected_log_potential(paired)
-        dynamics_values = transitions.apply(dynamics_values)
+        dynamics_values = transitions.clear(dynamics_values)
         return DiscretePotential(
-            self.valid.apply(
+            self.lengths.clear(
                 jnp.concatenate(
                     [initial_values[..., None, :], dynamics_values], axis=-2
                 )
@@ -216,9 +213,10 @@ class SwitchingFactors(typing.NamedTuple):
 
     def discrete_potential_from_latents(self, latents: jax.Array) -> DiscretePotential:
         """Score deterministic latents using the same factors as the moment update."""
-        latents = self.valid.apply(latents)
+        latents = self.lengths.clear(latents)
         shape, dim = latents.shape[:-1], latents.shape[-1]
         posterior = ContinuousPosterior(
+            lengths=self.lengths,
             means=latents,
             covariances=jnp.zeros((*shape, dim, dim), dtype=latents.dtype),
             cross_covariances=jnp.zeros(
@@ -264,13 +262,12 @@ def _quadratic_elbo(
     discrete_posterior: DiscretePosterior,
     continuous_log_normalizer: jax.Array,
     discrete_prior: DiscreteChain,
-    valid: Mask,
 ) -> jax.Array:
     """Per-sequence ELBO after the optimal conjugate continuous update."""
     return (
         continuous_log_normalizer
-        + discrete_posterior.expected_log_potential(discrete_prior, valid=valid)
-        + discrete_posterior.entropy(valid=valid)
+        + discrete_posterior.expected_log_potential(discrete_prior)
+        + discrete_posterior.entropy()
     )
 
 
@@ -283,12 +280,12 @@ def _align_inference_inputs(
     if data.input_dim != model.dynamics.input_dim:
         raise ValueError('dataset input dimension must match dynamics')
     working_model, working_data = batch.cartesian_broadcast(model, data)
-    expected = (*working_data.batch_shape, data.num_steps, model.dynamics.latent_dim)
+    expected = (*working_data.batch_shape, data.max_steps, model.dynamics.latent_dim)
     if initial_latents.shape != expected:
         raise ValueError(
             f'initial_latents must have shape {expected}; got {initial_latents.shape}'
         )
-    return working_model, working_data, working_data.valid().apply(initial_latents)
+    return working_model, working_data, working_data.lengths.clear(initial_latents)
 
 
 def _sum_data_objectives(values: jax.Array, model: Model, data: Dataset) -> jax.Array:
@@ -324,9 +321,7 @@ def infer_variational(
     )
     discrete = jax.lax.fori_loop(0, num_iters, step, discrete)
     continuous, log_normalizer = inference.infer_continuous(discrete)
-    objective = _quadratic_elbo(
-        discrete, log_normalizer, inference.discrete.chain, working_data.valid()
-    )
+    objective = _quadratic_elbo(discrete, log_normalizer, inference.discrete.chain)
     return InferenceState(
         model=model,
         posterior=Posterior(discrete, continuous),
@@ -405,7 +400,7 @@ def _laplace_elbo(
 ) -> jax.Array:
     """Per-sequence ELBO, excluding structural padding from every contribution."""
     latent_potential = switching_factors.discrete_potential(continuous_posterior)
-    states = data.valid().apply(discrete_posterior.state_probs)
+    states = data.lengths.clear(discrete_posterior.state_probs)
     log_values = jnp.where(states != 0, latent_potential.log_values, 0)
     expected_latent = jnp.sum(states * log_values, axis=(-2, -1))
     expected_observation = model.emissions.expected_log_likelihood(
@@ -415,9 +410,9 @@ def _laplace_elbo(
     return (
         expected_observation
         + expected_latent
-        + discrete_posterior.expected_log_potential(discrete_prior, valid=data.valid())
-        + continuous_posterior.entropy(valid=data.valid())
-        + discrete_posterior.entropy(valid=data.valid())
+        + discrete_posterior.expected_log_potential(discrete_prior)
+        + continuous_posterior.entropy()
+        + discrete_posterior.entropy()
     )
 
 

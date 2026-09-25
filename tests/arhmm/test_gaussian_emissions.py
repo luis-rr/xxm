@@ -7,6 +7,7 @@ from xxm.arhmm.emissions import AREmissions
 from xxm.core.affine import Affine
 from xxm.core.chains.discrete import DiscreteChainMarginals
 from xxm.core.dists.gaussian import LinearGaussian
+from xxm.core.lengths import Lengths
 
 ATOL = 1e-6
 FIT_ATOL = 2e-5
@@ -241,6 +242,7 @@ def test_ar_gaussian_fit_recovers_known_ar2_parameters():
     num_steps = observations.shape[0] - emissions.num_lags
 
     posterior = DiscreteChainMarginals(
+        lengths=Lengths(jnp.asarray(num_steps)),
         state_probs=jnp.ones((num_steps, 1)),
         pair_probs=jnp.ones(
             (
@@ -382,6 +384,7 @@ def test_ar_gaussian_methods_are_jittable():
     num_steps = observations.shape[0] - emissions.num_lags
 
     posterior = DiscreteChainMarginals(
+        lengths=Lengths(jnp.asarray(num_steps)),
         state_probs=jnp.ones((num_steps, 1)),
         pair_probs=jnp.ones(
             (
