@@ -53,10 +53,10 @@ def _raw_hermite_basis(
     h11 = u**3 - u**2
 
     return (
-        h00[:, None] * values_basis[segment]
-        + h10[:, None] * slope_basis[segment]
-        + h01[:, None] * values_basis[segment + 1]
-        + h11[:, None] * slope_basis[segment + 1]
+        h00[..., None] * values_basis[segment]
+        + h10[..., None] * slope_basis[segment]
+        + h01[..., None] * values_basis[segment + 1]
+        + h11[..., None] * slope_basis[segment + 1]
     )
 
 
@@ -159,6 +159,26 @@ def _centered_hermite_map(
     return orthogonal[:, 1:]
 
 
+def hermite_basis_at_positions(
+    positions: jax.Array,
+    num_knots: int,
+) -> jax.Array:
+    """Evaluate the centered Hermite basis at normalized positions in `[0, 1]`.
+
+    Positions may have arbitrary leading dimensions. The returned basis has
+    shape `(*positions.shape, num_knots - 1)` and uses the same zero-integral
+    coefficient coordinates for every position array.
+    """
+    if num_knots < 2:
+        raise ValueError('num_knots must be at least 2')
+
+    positions = jnp.asarray(positions)
+    positions = positions.astype(jnp.result_type(positions, jnp.float32))
+    raw_basis = _raw_hermite_basis(positions, num_knots)
+    coefficient_map = _centered_hermite_map(num_knots, dtype=raw_basis.dtype)
+    return raw_basis @ coefficient_map
+
+
 def hermite_basis(
     num_steps: int,
     num_knots: int,
@@ -194,17 +214,7 @@ def hermite_basis(
         num_steps - 1,
     )
 
-    raw_basis = _raw_hermite_basis(
-        positions,
-        num_knots,
-    )
-
-    coefficient_map = _centered_hermite_map(
-        num_knots,
-        dtype=raw_basis.dtype,
-    )
-
-    return raw_basis @ coefficient_map
+    return hermite_basis_at_positions(positions, num_knots)
 
 
 def hermite_penalty_matrices(

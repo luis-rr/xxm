@@ -7,6 +7,11 @@ class TemporalLatent(typing.Protocol):
     """Autonomous vector-valued temporal latent process."""
 
     @property
+    def batch_shape(self) -> tuple[int, ...]:
+        """Independent structural batch dimensions."""
+        ...
+
+    @property
     def variable_dim(self) -> int:
         """Dimension of each latent vector."""
         ...
