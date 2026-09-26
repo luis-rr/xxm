@@ -10,9 +10,15 @@ from jax import numpy as jnp
 from xxm.core import batch
 from xxm.core.affine import Affine
 from xxm.core.chains.gaussian import GaussianChainMarginals as Posterior
-from xxm.core.data import Dataset
+from xxm.core.data import Dataset, Sequences
 from xxm.core.emissions.continuous import EmissionsT
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
+from xxm.core.lengths import LengthsSpec
+
+
+class Sample(typing.NamedTuple):
+    latents: Sequences
+    observations: Sequences
 
 
 class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
@@ -65,43 +71,77 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     def sample(
         self,
         key: jax.Array,
-        num_steps: int,
+        ls: LengthsSpec,
         *,
         inputs: jax.Array,
-    ) -> tuple[jax.Array, jax.Array]:
-        """Sample a complete latent and observation trajectory."""
-        _ = self.batch_shape
-        self.dynamics.validate_trajectory_inputs(inputs, num_steps)
+    ) -> Sample:
+        """Sample latent and observation trajectories."""
+
+        model_batch_shape = self.batch_shape
+
+        model, ls = batch.cartesian_broadcast(self, ls)
+
+        inputs = batch.broadcast_array(
+            inputs,
+            model_batch_shape,
+            axis=0,
+        )
 
         key_initial, key_latents, key_observations = jax.random.split(
             key,
             3,
         )
 
-        initial_latent = self.initial.sample(key_initial)
+        initial_latent = model.initial.sample(
+            key_initial,
+        )
 
-        latents = self.dynamics.sample(
+        latents = model.dynamics.sample(
             key_latents,
             initial_latent,
-            num_steps,
+            ls.max_steps,
             inputs=inputs,
         )
 
-        observations = self.emissions.sample(key_observations, latents)
+        latents = Sequences.from_padded(ls.lengths.clear(latents), ls.lengths)
 
-        return latents, observations
+        observations = model.emissions.sample(
+            key_observations,
+            latents.values,
+        )
+
+        observations = Sequences.from_padded(observations, ls.lengths)
+
+        return Sample(
+            latents=latents,
+            observations=observations,
+        )
 
     def compute_prior_means(
         self,
-        num_steps: int,
+        ls: LengthsSpec,
         *,
         inputs: jax.Array,
-    ) -> jax.Array:
+    ) -> Sequences:
         r"""Compute prior latent means $\mathbb{E}[x_t]$."""
-        _ = self.batch_shape
-        return self.dynamics.mean_trajectory(
-            self.initial.dist.mean, num_steps, inputs=inputs
+
+        model_batch_shape = self.batch_shape
+
+        model, ls = batch.cartesian_broadcast(self, ls)
+
+        inputs = batch.broadcast_array(
+            inputs,
+            model_batch_shape,
+            axis=0,
         )
+
+        means = model.dynamics.mean_trajectory(
+            model.initial.dist.mean,
+            ls.max_steps,
+            inputs=inputs,
+        )
+
+        return Sequences.from_padded(means, ls.lengths)
 
     def log_joint(
         self,

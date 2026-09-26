@@ -7,7 +7,7 @@ import jax.numpy as jnp
 
 from xxm.core import batch
 from xxm.core.data import Dataset, Sequences, WeightedObservations
-from xxm.core.lengths import Lengths
+from xxm.core.lengths import Lengths, LengthsSpec
 from xxm.core.mask import ArbitraryMask
 
 
@@ -143,6 +143,10 @@ class ARDataset(typing.NamedTuple):
     def max_steps(self) -> int:
         """Number of compact modeled steps R = T - L."""
         return self.observations.max_steps
+
+    @property
+    def lengths_spec(self) -> LengthsSpec:
+        return LengthsSpec(self.lengths, self.max_steps)
 
     @property
     def num_lags(self) -> int:

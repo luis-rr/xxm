@@ -196,14 +196,21 @@ def test_mask_flatten_preserves_type_and_values(kind):
 
 def test_concatenate_and_split_preserve_lengths_and_singleton_axes_under_jit():
     values = jnp.arange(36.0).reshape(2, 3, 3, 2)
+
     sequences = Sequences.from_padded(
         values, Lengths(jnp.array([[3, 2, 1], [1, 2, 3]]))
     )
+
     parts = jax.jit(lambda item: batch.split(item, (1, 0, 2), axis=-1))(sequences)
+
     assert tuple(part.batch_shape for part in parts) == ((2, 1), (2, 0), (2, 2))
+
     restored = jax.jit(lambda *items: batch.concatenate(items, axis=1))(*parts)
+
     assert type(restored) is Sequences
-    np.testing.assert_array_equal(restored.values, values)
+
+    np.testing.assert_array_equal(restored.values, sequences.values)
+
     np.testing.assert_array_equal(restored.lengths.values, sequences.lengths.values)
 
 

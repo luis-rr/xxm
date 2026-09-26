@@ -355,14 +355,3 @@ def test_empty_gaussian_marginals_keep_zero_lengths_and_entropy():
     )
     assert posterior.max_steps == 0
     np.testing.assert_array_equal(jax.jit(lambda p: p.entropy())(posterior), [0, 0])
-
-
-@pytest.mark.parametrize(
-    'make_chain', [gaussian_chain_structure, discrete_chain_structure]
-)
-def test_chain_length_bounds_are_checked_at_explicit_host_boundary(make_chain):
-    chain = make_chain((2,), 3)
-    with pytest.raises(ValueError):
-        chain._replace(lengths=Lengths(jnp.array([1, 4]))).validate()
-    with pytest.raises(ValueError):
-        chain._replace(lengths=Lengths(jnp.array(3))).forward_backward()

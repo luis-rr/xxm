@@ -4,6 +4,7 @@ import pytest
 from jax import numpy as jnp
 
 from xxm.core.latents.gaussian import GaussianLinearDynamics
+from xxm.core.lengths import LengthsSpec
 from xxm.lds.model import GaussianLDS, PoissonLDS
 
 from .lds_helpers import make_model
@@ -20,7 +21,11 @@ def test_dynamics_next_mean_applies_matrix_and_bias():
 def test_prior_mean_starts_at_initial_mean():
     model = make_model()
 
-    means = model.compute_prior_means(num_steps=3, inputs=jnp.empty((3, 0)))
+    means = model.compute_prior_means(
+        ls=LengthsSpec.from_params(3),
+        inputs=jnp.empty((3, 0)),
+    )
+    means = means.get()
 
     assert jnp.allclose(means[0], model.initial.dist.mean)
     assert jnp.allclose(means[1], model.dynamics.dist.conditional(means[0]).mean)
@@ -30,8 +35,12 @@ def test_sample_returns_one_latent_and_observation_per_time_step():
     model = make_model()
 
     latents, observations = model.sample(
-        num_steps=4, key=jax.random.key(0), inputs=jnp.empty((4, 0))
+        ls=LengthsSpec.from_params(4),
+        key=jax.random.key(0),
+        inputs=jnp.empty((4, 0)),
     )
+    latents = latents.get()
+    observations = observations.get()
 
     assert latents.shape == (4, 2)
     assert observations.shape == (4, 2)

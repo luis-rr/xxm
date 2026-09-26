@@ -7,7 +7,9 @@ import jax.numpy as jnp
 
 from xxm.core import batch
 from xxm.core.affine import Affine
+from xxm.core.data import Sequences
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.lengths import LengthsSpec
 
 
 def _zero_mean_from_covariance(
@@ -126,23 +128,57 @@ class GaussianRandomWalk(typing.NamedTuple):
 
         return _random_walk_transition(self.innovation)
 
-    def sample(self, key: jax.Array, num_steps: int) -> jax.Array:
-        """Sample a trajectory with shape `(*B, T, D)`."""
-        if num_steps < 0:
-            raise ValueError('num_steps must be non-negative')
+    def sample(
+        self,
+        key: jax.Array,
+        ls: LengthsSpec,
+    ) -> Sequences:
+
+        max_steps = ls.max_steps
         batch_shape = self.batch_shape
         variable_dim = self.variable_dim
-        if num_steps == 0:
-            return jnp.zeros(batch_shape + (0, variable_dim), dtype=self.dtype)
-        key_initial, key_innovation = jax.random.split(key)
-        initial = self.initial.sample(key_initial)[..., None, :]
-        if num_steps == 1:
-            return initial
-        innovations = self.innovation.sample(
-            key_innovation, sample_shape=(num_steps - 1,)
+
+        if max_steps == 0:
+            values = jnp.zeros(
+                batch_shape
+                + (
+                    0,
+                    variable_dim,
+                ),
+                dtype=self.dtype,
+            )
+
+        else:
+            key_initial, key_innovation = jax.random.split(key)
+
+            initial = self.initial.sample(key_initial)[..., None, :]
+
+            if max_steps == 1:
+                values = initial
+
+            else:
+                innovations = self.innovation.sample(
+                    key_innovation,
+                    sample_shape=(max_steps - 1,),
+                )
+
+                subsequent = initial + jnp.cumsum(
+                    innovations,
+                    axis=-2,
+                )
+
+                values = jnp.concatenate(
+                    (
+                        initial,
+                        subsequent,
+                    ),
+                    axis=-2,
+                )
+
+        return Sequences.from_padded(
+            values,
+            ls.lengths,
         )
-        subsequent = initial + jnp.cumsum(innovations, axis=-2)
-        return jnp.concatenate((initial, subsequent), axis=-2)
 
     def reorient_variables(
         self,
@@ -289,11 +325,11 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
         """Independent structural batch dimensions `*B`, excluding gates."""
         shape = self.initial.batch_shape
 
-        if (
-            self.active_innovation.batch_shape != shape
-            or self.inactive_innovation.batch_shape != shape
-        ):
-            raise ValueError('initial and innovation batch shapes must match')
+        batch.require_same_shape(
+            shape,
+            self.active_innovation.batch_shape,
+            self.inactive_innovation.batch_shape,
+        )
 
         if not shape:
             raise ValueError('gated random walk parameters require a gate dimension')
@@ -353,89 +389,71 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
     def sample(
         self,
         key: jax.Array,
-        num_steps: int,
+        ls: LengthsSpec,
         gates: jax.Array,
-    ) -> jax.Array:
-        """Sample `(*B, T, K, D)` values with gates shaped `(*B, T - 1)`."""
-        if num_steps < 0:
-            raise ValueError('num_steps must be non-negative')
+    ) -> Sequences:
+        """Sample gated random-walk values with the requested padded layout."""
+        max_steps = ls.max_steps
+        transition_steps = ls.transitions().max_steps
 
         batch_shape = self.batch_shape
         num_gates = self.num_gates
         variable_dim = self.variable_dim
 
-        expected_gate_shape = batch_shape + (max(num_steps - 1, 0),)
-
-        if gates.shape != expected_gate_shape:
+        if gates.shape != batch_shape + (transition_steps,):
             raise ValueError(
-                f'gates must have shape {expected_gate_shape}, got {gates.shape}'
+                f'gates must have shape '
+                f'{batch_shape + (transition_steps,)}, '
+                f'got {gates.shape}'
             )
 
-        if num_steps == 0:
-            return jnp.zeros(
-                batch_shape
-                + (
-                    0,
-                    num_gates,
-                    variable_dim,
-                ),
+        if max_steps == 0:
+            values = jnp.zeros(
+                batch_shape + (0, num_gates, variable_dim),
                 dtype=self.dtype,
             )
 
-        key_initial, key_innovation = jax.random.split(key)
+        else:
+            key_initial, key_innovation = jax.random.split(key)
 
-        initial = self.initial.sample(
-            key_initial,
-        )[..., None, :]
+            initial = self.initial.sample(key_initial)[..., None, :]
 
-        if num_steps == 1:
-            return jnp.moveaxis(initial, -3, -2)
+            if max_steps == 1:
+                values = jnp.moveaxis(initial, -3, -2)
 
-        # (*B, K, 1)
-        gate_indices = jnp.arange(
-            num_gates,
-        ).reshape(
-            (1,) * len(batch_shape)
-            + (
-                num_gates,
-                1,
-            )
+            else:
+                gate_indices = jnp.arange(num_gates)
+                gate_indices = gate_indices.reshape(
+                    (1,) * len(batch_shape) + (num_gates, 1)
+                )
+
+                active = gates[..., None, :] == gate_indices
+
+                innovation = Gaussian(
+                    mean=jnp.where(
+                        active[..., None],
+                        self.active_innovation.mean[..., None, :],
+                        self.inactive_innovation.mean[..., None, :],
+                    ),
+                    covariance=jnp.where(
+                        active[..., None, None],
+                        self.active_innovation.covariance[..., None, :, :],
+                        self.inactive_innovation.covariance[..., None, :, :],
+                    ),
+                )
+
+                increments = innovation.sample(key_innovation)
+
+                subsequent = initial + jnp.cumsum(increments, axis=-2)
+
+                values = jnp.concatenate((initial, subsequent), axis=-2)
+
+                values = jnp.moveaxis(values, -3, -2)
+
+        return Sequences.from_padded(
+            values,
+            ls.lengths,
         )
-
-        # (*B, K, T - 1)
-        active = gates[..., None, :] == gate_indices
-
-        innovation = Gaussian(
-            mean=jnp.where(
-                active[..., None],
-                self.active_innovation.mean[..., None, :],
-                self.inactive_innovation.mean[..., None, :],
-            ),
-            covariance=jnp.where(
-                active[..., None, None],
-                self.active_innovation.covariance[..., None, :, :],
-                self.inactive_innovation.covariance[..., None, :, :],
-            ),
-        )
-
-        increments = innovation.sample(
-            key_innovation,
-        )
-
-        subsequent = initial + jnp.cumsum(
-            increments,
-            axis=-2,
-        )
-
-        samples = jnp.concatenate(
-            (
-                initial,
-                subsequent,
-            ),
-            axis=-2,
-        )
-
-        return jnp.moveaxis(samples, -3, -2)
 
     def reorient_variables(
         self,

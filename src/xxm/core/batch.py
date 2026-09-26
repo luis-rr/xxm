@@ -367,6 +367,19 @@ def squeeze_axes(shape: ShapeT, axis) -> tuple[int, ...]:
     return axes
 
 
+def pad_axis(values: jax.Array, size: int, *, axis: int) -> jax.Array:
+    """Right-pad one axis with zeros to the requested size."""
+    current = values.shape[axis]
+
+    if size < current:
+        raise ValueError(f'cannot pad axis of size {current} to {size}')
+
+    padding = [(0, 0)] * values.ndim
+    padding[axis] = (0, size - current)
+
+    return jnp.pad(values, tuple(padding))
+
+
 def permutation_indices(permutation, size: int) -> jax.Array:
     """Validate the static shape and dtype of a batch permutation."""
     permutation = jnp.asarray(permutation)

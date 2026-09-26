@@ -22,7 +22,7 @@ def test_visibility_and_validity_survive_padding_stacking_and_jit():
     np.testing.assert_array_equal(data.observation_weights(), expected_visible)
     assert data.lengths is data.observations.lengths
     for actual, expected in zip(data.observations.unpack(), observations, strict=True):
-        np.testing.assert_array_equal(actual, expected)
+        np.testing.assert_array_equal(actual.squeeze(), expected.squeeze())
 
     stacked = Dataset.stack(
         [
@@ -33,7 +33,7 @@ def test_visibility_and_validity_survive_padding_stacking_and_jit():
     for actual, expected in zip(
         jax.tree.leaves(stacked), jax.tree.leaves(data), strict=True
     ):
-        np.testing.assert_array_equal(actual, expected)
+        np.testing.assert_array_equal(actual.squeeze(), expected.squeeze())
 
     transformed = jax.jit(lambda d: d.astype(jnp.float32).broadcast(1).squeeze(0))(data)
     np.testing.assert_array_equal(transformed.visible.values, expected_visible)

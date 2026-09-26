@@ -12,12 +12,18 @@ from xxm.core.chains.discrete import DiscreteChainMarginals
 from xxm.core.chains.gaussian import (
     GaussianChainMarginals,
 )
-from xxm.core.data import Dataset
+from xxm.core.data import Dataset, Sequences
 from xxm.core.emissions.continuous import EmissionsT
 from xxm.core.latents.discrete import CategoricalInitial, CategoricalTransitions
 from xxm.core.latents.gaussian import StateConditionedGaussian
 from xxm.core.latents.switching import GaussianLinearSwitchingDynamics
-from xxm.core.lengths import Lengths
+from xxm.core.lengths import Lengths, LengthsSpec
+
+
+class Sample(typing.NamedTuple):
+    states: Sequences
+    latents: Sequences
+    observations: Sequences
 
 
 class Posterior(typing.NamedTuple):
@@ -166,15 +172,17 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     def sample(
         self,
         key: jax.Array,
-        num_steps: int,
+        ls: LengthsSpec,
         *,
         inputs: jax.Array,
-    ) -> tuple[jax.Array, jax.Array, jax.Array]:
+    ) -> Sample:
         """Sample aligned switching states, latents, and observations."""
-        if num_steps < 1:
-            raise ValueError('SLDS sampling requires at least one time step.')
-        if inputs.shape != (*self.batch_shape, num_steps, self.dynamics.input_dim):
-            raise ValueError('inputs must have shape (*B, T, D_u) matching the model')
+
+        model_batch_shape = self.batch_shape
+
+        model, ls = batch.cartesian_broadcast(self, ls)
+
+        inputs = batch.broadcast_array(inputs, model_batch_shape, axis=0)
 
         (
             key_state_initial,
@@ -182,25 +190,34 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
             key_latent_initial,
             key_latents,
             key_observations,
-        ) = jax.random.split(
-            key,
-            5,
-        )
+        ) = jax.random.split(key, 5)
 
-        initial_state = self.state_initial.sample(key_state_initial)
-        states = self.transitions.sample(key_states, initial_state, num_steps)
+        initial_state = model.state_initial.sample(key_state_initial)
 
-        initial_latent = self.latent_initial.sample(key_latent_initial, states[..., 0])
-        latents = self.dynamics.sample(
+        states = model.transitions.sample(key_states, initial_state, ls.max_steps)
+
+        initial_latent = model.latent_initial.sample(key_latent_initial, states[..., 0])
+
+        latents = model.dynamics.sample(
             key_latents,
             initial_latent,
             states[..., 1:],
             inputs=inputs[..., 1:, :],
         )
 
-        observations = self.emissions.sample(key_observations, latents)
+        states = Sequences.from_padded(states[..., None], ls.lengths)
 
-        return states, latents, observations
+        latents = Sequences.from_padded(latents, ls.lengths)
+
+        observations = model.emissions.sample(key_observations, latents.values)
+
+        observations = Sequences.from_padded(observations, ls.lengths)
+
+        return Sample(
+            states=states,
+            latents=latents,
+            observations=observations,
+        )
 
     def permute_states(self, permutation: jax.Array) -> typing.Self:
         """

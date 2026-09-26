@@ -9,19 +9,18 @@ from xxm.core.chains.discrete import DiscreteChain as Chain
 from xxm.core.data import Dataset
 from xxm.core.inference import InferenceState
 from xxm.core.latents.discrete import homogeneous_chain
-from xxm.core.lengths import Lengths
+from xxm.core.lengths import LengthsSpec
 
 from .core import Model, Posterior
 
 
 def to_chain(
     model: Model,
-    lengths: Lengths,
-    max_steps: int,
+    ls: LengthsSpec,
 ) -> Chain:
     """Construct discrete chain from model structure and time horizon."""
 
-    return homogeneous_chain(model.initial, model.transitions, lengths, max_steps)
+    return homogeneous_chain(model.initial, model.transitions, ls)
 
 
 def infer_exact(
@@ -40,8 +39,7 @@ def infer_exact(
 
     latent_chain = to_chain(
         working_model,
-        lengths=working_data.lengths,
-        max_steps=working_data.max_steps,
+        ls=working_data.lengths_spec,
     )
 
     posterior_chain = latent_chain.add_local_potential(

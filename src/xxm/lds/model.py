@@ -15,11 +15,12 @@ from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
+from xxm.core.lengths import LengthsLike, LengthsSpec
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import poisson as poisson_fit
 from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
 
-from .core import Model
+from .core import Model, Sample
 from .inference import elbo, infer_exact, infer_laplace
 from .init import init_gaussian_via_pca, init_poisson_via_pca
 from .learning import fit_em, fit_laplace_em
@@ -48,22 +49,20 @@ _elbo_jit = jax.jit(elbo)
 
 def _sampling_inputs(
     model: Model,
-    num_steps: int,
+    ls: LengthsSpec,
     inputs: jax.Array | None,
 ) -> jax.Array:
-    batch_shape = model.dynamics.batch_shape
-    input_dim = model.dynamics.input_dim
 
-    if inputs is None:
-        if input_dim != 0:
-            raise ValueError('controlled LDS sampling requires explicit inputs')
+    if inputs is not None:
+        return jnp.asarray(inputs)
 
-        return jnp.empty(
-            (*batch_shape, num_steps, 0),
-            dtype=model.dynamics.dist.affine.bias.dtype,
-        )
+    if model.dynamics.input_dim != 0:
+        raise ValueError('controlled LDS sampling requires explicit inputs')
 
-    return jnp.asarray(inputs)
+    return jnp.empty(
+        (*ls.batch_shape, ls.max_steps, 0),
+        dtype=model.dynamics.dist.affine.bias.dtype,
+    )
 
 
 def _conditioned_dynamics(
@@ -198,20 +197,16 @@ class GaussianLDS:
     def sample(
         self,
         key: jax.Array,
-        num_steps: int,
+        lengths: LengthsLike,
         *,
         inputs: jax.Array | None = None,
-    ) -> tuple[jax.Array, jax.Array]:
-        r"""Sample latent states $x_{0:T-1}$ and observations $y_{0:T-1}$."""
-        return self._model.sample(
-            key,
-            num_steps,
-            inputs=_sampling_inputs(
-                self._model,
-                num_steps,
-                inputs,
-            ),
-        )
+    ) -> Sample:
+        r"""Sample latent states and observations."""
+
+        ls = LengthsSpec.from_params(lengths)
+        inputs = _sampling_inputs(self._model, ls, inputs)
+
+        return self._model.sample(key, ls, inputs=inputs)
 
     def infer(
         self,
@@ -371,20 +366,16 @@ class PoissonLDS:
     def sample(
         self,
         key: jax.Array,
-        num_steps: int,
+        lengths: LengthsLike,
         *,
         inputs: jax.Array | None = None,
-    ) -> tuple[jax.Array, jax.Array]:
-        r"""Sample latent states $x_{0:T-1}$ and observations $y_{0:T-1}$."""
-        return self._model.sample(
-            key,
-            num_steps,
-            inputs=_sampling_inputs(
-                self._model,
-                num_steps,
-                inputs,
-            ),
-        )
+    ) -> Sample:
+        r"""Sample latent states and observations."""
+
+        ls = LengthsSpec.from_params(lengths)
+        inputs = _sampling_inputs(self._model, ls, inputs)
+
+        return self._model.sample(key, ls, inputs=inputs)
 
     def infer(
         self,

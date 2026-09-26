@@ -10,13 +10,20 @@ from xxm.core import batch
 from xxm.core.chains.discrete import (
     DiscreteChainMarginals as Posterior,
 )
+from xxm.core.data import Sequences
 from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
 )
+from xxm.core.lengths import LengthsSpec
 
 from .data import ARDataset
 from .emissions import AREmissions, ConditionalDistT
+
+
+class Sample(typing.NamedTuple):
+    states: Sequences
+    observations: Sequences
 
 
 class Model(
@@ -94,59 +101,92 @@ class Model(
     def sample_states(
         self,
         key: jax.Array,
-        num_steps: int,
-    ) -> jax.Array:
+        ls: LengthsSpec,
+    ) -> Sequences:
+
+        model, lengths = batch.cartesian_broadcast(
+            self,
+            ls,
+        )
+
         key_initial, key_transitions = jax.random.split(key)
 
-        initial_state = self.initial.sample(
+        initial_state = model.initial.sample(
             key_initial,
         )
 
-        return self.transitions.sample(
+        states = model.transitions.sample(
             key_transitions,
             initial_state,
-            num_steps,
+            lengths.max_steps,
+        )
+
+        return Sequences.from_padded(
+            states[..., None],
+            ls.lengths,
         )
 
     def sample(
         self,
         key: jax.Array,
-        num_steps: int,
-    ) -> tuple[jax.Array, jax.Array]:
+        ls: LengthsSpec,
+    ) -> Sample:
+
         key_states, key_observations = jax.random.split(key)
 
         states = self.sample_states(
             key_states,
-            num_steps,
+            ls,
         )
 
-        observations = self.emissions.sample(
+        emissions, ls = batch.cartesian_broadcast(self.emissions, ls)
+
+        observations = emissions.sample(
             key_observations,
-            states,
+            states.values[..., 0],
         )
 
-        return states, observations
+        observations = Sequences.from_padded(observations, states.lengths)
+
+        return Sample(
+            states=states,
+            observations=observations,
+        )
 
     def sample_continuation(
         self,
         key: jax.Array,
-        num_steps: int,
+        ls: LengthsSpec,
         initial_history: jax.Array,
-    ) -> tuple[jax.Array, jax.Array]:
+    ) -> Sample:
+
         key_states, key_observations = jax.random.split(key)
 
         states = self.sample_states(
             key_states,
-            num_steps,
+            ls,
         )
 
-        observations = self.emissions.sample_continuation(
+        emissions, ls = batch.cartesian_broadcast(self.emissions, ls)
+
+        initial_history = batch.broadcast_array(
+            initial_history,
+            self.batch_shape,
+            axis=0,
+        )
+
+        observations = emissions.sample_continuation(
             key_observations,
-            states,
+            states.values[..., 0],
             initial_history,
         )
 
-        return states, observations
+        observations = Sequences.from_padded(observations, states.lengths)
+
+        return Sample(
+            states=states,
+            observations=observations,
+        )
 
     def fit_params(
         self,

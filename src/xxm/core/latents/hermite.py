@@ -10,7 +10,9 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core import batch
+from xxm.core.data import Sequences
 from xxm.core.dists.gaussian import Gaussian
+from xxm.core.lengths import LengthsSpec
 
 
 def _hermite_segment_data(
@@ -470,13 +472,39 @@ class HermiteSpline:
         """Sample coefficients with shape `(*B, P * C)`."""
         return self.coefficient_prior.sample(key)
 
-    def sample(self, key: jax.Array, num_steps: int) -> jax.Array:
-        """Sample `num_steps` autonomous temporal values shaped `(*B, T, P)`."""
-        if num_steps < 0:
-            raise ValueError('num_steps must be non-negative')
-        return self.temporal_weights(
-            self.sample_coefficients(key), num_steps=num_steps + 1
+    def sample(
+        self,
+        key: jax.Array,
+        ls: LengthsSpec,
+    ) -> Sequences:
+
+        return self.sample_from_coefficients(
+            self.sample_coefficients(key),
+            ls,
         )
+
+    def sample_from_coefficients(
+        self,
+        coefficients: jax.Array,
+        ls: LengthsSpec,
+    ) -> Sequences:
+
+        denominator = ls.lengths.shift(-1).clip_min(1).values
+
+        positions = jnp.arange(ls.max_steps, dtype=self.dtype) / denominator[..., None]
+
+        positions = ls.lengths.clear(positions)
+
+        basis = hermite_basis_at_positions(positions, self.num_knots)
+        basis = basis.astype(coefficients.dtype)
+
+        coefficients = coefficients.reshape(
+            self.batch_shape + (self.num_motifs, self.num_coefficients)
+        )
+
+        values = jnp.einsum('...tc,...pc->...tp', basis, coefficients)
+
+        return Sequences.from_padded(values, ls.lengths)
 
     def log_prob(self, coefficients: jax.Array) -> jax.Array:
         """Evaluate coefficient prior densities over batch `*B`."""

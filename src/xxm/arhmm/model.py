@@ -17,9 +17,9 @@ from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
 )
-from xxm.core.lengths import Lengths
+from xxm.core.lengths import Lengths, LengthsLike, LengthsSpec
 
-from .core import Model, Posterior
+from .core import Model, Posterior, Sample
 from .data import ARDataset
 from .emissions import AREmissions
 from .inference import infer_exact
@@ -39,6 +39,22 @@ _fit_em_jit = jax.jit(
         'progress',
     ),
 )
+
+
+def _sampling_history(
+    model: Model,
+    lengths: Lengths,
+    initial_history: jax.Array,
+) -> jax.Array:
+
+    return jnp.broadcast_to(
+        initial_history,
+        (
+            *lengths.batch_shape,
+            model.num_lags,
+            model.observation_dim,
+        ),
+    )
 
 
 def _categorical_components_from_params(
@@ -230,28 +246,20 @@ class GaussianARHMM:
     def sample(
         self,
         key: jax.Array,
-        num_steps: int,
+        lengths: LengthsLike,
         *,
         initial_history: jax.Array | None = None,
-    ) -> tuple[jax.Array, jax.Array]:
-        """
-        Sample states and observations from the AR-HMM.
+    ) -> Sample:
 
-        If ``initial_history`` is omitted, generation uses a zero prehistory.
-        Otherwise it must have shape $(L,D_y)$ and be ordered chronologically,
-        from oldest to most recent. Only the newly generated observations are
-        returned.
-        """
+        ls = LengthsSpec.from_params(lengths)
+
         if initial_history is None:
-            return self._model.sample(
-                key,
-                num_steps,
-            )
+            return self._model.sample(key, ls)
 
         return self._model.sample_continuation(
             key,
-            num_steps,
-            initial_history,
+            ls,
+            _sampling_history(self._model, ls.lengths, initial_history),
         )
 
     def infer(self, data: Dataset) -> Inferred[typing.Self]:
@@ -473,28 +481,20 @@ class PoissonARHMM:
     def sample(
         self,
         key: jax.Array,
-        num_steps: int,
+        lengths: LengthsLike,
         *,
         initial_history: jax.Array | None = None,
-    ) -> tuple[jax.Array, jax.Array]:
-        """
-        Sample states and observations from the AR-HMM.
+    ) -> Sample:
 
-        If ``initial_history`` is omitted, generation uses a zero prehistory.
-        Otherwise it must have shape $(L,D_y)$ and be ordered chronologically,
-        from oldest to most recent. Only the newly generated observations are
-        returned.
-        """
+        ls = LengthsSpec.from_params(lengths)
+
         if initial_history is None:
-            return self._model.sample(
-                key,
-                num_steps,
-            )
+            return self._model.sample(key, ls)
 
         return self._model.sample_continuation(
             key,
-            num_steps,
-            initial_history,
+            ls,
+            _sampling_history(self._model, ls.lengths, initial_history),
         )
 
     def infer(self, data: Dataset) -> Inferred[typing.Self]:
@@ -578,7 +578,7 @@ class Inferred(typing.Generic[ARHMMFacadeT]):
         """State probabilities on the compact AR timeline."""
         return Sequences.from_padded(
             self.posterior.state_probs,
-            Lengths(self.data.lengths.values - self.model.num_lags),
+            self.data.lengths.shift(-self.model.num_lags),
         )
 
     def observation_mean(self) -> Sequences:
@@ -599,10 +599,7 @@ class Inferred(typing.Generic[ARHMMFacadeT]):
             axis=-1,
         )
 
-        return Sequences.from_padded(
-            means,
-            ar_data.lengths,
-        )
+        return Sequences.from_padded(means, ar_data.lengths)
 
     def permute_states(self, permutation: jax.Array) -> Inferred[ARHMMFacadeT]:
         """Relabel discrete states by permutation."""
@@ -622,7 +619,7 @@ class Inferred(typing.Generic[ARHMMFacadeT]):
 
         return Sequences.from_padded(
             most_likely,
-            Lengths(self.data.lengths.values - self.model.num_lags),
+            self.data.lengths.shift(-self.model.num_lags),
         )
 
 

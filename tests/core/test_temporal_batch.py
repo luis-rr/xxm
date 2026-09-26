@@ -10,6 +10,7 @@ from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
 from xxm.core.latents.hermite import HermiteSpline
 from xxm.core.latents.random_walk import GatedGaussianRandomWalk, GaussianRandomWalk
+from xxm.core.lengths import Lengths, LengthsSpec
 
 
 def gaussian(batch=(2, 3), dim=2):
@@ -52,17 +53,48 @@ def test_categorical_sampling_is_jittable():
 
 @pytest.mark.parametrize('steps', [0, 1, 5])
 def test_random_walk_time_follows_batch(steps):
-    rw = GaussianRandomWalk(gaussian(), gaussian()._replace(mean=jnp.ones((2, 3, 2))))
+    rw = GaussianRandomWalk(
+        gaussian(),
+        gaussian()._replace(
+            mean=jnp.ones((2, 3, 2)),
+        ),
+    )
     key = jax.random.key(19)
-    actual = jax.jit(lambda k: rw.sample(k, steps))(key)
-    assert actual.shape == (2, 3, steps, 2)
+
+    ls = LengthsSpec.from_params(
+        Lengths.full(rw.batch_shape, steps),
+    )
+
+    actual = jax.jit(lambda k, ls: rw.sample(k, ls))(
+        key,
+        ls,
+    )
+
+    assert actual.values.shape == (2, 3, steps, 2)
+    assert actual.lengths.batch_shape == rw.batch_shape
+    np.testing.assert_array_equal(
+        actual.lengths.values,
+        jnp.full(rw.batch_shape, steps),
+    )
+
     if steps:
         ki, ke = jax.random.split(key)
+
         initial = rw.initial.sample(ki)
-        np.testing.assert_allclose(actual[..., 0, :], initial)
-        increments = rw.innovation.sample(ke, (steps - 1,))
+
         np.testing.assert_allclose(
-            actual[..., 1:, :], initial[..., None, :] + jnp.cumsum(increments, axis=-2)
+            actual.values[..., 0, :],
+            initial,
+        )
+
+        increments = rw.innovation.sample(
+            ke,
+            (steps - 1,),
+        )
+
+        np.testing.assert_allclose(
+            actual.values[..., 1:, :],
+            initial[..., None, :] + jnp.cumsum(increments, axis=-2),
         )
 
 
@@ -79,6 +111,10 @@ def test_gated_random_walk_aligns_gates_and_replicates(steps):
         inactive,
     )
 
+    ls = LengthsSpec.from_params(
+        Lengths.full(rw.batch_shape, steps),
+    )
+
     gates = (
         jnp.arange(3 * max(steps - 1, 0)).reshape(
             3,
@@ -90,13 +126,14 @@ def test_gated_random_walk_aligns_gates_and_replicates(steps):
     key = jax.random.key(20)
 
     actual = jax.jit(
-        lambda k, gates: rw.sample(
-            k,
-            steps,
-            gates,
+        lambda k, ls, gates: rw.sample(
+            key=k,
+            ls=ls,
+            gates=gates,
         )
     )(
         key,
+        ls,
         gates,
     )
 
@@ -107,7 +144,12 @@ def test_gated_random_walk_aligns_gates_and_replicates(steps):
     # that object's batch structure.
     assert rw.active_transition_dist().batch_shape == rw.batch_shape + (rw.num_gates,)
 
-    assert actual.shape == (3, steps, 2, 1)
+    assert actual.values.shape == (3, steps, 2, 1)
+
+    np.testing.assert_array_equal(
+        actual.lengths.values,
+        jnp.full(rw.batch_shape, steps),
+    )
 
     if steps:
         ki, ke = jax.random.split(key)
@@ -145,7 +187,11 @@ def test_gated_random_walk_aligns_gates_and_replicates(steps):
             ),
             axis=-2,
         )
-        np.testing.assert_allclose(actual, jnp.moveaxis(expected, -3, -2))
+
+        np.testing.assert_allclose(
+            actual.values,
+            jnp.moveaxis(expected, -3, -2),
+        )
 
     np.testing.assert_array_equal(
         rw.permute_gates(jnp.array([1, 0])).initial.mean,
@@ -157,9 +203,9 @@ def test_gated_random_walk_aligns_gates_and_replicates(steps):
         match='gates must have shape',
     ):
         rw.sample(
-            key,
-            steps,
-            gates.T[..., None],
+            key=key,
+            ls=ls,
+            gates=gates.T[..., None],
         )
 
 

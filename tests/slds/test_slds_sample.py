@@ -10,6 +10,7 @@ from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
 )
+from xxm.core.lengths import LengthsSpec
 from xxm.slds.core import (
     GaussianLinearSwitchingDynamics,
     Model,
@@ -32,7 +33,7 @@ def test_categorical_transitions_sample_includes_initial():
     states = transitions.sample(
         jax.random.key(0),
         initial_state=jnp.array(0),
-        num_steps=4,
+        max_steps=4,
     )
 
     np.testing.assert_array_equal(
@@ -152,9 +153,12 @@ def test_sample():
 
     states, latents, observations = model.sample(
         jax.random.key(0),
-        num_steps=4,
+        ls=LengthsSpec.from_params(4),
         inputs=jnp.empty((4, 0)),
     )
+    states = states.get()
+    latents = latents.get(squeeze=False)
+    observations = observations.get(squeeze=False)
 
     assert states.shape == (4,)
     assert latents.shape == (4, 1)
@@ -184,20 +188,11 @@ def test_sample_jittable():
     model = _make_model()
     key = jax.random.key(0)
 
-    eager = model.sample(
-        key,
-        num_steps=4,
-        inputs=jnp.empty((4, 0)),
-    )
+    ls = LengthsSpec.from_params(4)
 
-    jitted = jax.jit(
-        model.sample,
-        static_argnames=('num_steps',),
-    )(
-        key,
-        num_steps=4,
-        inputs=jnp.empty((4, 0)),
-    )
+    eager = model.sample(key, ls=ls, inputs=jnp.empty((4, 0)))
+
+    jitted = jax.jit(model.sample)(key, ls=ls, inputs=jnp.empty((4, 0)))
 
     for eager_value, jitted_value in zip(
         eager,
@@ -205,6 +200,6 @@ def test_sample_jittable():
         strict=True,
     ):
         np.testing.assert_allclose(
-            jitted_value,
-            eager_value,
+            jitted_value.get(),
+            eager_value.get(),
         )

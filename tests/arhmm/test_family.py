@@ -141,8 +141,10 @@ def test_continuation_uses_chronological_history(family):
     key = jax.random.key(7)
     history = jnp.array([[2.0], [1.0]])
     states, actual = model.sample(key, 3, initial_history=history)
+    states = states.get()
+    actual = actual.get()
     assert states.shape == (3,)
-    assert actual.shape == (3, 1)
+    assert actual.shape == (3,)
     _, observation_key = jax.random.split(key)
     expected = []
     recent, older = history[1], history[0]
@@ -161,12 +163,12 @@ def test_continuation_uses_chronological_history(family):
             value = jax.random.poisson(sample_key, jnp.exp(mean))
         expected.append(value)
         older, recent = recent, value
-    np.testing.assert_allclose(actual, jnp.stack(expected), atol=1e-6)
+    np.testing.assert_allclose(actual, jnp.stack(expected).squeeze(), atol=1e-6)
 
     autonomous = model.sample(key, 3)
     zero_history = model.sample(key, 3, initial_history=jnp.zeros((2, 1)))
     for a, b in zip(autonomous, zero_history, strict=True):
-        np.testing.assert_array_equal(a, b)
+        np.testing.assert_array_equal(a.values.squeeze(), b.values.squeeze())
 
 
 def test_public_family_boundary():

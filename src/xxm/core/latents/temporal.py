@@ -2,6 +2,9 @@ import typing
 
 import jax
 
+from xxm.core.data import Sequences
+from xxm.core.lengths import LengthsSpec
+
 
 class TemporalLatent(typing.Protocol):
     """Autonomous vector-valued temporal latent process."""
@@ -33,7 +36,7 @@ class TemporalLatent(typing.Protocol):
     def sample(
         self,
         key: jax.Array,
-        num_steps: int,
-    ) -> jax.Array:
-        """Sample exactly `num_steps` temporal values."""
+        ls: LengthsSpec,
+    ) -> Sequences:
+        """Sample temporal values."""
         ...

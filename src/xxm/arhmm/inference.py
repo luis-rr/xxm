@@ -30,8 +30,7 @@ def _infer_prepared(
     chain = homogeneous_chain(
         working_model.initial,
         working_model.transitions,
-        working_data.lengths,
-        working_data.max_steps,
+        working_data.lengths_spec,
     )
 
     posterior_chain = chain.add_local_potential(

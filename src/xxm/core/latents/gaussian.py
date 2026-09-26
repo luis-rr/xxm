@@ -369,15 +369,24 @@ class GaussianLinearDynamics(typing.NamedTuple):
 
         return type(self)(fitted)
 
-    def validate_trajectory_inputs(self, inputs: jax.Array, num_steps: int) -> None:
+    def validate_trajectory_inputs(
+        self,
+        inputs: jax.Array,
+        max_steps: int,
+    ) -> None:
         """Require full trajectory inputs `(*B, T, D_u)` with at least one step.
 
         The boundary input at time zero is included but unused by dynamics.
         """
-        if num_steps < 1:
+        if max_steps < 1:
             raise ValueError('trajectories require at least one time step')
 
-        expected_shape = (*self.batch_shape, num_steps, self.input_dim)
+        expected_shape = (
+            *self.batch_shape,
+            max_steps,
+            self.input_dim,
+        )
+
         if inputs.shape != expected_shape:
             raise ValueError(
                 f'inputs must have shape {expected_shape}; got {inputs.shape}'
@@ -386,7 +395,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
     def mean_trajectory(
         self,
         initial_mean: jax.Array,
-        num_steps: int,
+        max_steps: int,
         *,
         inputs: jax.Array,
     ) -> jax.Array:
@@ -394,7 +403,11 @@ class GaussianLinearDynamics(typing.NamedTuple):
 
         Inputs have shape `(*B, T, D_u)`; the input at time zero is unused.
         """
-        self.validate_trajectory_inputs(inputs, num_steps)
+        self.validate_trajectory_inputs(
+            inputs,
+            max_steps,
+        )
+
         batch_shape = self.batch_shape
 
         if initial_mean.shape != (*batch_shape, self.latent_dim):
@@ -403,6 +416,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
             )
 
         time_axis = len(batch_shape)
+
         transition_inputs = jnp.moveaxis(
             inputs[..., 1:, :],
             time_axis,
@@ -413,8 +427,10 @@ class GaussianLinearDynamics(typing.NamedTuple):
             previous: jax.Array,
             current_inputs: jax.Array,
         ) -> tuple[jax.Array, jax.Array]:
+
             conditional = self.conditional(current_inputs)
             current = conditional.conditional_mean(previous)
+
             return current, current
 
         _, following = jax.lax.scan(
@@ -464,7 +480,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
         self,
         key: jax.Array,
         initial_latent: jax.Array,
-        num_steps: int,
+        max_steps: int,
         *,
         inputs: jax.Array,
     ) -> jax.Array:
@@ -474,7 +490,10 @@ class GaussianLinearDynamics(typing.NamedTuple):
         `inputs[..., t, :]` affects the transition into latent state `t`;
         `inputs[..., 0, :]` is unused.
         """
-        self.validate_trajectory_inputs(inputs, num_steps)
+        self.validate_trajectory_inputs(
+            inputs,
+            max_steps,
+        )
 
         time_axis = len(self.batch_shape)
 
@@ -486,7 +505,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
 
         keys = jax.random.split(
             key,
-            num_steps - 1,
+            max_steps - 1,
         )
 
         def step(previous, args):

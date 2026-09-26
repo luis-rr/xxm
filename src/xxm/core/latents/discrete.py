@@ -8,7 +8,7 @@ import jax.numpy as jnp
 from xxm.core import batch
 from xxm.core.chains.discrete import DiscreteChain
 from xxm.core.dists.categorical import Categorical
-from xxm.core.lengths import Lengths
+from xxm.core.lengths import LengthsSpec
 from xxm.core.optim import categorical as categorical_fit
 from xxm.core.optim.batch import filter_valid_batches
 from xxm.core.posteriors import DiscretePosterior
@@ -17,21 +17,20 @@ from xxm.core.posteriors import DiscretePosterior
 def homogeneous_chain(
     initial: 'CategoricalInitial',
     transitions: 'CategoricalTransitions',
-    lengths: Lengths,
-    max_steps: int,
+    ls: LengthsSpec,
 ) -> DiscreteChain:
     """Construct a padded homogeneous Markov-chain prior."""
     num_states = initial.num_states
     return DiscreteChain(
-        lengths=lengths.align_batch(initial.batch_shape),
+        lengths=ls.lengths,
         initial_probs=initial.dist.probs,
         transition_probs=batch.broadcast_array(
             transitions.dist.probs,
-            (max_steps - 1,),
+            (ls.max_steps - 1,),
             axis=len(transitions.batch_shape),
         ),
         state_log_potentials=jnp.zeros(
-            initial.batch_shape + (max_steps, num_states),
+            initial.batch_shape + (ls.max_steps, num_states),
             dtype=initial.dist.probs.dtype,
         ),
     )
@@ -149,9 +148,20 @@ class CategoricalTransitions(typing.NamedTuple):
         return self.conditional(previous).sample(key)
 
     def sample(
-        self, key: jax.Array, initial_state: jax.Array, num_steps: int
+        self,
+        key: jax.Array,
+        initial_state: jax.Array,
+        max_steps: int,
     ) -> jax.Array:
-        """Sample state sequence conditional on initial state."""
+        """Sample one dense state trajectory up to `max_steps`."""
+        if max_steps < 1:
+            raise ValueError('max_steps must be at least 1')
+
+        if initial_state.shape != self.batch_shape:
+            raise ValueError(
+                f'initial_state must have shape {self.batch_shape}; '
+                f'got {initial_state.shape}'
+            )
 
         def step(carry, _):
             state, key = carry
@@ -168,10 +178,15 @@ class CategoricalTransitions(typing.NamedTuple):
             step,
             (initial_state, key),
             xs=None,
-            length=num_steps - 1,
+            length=max_steps - 1,
         )
 
-        subsequent_states = jnp.moveaxis(subsequent_states, 0, -1)
+        subsequent_states = jnp.moveaxis(
+            subsequent_states,
+            0,
+            -1,
+        )
+
         return jnp.concatenate(
             [
                 initial_state[..., None],

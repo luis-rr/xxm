@@ -20,8 +20,9 @@ from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
 )
+from xxm.core.lengths import LengthsLike, LengthsSpec
 
-from .core import Model, Posterior
+from .core import Model, Posterior, Sample
 from .inference import infer_exact
 from .init import (
     DEFAULT_SELF_TRANSITION_PROB,
@@ -158,12 +159,10 @@ class GaussianHMM:
 
         return cls(model)
 
-    def sample(self, key: jax.Array, num_steps: int) -> tuple[jax.Array, jax.Array]:
-        r"""Sample states $z_{0:T-1}$ and observations $y_{0:T-1}$ from the model."""
-        return self._model.sample(
-            key,
-            num_steps,
-        )
+    def sample(self, key: jax.Array, length: LengthsLike) -> Sample:
+        r"""Sample state and observation sequences with requested lengths."""
+        ls = LengthsSpec.from_params(length)
+        return self._model.sample(key, ls=ls)
 
     def infer(
         self,
@@ -297,12 +296,10 @@ class PoissonHMM:
 
         return cls(model)
 
-    def sample(self, key: jax.Array, num_steps: int) -> tuple[jax.Array, jax.Array]:
-        r"""Sample states $z_{0:T-1}$ and observations $y_{0:T-1}$ from the model."""
-        return self._model.sample(
-            key,
-            num_steps,
-        )
+    def sample(self, key: jax.Array, length: LengthsLike) -> Sample:
+        r"""Sample state and observation sequences with requested lengths."""
+        ls = LengthsSpec.from_params(length)
+        return self._model.sample(key, ls=ls)
 
     def infer(
         self,
@@ -366,10 +363,7 @@ class Inferred(typing.Generic[HMMFacadeT]):
 
     def state_probs(self) -> Sequences:
         """State probabilities with the source batch shape and sequence lengths."""
-        return Sequences.from_padded(
-            self.posterior.state_probs,
-            self.data.lengths,
-        )
+        return Sequences.from_padded(self.posterior.state_probs, self.data.lengths)
 
     def observation_mean(self) -> Sequences:
         """Return the posterior mean observation at each time point."""
@@ -379,10 +373,7 @@ class Inferred(typing.Generic[HMMFacadeT]):
             self.posterior,
         )
 
-        return Sequences.from_padded(
-            means,
-            self.data.lengths,
-        )
+        return Sequences.from_padded(means, self.data.lengths)
 
     def permute_states(self, permutation: jax.Array) -> Inferred[HMMFacadeT]:
         """Relabel discrete states by permutation."""
@@ -400,10 +391,7 @@ class Inferred(typing.Generic[HMMFacadeT]):
             keepdims=True,
         )
 
-        return Sequences.from_padded(
-            most_likely,
-            self.data.lengths,
-        )
+        return Sequences.from_padded(most_likely, self.data.lengths)
 
 
 class Fit(typing.NamedTuple, typing.Generic[HMMFacadeT]):

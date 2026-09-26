@@ -8,11 +8,17 @@ import jax
 
 from xxm.core import batch
 from xxm.core.chains.discrete import DiscreteChainMarginals as Posterior
-from xxm.core.data import Dataset
+from xxm.core.data import Dataset, Sequences
 from xxm.core.emissions.discrete import Emissions
 from xxm.core.latents.discrete import CategoricalInitial, CategoricalTransitions
+from xxm.core.lengths import LengthsSpec
 
 EmissionsT = typing.TypeVar('EmissionsT', bound=Emissions)
+
+
+class Sample(typing.NamedTuple):
+    states: Sequences
+    observations: Sequences
 
 
 class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
@@ -81,37 +87,57 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     def sample_states(
         self,
         key: jax.Array,
-        num_steps: int,
-    ) -> jax.Array:
-        """Sample state trajectory $z_{0:T-1}$ from the prior."""
+        ls: LengthsSpec,
+    ) -> Sequences:
+        """Sample padded state trajectories for a batch of requested lengths."""
+
+        model, ls = batch.cartesian_broadcast(self, ls)
+
         key_initial, key_transitions = jax.random.split(key)
 
-        initial_state = self.initial.sample(
+        initial_state = model.initial.sample(
             key_initial,
         )
 
-        return self.transitions.sample(
+        states = model.transitions.sample(
             key_transitions,
             initial_state,
-            num_steps,
+            ls.max_steps,
         )
+
+        states = ls.lengths.clear(states)
+
+        return Sequences.from_padded(states[..., None], ls.lengths)
 
     def sample(
         self,
         key: jax.Array,
-        num_steps: int,
-    ) -> tuple[jax.Array, jax.Array]:
-        r"""Sample complete trajectory $(z_{0:T-1}, y_{0:T-1})$ autonomously."""
+        ls: LengthsSpec,
+    ) -> Sample:
+        r"""Sample padded state and observation trajectories."""
+
         key_states, key_observations = jax.random.split(key)
 
         states = self.sample_states(
             key_states,
-            num_steps,
+            ls,
         )
 
-        observations = self.emissions.sample(key_observations, states)
+        emissions, ls = batch.cartesian_broadcast(self.emissions, ls)
 
-        return states, observations
+        observations = emissions.sample(
+            key_observations,
+            states.values[..., 0],
+        )
+
+        observations = states.lengths.clear(
+            observations,
+        )
+
+        return Sample(
+            states=states,
+            observations=Sequences.from_padded(observations, states.lengths),
+        )
 
     def fit_params(
         self,

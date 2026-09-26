@@ -698,8 +698,13 @@ class GaussianChain(typing.NamedTuple):
 
     def validate(self) -> None:
         """Validate structural lengths at an explicit host boundary."""
-        self.lengths.align_batch(self.batch_shape)
-        self.lengths.validate(max_steps=self.max_steps)
+        batch.require_same_shape(
+            self.batch_shape,
+            self.lower_precision_blocks.shape[:-3],
+            self.information_vectors.shape[:-2],
+            self.log_constant.shape,
+            self.lengths.batch_shape,
+        )
 
     def forward_backward(
         self,
@@ -711,8 +716,6 @@ class GaussianChain(typing.NamedTuple):
         batch_shape = self.batch_shape
         t = self.max_steps
         d = self.variable_dim
-
-        self.lengths.align_batch(batch_shape)
 
         batch.require_same_shape(
             batch_shape,
@@ -775,7 +778,7 @@ class GaussianChain(typing.NamedTuple):
             )
 
         batch_shape = initial_potential.batch_shape
-        lengths.align_batch(batch_shape)
+
         if (
             len(pair_potentials.batch_shape) != len(batch_shape) + 1
             or pair_potentials.batch_shape[:-1] != batch_shape

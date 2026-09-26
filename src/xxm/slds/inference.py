@@ -138,7 +138,9 @@ class DiscreteFactors(typing.NamedTuple):
     def from_model(cls, model: Model[EmissionsT], data: Dataset) -> typing.Self:
         return cls(
             homogeneous_chain(
-                model.state_initial, model.transitions, data.lengths, data.max_steps
+                model.state_initial,
+                model.transitions,
+                data.lengths_spec,
             ),
         )
 

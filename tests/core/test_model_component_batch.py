@@ -29,7 +29,7 @@ from xxm.core.latents.gaussian import (
     StateConditionedGaussian,
 )
 from xxm.core.latents.switching import GaussianLinearSwitchingDynamics
-from xxm.core.lengths import Lengths
+from xxm.core.lengths import Lengths, LengthsSpec
 
 B = (2, 3)
 K, T, D, O, L = 2, 3, 2, 2, 1
@@ -238,7 +238,9 @@ def test_discrete_latent_fit_and_sampling():
     np.testing.assert_array_equal(trajectory[..., 0], states)
     assert bool(jnp.all((trajectory >= 0) & (trajectory < K)))
     assert transitions.sample(jax.random.key(1), states, 1).shape == FIT_B + (1,)
-    chain = homogeneous_chain(initial, transitions, Lengths(jnp.full(FIT_B, T)), T)
+    chain = homogeneous_chain(
+        initial, transitions, LengthsSpec(Lengths(jnp.full(FIT_B, T)), T)
+    )
     assert chain.transition_probs.shape == FIT_B + (T - 1, K, K)
     assert chain.state_log_potentials.shape == FIT_B + (T, K)
 

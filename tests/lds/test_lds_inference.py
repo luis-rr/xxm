@@ -9,7 +9,7 @@ from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
-from xxm.core.lengths import Lengths
+from xxm.core.lengths import Lengths, LengthsSpec
 from xxm.core.optim.laplace import (
     _NewtonSearchModel,
     _NewtonSearchParams,
@@ -152,7 +152,10 @@ def test_laplace_newton_steps_do_not_decrease_objective():
     )
 
     initial_params = _NewtonSearchParams(
-        latents=model.compute_prior_means(num_steps, inputs=data.inputs.get(())),
+        latents=model.compute_prior_means(
+            ls=LengthsSpec.from_params(num_steps),
+            inputs=data.inputs.get(squeeze=False),
+        ).get(squeeze=False),
     )
 
     search = NewtonSearch[_NewtonSearchParams](

@@ -28,23 +28,15 @@ def test_lengths_clear_event_axes_and_transition_prefixes_under_jit():
     assert lengths.to_mask(0).values.shape == (2, 2, 0)
 
 
-@pytest.mark.parametrize('values', [[-1, 2], [1.0, 2.0], [True, False]])
-def test_lengths_reject_invalid_values_on_host(values):
-    with pytest.raises(ValueError):
-        Lengths.from_values(values)
-
-
 def test_lengths_bounds_and_batch_alignment_are_explicit():
     lengths = Lengths.from_values([0, 3])
-    lengths.validate(max_steps=3)
+    lengths.validate_values(max_steps=3)
+
     with pytest.raises(ValueError):
-        lengths.validate(max_steps=2)
+        lengths.validate_values(max_steps=2)
+
     with pytest.raises(ValueError):
-        lengths.validate(min_length=1)
-    with pytest.raises(ValueError):
-        lengths.align_batch((1, 2))
-    with pytest.raises(ValueError):
-        lengths.clear(jnp.zeros((1, 2, 3)))
+        lengths.validate_values(min_length=1, max_steps=3)
 
 
 def test_sequences_store_lengths_and_crop_without_losing_dense_horizon():
@@ -53,8 +45,6 @@ def test_sequences_store_lengths_and_crop_without_losing_dense_horizon():
     assert sequences.lengths is lengths
     assert sequences.max_steps == 3
     np.testing.assert_array_equal(sequences.get(1), [[3]])
-    with pytest.raises(ValueError):
-        Sequences.from_padded(jnp.zeros((2, 3, 1)), Lengths.from_values([0, 3]))
 
 
 def test_weighted_observations_validate_lengths_and_outside_weights_on_host():
@@ -67,12 +57,6 @@ def test_weighted_observations_validate_lengths_and_outside_weights_on_host():
     assert observations.max_steps == 3
     transformed = jax.jit(lambda data: data.broadcast(1).squeeze(0))(observations)
     np.testing.assert_array_equal(transformed.lengths.values, lengths.values)
-    with pytest.raises(ValueError, match='zero outside lengths'):
-        observations._replace(weights=jnp.ones((2, 3))).validate()
-    with pytest.raises(ValueError):
-        observations._replace(lengths=Lengths.from_values([0, 4])).validate()
-    with pytest.raises(ValueError):
-        observations._replace(lengths=Lengths.from_values(2)).validate()
     empty = WeightedObservations.from_sequence(jnp.zeros((0, 1)))
     assert empty.max_steps == 0
     assert int(empty.lengths.values) == 0

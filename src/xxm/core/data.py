@@ -7,14 +7,8 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core import batch
-from xxm.core.lengths import Lengths
+from xxm.core.lengths import FillT, Lengths, LengthsSpec
 from xxm.core.mask import ArbitraryMask
-
-
-def _pad_time(values: jax.Array, max_steps: int) -> jax.Array:
-    """Pad the leading time axis with zeros, preserving event dimensions."""
-    padding = ((0, max_steps - values.shape[0]),) + ((0, 0),) * (values.ndim - 1)
-    return jnp.pad(values, padding)
 
 
 def _require_matching_lengths(values, observations, *, name: str) -> None:
@@ -68,8 +62,9 @@ class WeightedObservations(typing.NamedTuple):
     def validate(self) -> None:
         """Validate weighted-observation shapes and values on the host."""
         self.validate_shapes()
-        self.lengths.validate(max_steps=self.max_steps)
+
         support = self.lengths.to_mask(self.max_steps).values
+
         if bool(jnp.any(~support & (self.weights != 0))):
             raise ValueError('weights must be zero outside lengths')
 
@@ -81,7 +76,7 @@ class WeightedObservations(typing.NamedTuple):
         if self.weights.shape != self.values.shape[:-1]:
             raise ValueError('weights must have shape (*B, T) aligned with values')
 
-        self.lengths.align_batch(self.batch_shape)
+        batch.require_same_shape(self.batch_shape, self.lengths.batch_shape)
 
     @classmethod
     def from_sequence(
@@ -214,7 +209,7 @@ class WeightedObservations(typing.NamedTuple):
 @jax.tree_util.register_pytree_node_class
 @dataclasses.dataclass(frozen=True, eq=False, init=False)
 class Sequences:
-    """Temporal values `(*B, T, D)` with contiguous valid prefixes.
+    """Temporal values `(*B, T, *E)` with contiguous valid prefixes.
 
     Every batch item is one sequence. `lengths` stores valid-prefix lengths;
     padded tails are storage only. `get` retrieves a cropped sequence on the host.
@@ -256,21 +251,43 @@ class Sequences:
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
-        return self.values.shape[:-2]
+        return self.lengths.batch_shape
+
+    @property
+    def time_axis(self) -> int:
+        return len(self.batch_shape)
 
     @property
     def max_steps(self) -> int:
-        return self.values.shape[-2]
+        return self.values.shape[self.time_axis]
+
+    @property
+    def event_shape(self) -> tuple[int, ...]:
+        return self.values.shape[self.time_axis + 1 :]
+
+    @property
+    def lengths_spec(self) -> LengthsSpec:
+        """Number of timesteps."""
+        return LengthsSpec(
+            self.lengths,
+            max_steps=self.max_steps,
+        )
 
     def validate(self) -> None:
-        """Validate shapes and sequence-prefix lengths on the host."""
-        if self.values.ndim < 2:
+        """Validate temporal storage shape."""
+
+        batch_shape = self.lengths.batch_shape
+        batch_ndim = len(batch_shape)
+
+        if self.values.ndim < batch_ndim + 2:
             raise ValueError(
-                f'values must have shape (*B, T, D). Got {self.values.shape}'
+                f'values must have shape (*B, T, *E). Got {self.values.shape}'
             )
 
-        self.lengths.align_batch(self.batch_shape)
-        self.lengths.validate(max_steps=self.max_steps, min_length=1)
+        batch.require_same_shape(
+            self.values.shape[:batch_ndim],
+            batch_shape,
+        )
 
     @classmethod
     def from_sequence(cls, values: jax.Array) -> typing.Self:
@@ -281,7 +298,7 @@ class Sequences:
 
         return cls.from_padded(
             values,
-            Lengths(jnp.asarray(values.shape[0], dtype=jnp.int32)),
+            Lengths.from_values(values.shape[0]),
         )
 
     @classmethod
@@ -293,13 +310,7 @@ class Sequences:
 
         return cls.from_padded(
             values,
-            Lengths(
-                jnp.full(
-                    values.shape[:-2],
-                    values.shape[-2],
-                    dtype=jnp.int32,
-                )
-            ),
+            Lengths.full(values.shape[:-2], values.shape[-2]),
         )
 
     @classmethod
@@ -307,10 +318,11 @@ class Sequences:
         cls,
         values: jax.Array,
         lengths: Lengths,
+        fill: FillT = 0,
     ) -> typing.Self:
-        """Construct explicitly padded temporal values `(*B, T, D)`."""
+        """Construct explicitly padded temporal values `(*B, T, *E)`."""
         return cls(
-            values=values,
+            values=lengths.clear(values, fill=fill),
             lengths=lengths,
         )
 
@@ -335,12 +347,16 @@ class Sequences:
             raise ValueError('sequences must contain at least one item')
 
         batch_shape = sequences[0].batch_shape
-        value_dim = sequences[0].values.shape[-1]
+        event_shape = sequences[0].event_shape
 
         for sequence in sequences:
-            batch.require_same_shape(batch_shape, sequence.batch_shape)
-            if sequence.values.shape[-1] != value_dim:
-                raise ValueError('sequences must share a value dimension')
+            batch.require_same_shape(
+                batch_shape,
+                sequence.batch_shape,
+            )
+
+            if sequence.event_shape != event_shape:
+                raise ValueError('sequences must share an event shape')
 
         _, axis = batch.insertion(
             (len(sequences),),
@@ -351,7 +367,14 @@ class Sequences:
 
         return cls._unchecked(
             values=jnp.stack(
-                [sequence._pad_to_max_steps(max_steps) for sequence in sequences],
+                [
+                    batch.pad_axis(
+                        sequence.values,
+                        max_steps,
+                        axis=len(sequence.batch_shape),
+                    )
+                    for sequence in sequences
+                ],
                 axis=axis,
             ),
             lengths=Lengths(
@@ -360,13 +383,6 @@ class Sequences:
                     axis=axis,
                 )
             ),
-        )
-
-    def _pad_to_max_steps(self, max_steps: int) -> jax.Array:
-        padding = ((0, 0),) * len(self.batch_shape)
-        return jnp.pad(
-            self.values,
-            padding + ((0, max_steps - self.max_steps), (0, 0)),
         )
 
     def select(self, index: batch.SelT) -> typing.Self:
@@ -389,7 +405,12 @@ class Sequences:
         """Move one batch axis to another batch position."""
         return batch.move_axis(self, source, destination)
 
-    def get(self, index: batch.SelT | None = None) -> jax.Array:
+    def get(
+        self,
+        index: batch.SelT | None = None,
+        *,
+        squeeze: bool = True,
+    ) -> jax.Array:
         """Retrieve exactly one unpadded `(T_i, D)` array on the host."""
         if index is None:
             selected = self
@@ -399,7 +420,12 @@ class Sequences:
         if selected.batch_shape:
             raise ValueError('get requires selecting exactly one batch item')
 
-        return selected.values[: int(selected.lengths.values)]
+        result = selected.values[: int(selected.lengths.values)]
+
+        if squeeze:
+            result = jnp.squeeze(result)
+
+        return result
 
     def unpack(self) -> tuple[jax.Array, ...]:
         """Crop an unbatched sequence or flat collection on the host."""
@@ -465,6 +491,11 @@ class Dataset:
         return self.observations.lengths
 
     @property
+    def lengths_spec(self) -> LengthsSpec:
+        """Observation/input valid-prefix lengths `(*B,)`."""
+        return LengthsSpec(self.observations.lengths, self.max_steps)
+
+    @property
     def max_steps(self) -> int:
         return self.observations.max_steps
 
@@ -504,7 +535,7 @@ class Dataset:
             raise ValueError('observations and inputs must share their batch shape')
         if self.max_steps != self.inputs.max_steps:
             raise ValueError('observations and inputs must share their time dimension')
-        if not bool(jnp.all(self.lengths.values == self.inputs.lengths.values)):
+        if not jnp.array_equal(self.lengths.values, self.inputs.lengths.values):
             raise ValueError('observations and inputs must share their lengths')
 
         if self.visible.batch_shape != self.batch_shape:
@@ -594,7 +625,10 @@ class Dataset:
                 name='visible',
             )
             padded_visible = jnp.stack(
-                [_pad_time(values, sequences.max_steps) for values in visible],
+                [
+                    batch.pad_axis(values, sequences.max_steps, axis=0)
+                    for values in visible
+                ],
             )
 
         return cls.from_padded(
@@ -614,10 +648,7 @@ class Dataset:
         visible: jax.Array | ArbitraryMask | None = None,
     ) -> typing.Self:
         """Construct explicitly padded trajectories `(*B, T, D_y)`."""
-        observation_sequences = Sequences.from_padded(
-            observations,
-            lengths,
-        )
+        observation_sequences = Sequences.from_padded(observations, lengths)
 
         if inputs is None:
             inputs = jnp.empty(
@@ -625,10 +656,7 @@ class Dataset:
                 dtype=observation_sequences.values.dtype,
             )
 
-        input_sequences = Sequences.from_padded(
-            inputs,
-            observation_sequences.lengths,
-        )
+        input_sequences = Sequences.from_padded(inputs, observation_sequences.lengths)
 
         if visible is None:
             visibility = observation_sequences.lengths.to_mask(
