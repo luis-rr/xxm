@@ -251,7 +251,7 @@ class GaussianARHMM:
         initial_history: jax.Array | None = None,
     ) -> Sample:
 
-        ls = LengthsSpec.from_params(lengths)
+        ls = LengthsSpec.from_params(lengths, min_length=1)
 
         if initial_history is None:
             return self._model.sample(key, ls)
@@ -486,7 +486,7 @@ class PoissonARHMM:
         initial_history: jax.Array | None = None,
     ) -> Sample:
 
-        ls = LengthsSpec.from_params(lengths)
+        ls = LengthsSpec.from_params(lengths, min_length=1)
 
         if initial_history is None:
             return self._model.sample(key, ls)
@@ -614,7 +614,6 @@ class Inferred(typing.Generic[ARHMMFacadeT]):
         most_likely = jnp.argmax(
             self.posterior.state_probs,
             axis=-1,
-            keepdims=True,
         )
 
         return Sequences.from_padded(

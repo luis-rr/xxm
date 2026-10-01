@@ -136,6 +136,7 @@ class GaussianRandomWalk(typing.NamedTuple):
 
         max_steps = ls.max_steps
         batch_shape = self.batch_shape
+        batch.require_same_shape(batch_shape, ls.batch_shape)
         variable_dim = self.variable_dim
 
         if max_steps == 0:
@@ -390,7 +391,8 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
         self,
         key: jax.Array,
         ls: LengthsSpec,
-        gates: jax.Array,
+        *,
+        gates: Sequences,
     ) -> Sequences:
         """Sample gated random-walk values with the requested padded layout."""
         max_steps = ls.max_steps
@@ -400,11 +402,10 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
         num_gates = self.num_gates
         variable_dim = self.variable_dim
 
-        if gates.shape != batch_shape + (transition_steps,):
+        batch.require_same_shape(batch_shape, ls.batch_shape, gates.batch_shape)
+        if gates.event_shape != () or gates.max_steps != transition_steps:
             raise ValueError(
-                f'gates must have shape '
-                f'{batch_shape + (transition_steps,)}, '
-                f'got {gates.shape}'
+                'gates must be scalar events on the walk transition timeline'
             )
 
         if max_steps == 0:
@@ -427,7 +428,7 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
                     (1,) * len(batch_shape) + (num_gates, 1)
                 )
 
-                active = gates[..., None, :] == gate_indices
+                active = gates.values[..., None, :] == gate_indices
 
                 innovation = Gaussian(
                     mean=jnp.where(

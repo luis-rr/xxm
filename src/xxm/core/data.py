@@ -214,8 +214,7 @@ class Sequences:
     Every batch item is one sequence. `lengths` stores valid-prefix lengths;
     padded tails are storage only. `get` retrieves a cropped sequence on the host.
 
-    Public construction normalizes arrays and validates lengths on the host.
-    Batch transformations and PyTree reconstruction bypass host validation.
+    Construction normalizes arrays and validates static storage shape only.
     """
 
     values: jax.Array
@@ -265,13 +264,26 @@ class Sequences:
     def event_shape(self) -> tuple[int, ...]:
         return self.values.shape[self.time_axis + 1 :]
 
+    def select_time(self, *, start: int, stop: int | None = None) -> typing.Self:
+        """Slice stored time, retaining batch/event axes and valid-prefix lengths.
+
+        Bounds follow ordinary slicing of the dense horizon.
+        """
+        start, stop, _ = slice(start, stop).indices(self.max_steps)
+
+        extent = jnp.clip(self.lengths.values - start, 0, max(stop - start, 0))
+        lengths = Lengths(extent)
+        selection = (slice(None),) * self.time_axis + (slice(start, stop),)
+        return type(self).from_padded(self.values[selection], lengths)
+
+    def time_major(self) -> jax.Array:
+        """Return values with layout `(T, *B, *E)` for temporal kernels."""
+        return jnp.moveaxis(self.values, self.time_axis, 0)
+
     @property
     def lengths_spec(self) -> LengthsSpec:
         """Number of timesteps."""
-        return LengthsSpec(
-            self.lengths,
-            max_steps=self.max_steps,
-        )
+        return LengthsSpec(self.lengths, max_steps=self.max_steps)
 
     def validate(self) -> None:
         """Validate temporal storage shape."""
@@ -279,7 +291,7 @@ class Sequences:
         batch_shape = self.lengths.batch_shape
         batch_ndim = len(batch_shape)
 
-        if self.values.ndim < batch_ndim + 2:
+        if self.values.ndim < batch_ndim + 1:
             raise ValueError(
                 f'values must have shape (*B, T, *E). Got {self.values.shape}'
             )
@@ -291,26 +303,14 @@ class Sequences:
 
     @classmethod
     def from_sequence(cls, values: jax.Array) -> typing.Self:
-        """Construct one unbatched sequence `(T, D)`."""
+        """Construct one unbatched sequence `(T, *E)`."""
         values = jnp.asarray(values)
-        if values.ndim != 2:
-            raise ValueError(f'values must have shape (T, D). Got {values.shape}')
+        if values.ndim < 1:
+            raise ValueError(f'values must have shape (T, *E). Got {values.shape}')
 
         return cls.from_padded(
             values,
-            Lengths.from_values(values.shape[0]),
-        )
-
-    @classmethod
-    def from_batch(cls, values: jax.Array) -> typing.Self:
-        """Construct equal-length temporal values `(*B, T, D)`."""
-        values = jnp.asarray(values)
-        if values.ndim < 2:
-            raise ValueError(f'values must have shape (*B, T, D). Got {values.shape}')
-
-        return cls.from_padded(
-            values,
-            Lengths.full(values.shape[:-2], values.shape[-2]),
+            Lengths(jnp.asarray(values.shape[0], dtype=jnp.int32)),
         )
 
     @classmethod
@@ -331,7 +331,7 @@ class Sequences:
         cls,
         values: typing.Sequence[jax.Array],
     ) -> typing.Self:
-        """Pad a flat collection of `(T_i, D)` arrays to a common time size."""
+        """Pad a flat collection of `(T_i, *E)` arrays to a common time size."""
         sequences = tuple(cls.from_sequence(value) for value in values)
         return cls.stack(sequences)
 
@@ -411,7 +411,7 @@ class Sequences:
         *,
         squeeze: bool = True,
     ) -> jax.Array:
-        """Retrieve exactly one unpadded `(T_i, D)` array on the host."""
+        """Retrieve exactly one unpadded `(T_i, *E)` array on the host."""
         if index is None:
             selected = self
         else:
@@ -531,6 +531,10 @@ class Dataset:
         """Validate temporal structure and public data policies on the host."""
         self.observations.validate()
         self.inputs.validate()
+        if len(self.observations.event_shape) != 1:
+            raise ValueError('observations must have shape (*B, T, D_y)')
+        if len(self.inputs.event_shape) != 1:
+            raise ValueError('inputs must have shape (*B, T, D_u)')
         if self.batch_shape != self.inputs.batch_shape:
             raise ValueError('observations and inputs must share their batch shape')
         if self.max_steps != self.inputs.max_steps:
@@ -567,23 +571,6 @@ class Dataset:
         return cls.from_padded(
             sequence.values,
             sequence.lengths,
-            inputs=inputs,
-            visible=visible,
-        )
-
-    @classmethod
-    def from_batch(
-        cls,
-        observations: jax.Array,
-        *,
-        inputs: jax.Array | None = None,
-        visible: jax.Array | ArbitraryMask | None = None,
-    ) -> typing.Self:
-        """Construct equal-length trajectories with arbitrary batch shape."""
-        sequences = Sequences.from_batch(observations)
-        return cls.from_padded(
-            sequences.values,
-            sequences.lengths,
             inputs=inputs,
             visible=visible,
         )

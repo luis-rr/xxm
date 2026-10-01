@@ -93,18 +93,21 @@ def _sampling_inputs(
     model: Model,
     ls: LengthsSpec,
     inputs: jax.Array | None,
-) -> jax.Array:
+) -> Sequences:
 
     if inputs is not None:
-        return jnp.asarray(inputs)
-
-    if model.dynamics.input_dim != 0:
-        raise ValueError('controlled SLDS sampling requires explicit inputs')
-
-    return jnp.empty(
-        (*ls.batch_shape, ls.max_steps, 0),
-        dtype=model.dynamics.dist.affine.bias.dtype,
-    )
+        values = jnp.asarray(inputs)
+    else:
+        if model.dynamics.input_dim != 0:
+            raise ValueError('controlled SLDS sampling requires explicit inputs')
+        values = jnp.empty(
+            (*ls.batch_shape, ls.max_steps, 0),
+            dtype=model.dynamics.dist.affine.bias.dtype,
+        )
+    expected = (*ls.batch_shape, ls.max_steps, model.dynamics.input_dim)
+    if values.shape != expected:
+        raise ValueError(f'inputs must have shape {expected}; got {values.shape}')
+    return Sequences.from_padded(values, ls.lengths)
 
 
 def _conditioned_dynamics(model: Model, inputs: jax.Array | None) -> LinearGaussian:
@@ -312,11 +315,10 @@ class GaussianSLDS:
     ) -> Sample:
         r"""Sample discrete states, continuous latents, and observations."""
 
-        ls = LengthsSpec.from_params(lengths)
+        ls = LengthsSpec.from_params(lengths, min_length=1)
 
         return self._model.sample(
             key,
-            ls,
             inputs=_sampling_inputs(self._model, ls, inputs),
         )
 
@@ -567,11 +569,10 @@ class PoissonSLDS:
     ) -> Sample:
         r"""Sample discrete states, continuous latents, and observations."""
 
-        ls = LengthsSpec.from_params(lengths)
+        ls = LengthsSpec.from_params(lengths, min_length=1)
 
         return self._model.sample(
             key,
-            ls,
             inputs=_sampling_inputs(self._model, ls, inputs),
         )
 
@@ -687,7 +688,6 @@ class Inferred(typing.Generic[SLDSFacadeT]):
         states = jnp.argmax(
             self.posterior.discrete.state_probs,
             axis=-1,
-            keepdims=True,
         )
 
         return Sequences.from_padded(

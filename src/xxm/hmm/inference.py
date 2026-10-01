@@ -5,29 +5,18 @@ Exact inference for Hidden Markov Models.
 import jax.numpy as jnp
 
 from xxm.core import batch
-from xxm.core.chains.discrete import DiscreteChain as Chain
 from xxm.core.data import Dataset
 from xxm.core.inference import InferenceState
 from xxm.core.latents.discrete import homogeneous_chain
-from xxm.core.lengths import LengthsSpec
 
 from .core import Model, Posterior
-
-
-def to_chain(
-    model: Model,
-    ls: LengthsSpec,
-) -> Chain:
-    """Construct discrete chain from model structure and time horizon."""
-
-    return homogeneous_chain(model.initial, model.transitions, ls)
 
 
 def infer_exact(
     model: Model,
     data: Dataset,
 ) -> InferenceState[Model, Posterior]:
-    """Infer the model × data Cartesian batch and sum only data objectives."""
+    """Infer the model x data Cartesian batch and sum only data objectives."""
     if data.input_dim != 0:
         raise ValueError('stationary HMMs require data.input_dim == 0')
 
@@ -37,8 +26,9 @@ def infer_exact(
         working_data.weighted_observations(),
     )
 
-    latent_chain = to_chain(
-        working_model,
+    latent_chain = homogeneous_chain(
+        working_model.initial,
+        working_model.transitions,
         ls=working_data.lengths_spec,
     )
 

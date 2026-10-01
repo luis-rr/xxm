@@ -215,7 +215,7 @@ def test_concatenate_and_split_preserve_lengths_and_singleton_axes_under_jit():
 
 
 def test_concatenate_rejects_batch_and_intrinsic_mismatches_without_padding():
-    sequences = Sequences.from_batch(jnp.zeros((2, 3, 1)))
+    sequences = Sequences.from_padded(jnp.zeros((2, 3, 1)), Lengths.full((2,), 3))
     with pytest.raises(ValueError):
         batch.concatenate([])
     with pytest.raises(ValueError):
@@ -225,7 +225,12 @@ def test_concatenate_rejects_batch_and_intrinsic_mismatches_without_padding():
     with pytest.raises(ValueError):
         batch.concatenate([sequences, Lengths(jnp.ones(2, dtype=int))])
     with pytest.raises(ValueError, match='intrinsic'):
-        batch.concatenate([sequences, Sequences.from_batch(jnp.zeros((1, 4, 1)))])
+        batch.concatenate(
+            [
+                sequences,
+                Sequences.from_padded(jnp.zeros((1, 4, 1)), Lengths.full((1,), 4)),
+            ]
+        )
     with pytest.raises(ValueError):
         batch.concatenate([_gaussian(), _gaussian().select((slice(None), slice(1)))])
 

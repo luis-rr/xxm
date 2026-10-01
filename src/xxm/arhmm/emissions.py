@@ -22,6 +22,7 @@ import jax.numpy as jnp
 
 from xxm.core import batch
 from xxm.core.chains.discrete import DiscretePotential
+from xxm.core.data import Sequences
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
 from xxm.core.optim import gaussian as gaussian_fit
@@ -313,19 +314,25 @@ class AREmissions(
     def sample_continuation(
         self,
         key: jax.Array,
-        states: jax.Array,
+        states: Sequences,
         initial_history: jax.Array,
-    ) -> jax.Array:
+    ) -> Sequences:
         """
         Sample a continuation conditional on an explicit observation history.
 
         `initial_history` has shape $(*B,L,D_y)$ and is chronological, from
         oldest to most recent. Only newly generated observations are returned.
         """
+        batch.require_same_shape(self.batch_shape, states.batch_shape)
+
+        if states.event_shape != ():
+            raise ValueError('states must have scalar events')
+
         expected_history_shape = self.batch_shape + (
             self.num_lags,
             self.observation_dim,
         )
+
         if initial_history.shape != expected_history_shape:
             raise ValueError(
                 'initial_history must have shape '
@@ -363,16 +370,16 @@ class AREmissions(
         _, observations = jax.lax.scan(
             step,
             (history, key),
-            jnp.moveaxis(states, -1, 0),
+            states.time_major(),
         )
 
-        return jnp.moveaxis(observations, 0, -2)
+        return Sequences.from_padded(jnp.moveaxis(observations, 0, -2), states.lengths)
 
     def sample(
         self,
         key: jax.Array,
-        states: jax.Array,
-    ) -> jax.Array:
+        states: Sequences,
+    ) -> Sequences:
         """
         Sample observations autonomously from a zero prehistory.
 

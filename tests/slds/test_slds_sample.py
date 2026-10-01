@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from xxm.core.affine import Affine
+from xxm.core.data import Sequences
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.emissions.continuous import GaussianEmissions
@@ -33,11 +34,11 @@ def test_categorical_transitions_sample_includes_initial():
     states = transitions.sample(
         jax.random.key(0),
         initial_state=jnp.array(0),
-        max_steps=4,
+        ls=LengthsSpec.from_params(4),
     )
 
     np.testing.assert_array_equal(
-        states,
+        states.values,
         jnp.array([0, 1, 1, 1]),
     )
 
@@ -125,24 +126,25 @@ def test_switching_dynamics_sample_includes_initial():
     dynamics = _make_model().dynamics
 
     initial_latent = jnp.array([2.0])
-    states = jnp.array([0, 1, 1])
+    states = Sequences.from_sequence(jnp.array([0, 0, 1, 1]))
 
     latents = dynamics.sample(
         jax.random.key(0),
         initial_latent,
         states,
-        inputs=jnp.empty((3, 0)),
+        inputs=Sequences.from_sequence(jnp.empty((4, 0))),
     )
 
-    assert latents.shape == (4, 1)
+    assert latents.values.shape == (4, 1)
+    np.testing.assert_array_equal(latents.lengths.values, states.lengths.values)
 
     np.testing.assert_array_equal(
-        latents[0],
+        latents.values[0],
         initial_latent,
     )
 
     np.testing.assert_allclose(
-        latents[1:, 0],
+        latents.values[1:, 0],
         jnp.array([10.0, -10.0, -10.0]),
         atol=1e-3,
     )
@@ -153,8 +155,7 @@ def test_sample():
 
     states, latents, observations = model.sample(
         jax.random.key(0),
-        ls=LengthsSpec.from_params(4),
-        inputs=jnp.empty((4, 0)),
+        inputs=Sequences.from_sequence(jnp.empty((4, 0))),
     )
     states = states.get()
     latents = latents.get(squeeze=False)
@@ -188,11 +189,11 @@ def test_sample_jittable():
     model = _make_model()
     key = jax.random.key(0)
 
-    ls = LengthsSpec.from_params(4)
+    inputs = Sequences.from_sequence(jnp.empty((4, 0)))
 
-    eager = model.sample(key, ls=ls, inputs=jnp.empty((4, 0)))
+    eager = model.sample(key, inputs=inputs)
 
-    jitted = jax.jit(model.sample)(key, ls=ls, inputs=jnp.empty((4, 0)))
+    jitted = jax.jit(model.sample)(key, inputs=inputs)
 
     for eager_value, jitted_value in zip(
         eager,
@@ -202,4 +203,7 @@ def test_sample_jittable():
         np.testing.assert_allclose(
             jitted_value.get(),
             eager_value.get(),
+        )
+        np.testing.assert_array_equal(
+            jitted_value.lengths.values, eager_value.lengths.values
         )

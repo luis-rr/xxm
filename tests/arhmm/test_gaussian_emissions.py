@@ -6,6 +6,7 @@ from xxm.arhmm.data import ARDataset, lagged_observations
 from xxm.arhmm.emissions import AREmissions
 from xxm.core.affine import Affine
 from xxm.core.chains.discrete import DiscreteChainMarginals
+from xxm.core.data import Sequences
 from xxm.core.dists.gaussian import LinearGaussian
 from xxm.core.lengths import Lengths
 
@@ -320,10 +321,11 @@ def test_ar_gaussian_sample_follows_ar_recurrence():
         covariances=jnp.array([[[0.25]]]),
     )
 
-    states = jnp.zeros(4, dtype=int)
+    states = Sequences.from_sequence(jnp.zeros(4, dtype=int))
     key = jax.random.key(0)
 
     observations = emissions.sample(key, states)
+    np.testing.assert_array_equal(observations.lengths.values, states.lengths.values)
 
     # Reconstruct the expected samples explicitly from the same
     # innovations and the AR recurrence, starting from zero history.
@@ -332,7 +334,7 @@ def test_ar_gaussian_sample_follows_ar_recurrence():
     history = jnp.array([0.0])
     scan_key = key
 
-    for _ in range(states.shape[0]):
+    for _ in range(states.max_steps):
         scan_key, observation_key = jax.random.split(scan_key)
 
         mean = 0.5 * history + 1.0
@@ -349,7 +351,7 @@ def test_ar_gaussian_sample_follows_ar_recurrence():
     expected = jnp.stack(expected)
 
     np.testing.assert_allclose(
-        observations,
+        observations.values,
         expected,
         atol=ATOL,
     )
@@ -395,7 +397,7 @@ def test_ar_gaussian_methods_are_jittable():
         ),
     )
 
-    states = jnp.zeros(5, dtype=int)
+    states = Sequences.from_sequence(jnp.zeros(5, dtype=int))
     key = jax.random.key(0)
     data = ARDataset.from_sequence(observations, emissions.num_lags)
 
@@ -463,11 +465,11 @@ def test_ar_gaussian_methods_are_jittable():
             emissions,
             key,
             states,
-        ),
+        ).values,
         emissions.sample(
             key,
             states,
-        ),
+        ).values,
         atol=ATOL,
     )
 
@@ -488,7 +490,7 @@ def test_ar_gaussian_sample_uses_zero_history():
         covariances=jnp.array([[[0.5]]]),
     )
 
-    states = jnp.zeros(5, dtype=int)
+    states = Sequences.from_sequence(jnp.zeros(5, dtype=int))
     key = jax.random.key(0)
 
     initial_history = jnp.zeros(
@@ -510,7 +512,9 @@ def test_ar_gaussian_sample_uses_zero_history():
     )
 
     np.testing.assert_allclose(
-        autonomous,
-        continuation,
+        autonomous.values,
+        continuation.values,
         atol=ATOL,
     )
+    np.testing.assert_array_equal(autonomous.lengths.values, states.lengths.values)
+    np.testing.assert_array_equal(continuation.lengths.values, states.lengths.values)

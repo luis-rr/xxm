@@ -3,8 +3,8 @@ import numpy as np
 import pytest
 from jax import numpy as jnp
 
+from xxm.core.data import Sequences
 from xxm.core.latents.gaussian import GaussianLinearDynamics
-from xxm.core.lengths import LengthsSpec
 from xxm.lds.model import GaussianLDS, PoissonLDS
 
 from .lds_helpers import make_model
@@ -22,8 +22,7 @@ def test_prior_mean_starts_at_initial_mean():
     model = make_model()
 
     means = model.compute_prior_means(
-        ls=LengthsSpec.from_params(3),
-        inputs=jnp.empty((3, 0)),
+        inputs=Sequences.from_sequence(jnp.empty((3, 0))),
     )
     means = means.get()
 
@@ -35,9 +34,8 @@ def test_sample_returns_one_latent_and_observation_per_time_step():
     model = make_model()
 
     latents, observations = model.sample(
-        ls=LengthsSpec.from_params(4),
         key=jax.random.key(0),
-        inputs=jnp.empty((4, 0)),
+        inputs=Sequences.from_sequence(jnp.empty((4, 0))),
     )
     latents = latents.get()
     observations = observations.get()

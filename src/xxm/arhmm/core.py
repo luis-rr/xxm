@@ -104,10 +104,7 @@ class Model(
         ls: LengthsSpec,
     ) -> Sequences:
 
-        model, lengths = batch.cartesian_broadcast(
-            self,
-            ls,
-        )
+        model, lengths = batch.cartesian_broadcast(self, ls)
 
         key_initial, key_transitions = jax.random.split(key)
 
@@ -115,15 +112,10 @@ class Model(
             key_initial,
         )
 
-        states = model.transitions.sample(
+        return model.transitions.sample(
             key_transitions,
             initial_state,
-            lengths.max_steps,
-        )
-
-        return Sequences.from_padded(
-            states[..., None],
-            ls.lengths,
+            lengths,
         )
 
     def sample(
@@ -141,12 +133,7 @@ class Model(
 
         emissions, ls = batch.cartesian_broadcast(self.emissions, ls)
 
-        observations = emissions.sample(
-            key_observations,
-            states.values[..., 0],
-        )
-
-        observations = Sequences.from_padded(observations, states.lengths)
+        observations = emissions.sample(key_observations, states)
 
         return Sample(
             states=states,
@@ -177,11 +164,9 @@ class Model(
 
         observations = emissions.sample_continuation(
             key_observations,
-            states.values[..., 0],
+            states,
             initial_history,
         )
-
-        observations = Sequences.from_padded(observations, states.lengths)
 
         return Sample(
             states=states,

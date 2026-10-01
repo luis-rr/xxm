@@ -47,6 +47,44 @@ def test_sequences_store_lengths_and_crop_without_losing_dense_horizon():
     np.testing.assert_array_equal(sequences.get(1), [[3]])
 
 
+def test_sequences_allow_scalar_events_and_empty_time():
+    scalar = Sequences.from_sequence(jnp.arange(2))
+    assert (scalar.batch_shape, scalar.event_shape, scalar.max_steps) == ((), (), 2)
+    stacked = Sequences.stack(
+        [scalar, Sequences.from_sequence(jnp.empty((0,), dtype=int))]
+    )
+    assert stacked.values.shape == (2, 2)
+    np.testing.assert_array_equal(stacked.lengths.values, [2, 0])
+    np.testing.assert_array_equal(stacked.values, [[0, 1], [0, 0]])
+
+    vectors = Sequences.from_sequences([jnp.empty((0, 1)), jnp.ones((2, 1))])
+    assert vectors.values.shape == (2, 2, 1)
+    assert vectors.event_shape == (1,)
+    np.testing.assert_array_equal(vectors.lengths.values, [0, 2])
+    empty = Sequences.from_padded(jnp.empty((2, 0, 1)), Lengths.full((2,), 0))
+    assert empty.max_steps == 0
+    assert empty.event_shape == (1,)
+
+
+def test_select_time_preserves_heterogeneous_prefixes_and_scalar_events():
+    sequences = Sequences.from_padded(
+        jnp.arange(12).reshape(3, 4), Lengths.from_values([4, 2, 1])
+    )
+    transitions = sequences.select_time(start=1)
+    assert transitions.event_shape == ()
+    np.testing.assert_array_equal(transitions.lengths.values, [3, 1, 0])
+    np.testing.assert_array_equal(
+        transitions.time_major(), [[1, 5, 0], [2, 0, 0], [3, 0, 0]]
+    )
+
+    bounded = sequences.select_time(start=-3, stop=3)
+    np.testing.assert_array_equal(bounded.lengths.values, [2, 1, 0])
+    np.testing.assert_array_equal(bounded.values, transitions.values[:, :2])
+    empty = sequences.select_time(start=4)
+    assert empty.time_major().shape == (0, 3)
+    np.testing.assert_array_equal(empty.lengths.values, [0, 0, 0])
+
+
 def test_weighted_observations_validate_lengths_and_outside_weights_on_host():
     lengths = Lengths.from_values([0, 2])
     values = jnp.ones((2, 3, 1))

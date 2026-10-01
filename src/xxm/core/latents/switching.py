@@ -10,6 +10,7 @@ from xxm.core.affine import Affine
 from xxm.core.chains.gaussian import (
     GaussianPairPotential,
 )
+from xxm.core.data import Sequences
 from xxm.core.dists.gaussian import LinearGaussian
 from xxm.core.latents.gaussian import GaussianLinearDynamics
 from xxm.core.optim import gaussian as gaussian_fit
@@ -182,7 +183,11 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         )
 
     def sample_next(
-        self, key: jax.Array, previous: jax.Array, state: jax.Array, inputs: jax.Array
+        self,
+        key: jax.Array,
+        previous: jax.Array,
+        state: jax.Array,
+        inputs: jax.Array,
     ) -> jax.Array:
         """Sample the next latent using the state being entered."""
         dynamics = self.conditional(inputs)
@@ -193,15 +198,20 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         self,
         key: jax.Array,
         initial_latent: jax.Array,
-        states: jax.Array,
+        states: Sequences,
         *,
-        inputs: jax.Array,
-    ) -> jax.Array:
-        """Sample from transition-aligned states and inputs, including the start."""
-        if states.shape[:-1] != self.batch_shape:
-            raise ValueError('states must have shape (*B, T - 1)')
-        if inputs.shape != (*states.shape, self.input_dim):
-            raise ValueError('inputs must have shape (*B, T - 1, D_u)')
+        inputs: Sequences,
+    ) -> Sequences:
+        """Sample latents on the state timeline; boundary input zero is unused."""
+        batch.require_same_shape(
+            self.batch_shape, states.batch_shape, inputs.batch_shape
+        )
+        if states.event_shape != ():
+            raise ValueError('states must have scalar events')
+        if inputs.event_shape != (self.input_dim,):
+            raise ValueError('inputs must have event shape (input_dim,)')
+        if states.max_steps != inputs.max_steps or states.max_steps < 1:
+            raise ValueError('states and inputs must share a nonempty time dimension')
         if initial_latent.shape != (*self.batch_shape, self.latent_dim):
             raise ValueError(
                 'initial_latent must match dynamics batch and latent dimension'
@@ -225,17 +235,21 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         _, subsequent_latents = jax.lax.scan(
             step,
             (initial_latent, key),
-            (jnp.moveaxis(states, -1, 0), jnp.moveaxis(inputs, -2, 0)),
+            (
+                states.select_time(start=1).time_major(),
+                inputs.select_time(start=1).time_major(),
+            ),
         )
 
         subsequent_latents = jnp.moveaxis(subsequent_latents, 0, -2)
-        return jnp.concatenate(
+        values = jnp.concatenate(
             [
                 initial_latent[..., None, :],
                 subsequent_latents,
             ],
             axis=-2,
         )
+        return Sequences.from_padded(values, states.lengths)
 
     def permute_states(self, permutation: jax.Array) -> typing.Self:
         """

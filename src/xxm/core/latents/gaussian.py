@@ -8,6 +8,7 @@ from jax import numpy as jnp
 from xxm.core import batch
 from xxm.core.affine import Affine
 from xxm.core.chains.gaussian import GaussianPairPotential, GaussianPotential
+from xxm.core.data import Sequences
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian, PairedGaussian
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim.batch import filter_valid_batches
@@ -371,42 +372,30 @@ class GaussianLinearDynamics(typing.NamedTuple):
 
     def validate_trajectory_inputs(
         self,
-        inputs: jax.Array,
-        max_steps: int,
-    ) -> None:
+        inputs: Sequences,
+    ):
         """Require full trajectory inputs `(*B, T, D_u)` with at least one step.
 
         The boundary input at time zero is included but unused by dynamics.
         """
-        if max_steps < 1:
+        if inputs.max_steps < 1:
             raise ValueError('trajectories require at least one time step')
 
-        expected_shape = (
-            *self.batch_shape,
-            max_steps,
-            self.input_dim,
-        )
-
-        if inputs.shape != expected_shape:
-            raise ValueError(
-                f'inputs must have shape {expected_shape}; got {inputs.shape}'
-            )
+        batch.require_same_shape(self.batch_shape, inputs.batch_shape)
+        if inputs.event_shape != (self.input_dim,):
+            raise ValueError('inputs must have event shape (input_dim,)')
 
     def mean_trajectory(
         self,
         initial_mean: jax.Array,
-        max_steps: int,
         *,
-        inputs: jax.Array,
-    ) -> jax.Array:
+        inputs: Sequences,
+    ) -> Sequences:
         """Roll out transition means, including the initial mean at time zero.
 
         Inputs have shape `(*B, T, D_u)`; the input at time zero is unused.
         """
-        self.validate_trajectory_inputs(
-            inputs,
-            max_steps,
-        )
+        self.validate_trajectory_inputs(inputs)
 
         batch_shape = self.batch_shape
 
@@ -417,11 +406,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
 
         time_axis = len(batch_shape)
 
-        transition_inputs = jnp.moveaxis(
-            inputs[..., 1:, :],
-            time_axis,
-            0,
-        )
+        transition_inputs = inputs.select_time(start=1).time_major()
 
         def step(
             previous: jax.Array,
@@ -445,7 +430,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
             time_axis,
         )
 
-        return jnp.concatenate(
+        values = jnp.concatenate(
             [
                 jnp.expand_dims(
                     initial_mean,
@@ -455,6 +440,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
             ],
             axis=time_axis,
         )
+        return Sequences.from_padded(values, inputs.lengths)
 
     def sample_next(
         self,
@@ -480,32 +466,26 @@ class GaussianLinearDynamics(typing.NamedTuple):
         self,
         key: jax.Array,
         initial_latent: jax.Array,
-        max_steps: int,
         *,
-        inputs: jax.Array,
-    ) -> jax.Array:
+        inputs: Sequences,
+    ) -> Sequences:
         """
         Sample latent trajectories with shape `(*B, T, D_x)`.
 
-        `inputs[..., t, :]` affects the transition into latent state `t`;
-        `inputs[..., 0, :]` is unused.
+        `inputs.values[..., t, :]` affects the transition into latent state `t`;
+        `inputs.values[..., 0, :]` is unused.
         """
-        self.validate_trajectory_inputs(
-            inputs,
-            max_steps,
-        )
+        self.validate_trajectory_inputs(inputs)
+        if initial_latent.shape != (*self.batch_shape, self.latent_dim):
+            raise ValueError('initial_latent must match dynamics batch and latent dim')
 
         time_axis = len(self.batch_shape)
 
-        transition_inputs = jnp.moveaxis(
-            inputs[..., 1:, :],
-            time_axis,
-            0,
-        )
+        transition_inputs = inputs.select_time(start=1).time_major()
 
         keys = jax.random.split(
             key,
-            max_steps - 1,
+            inputs.max_steps - 1,
         )
 
         def step(previous, args):
@@ -534,7 +514,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
             time_axis,
         )
 
-        return jnp.concatenate(
+        samples = jnp.concatenate(
             [
                 jnp.expand_dims(
                     initial_latent,
@@ -543,6 +523,11 @@ class GaussianLinearDynamics(typing.NamedTuple):
                 following,
             ],
             axis=time_axis,
+        )
+
+        return Sequences.from_padded(
+            samples,
+            inputs.lengths,
         )
 
     def align(self, alignment: Affine) -> typing.Self:

@@ -13,7 +13,6 @@ from xxm.core.chains.gaussian import GaussianChainMarginals as Posterior
 from xxm.core.data import Dataset, Sequences
 from xxm.core.emissions.continuous import EmissionsT
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
-from xxm.core.lengths import LengthsSpec
 
 
 class Sample(typing.NamedTuple):
@@ -71,21 +70,12 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     def sample(
         self,
         key: jax.Array,
-        ls: LengthsSpec,
         *,
-        inputs: jax.Array,
+        inputs: Sequences,
     ) -> Sample:
         """Sample latent and observation trajectories."""
 
-        model_batch_shape = self.batch_shape
-
-        model, ls = batch.cartesian_broadcast(self, ls)
-
-        inputs = batch.broadcast_array(
-            inputs,
-            model_batch_shape,
-            axis=0,
-        )
+        model, inputs = batch.cartesian_broadcast(self, inputs)
 
         key_initial, key_latents, key_observations = jax.random.split(
             key,
@@ -99,18 +89,13 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         latents = model.dynamics.sample(
             key_latents,
             initial_latent,
-            ls.max_steps,
             inputs=inputs,
         )
 
-        latents = Sequences.from_padded(ls.lengths.clear(latents), ls.lengths)
-
         observations = model.emissions.sample(
             key_observations,
-            latents.values,
+            latents,
         )
-
-        observations = Sequences.from_padded(observations, ls.lengths)
 
         return Sample(
             latents=latents,
@@ -119,29 +104,17 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
     def compute_prior_means(
         self,
-        ls: LengthsSpec,
         *,
-        inputs: jax.Array,
+        inputs: Sequences,
     ) -> Sequences:
         r"""Compute prior latent means $\mathbb{E}[x_t]$."""
 
-        model_batch_shape = self.batch_shape
+        model, inputs = batch.cartesian_broadcast(self, inputs)
 
-        model, ls = batch.cartesian_broadcast(self, ls)
-
-        inputs = batch.broadcast_array(
-            inputs,
-            model_batch_shape,
-            axis=0,
-        )
-
-        means = model.dynamics.mean_trajectory(
+        return model.dynamics.mean_trajectory(
             model.initial.dist.mean,
-            ls.max_steps,
             inputs=inputs,
         )
-
-        return Sequences.from_padded(means, ls.lengths)
 
     def log_joint(
         self,

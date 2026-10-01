@@ -7,7 +7,7 @@ import jax.numpy as jnp
 
 from xxm.core import batch
 from xxm.core.chains.discrete import DiscretePotential
-from xxm.core.data import WeightedObservations
+from xxm.core.data import Sequences, WeightedObservations
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
 from xxm.core.optim import gaussian as gaussian_fit
@@ -123,8 +123,8 @@ class Emissions(typing.Protocol):
     def sample(
         self,
         key: jax.Array,
-        states: jax.Array,
-    ) -> jax.Array:
+        states: Sequences,
+    ) -> Sequences:
         """Sample observations conditional on discrete states."""
         ...
 
@@ -238,11 +238,15 @@ class GaussianEmissions(typing.NamedTuple):
         states = self.dist.broadcast(posterior.max_steps, axis=len(self.batch_shape))
         return states.mixture_mean(posterior.state_probs, axis=-1)
 
-    def sample(self, key: jax.Array, states: jax.Array) -> jax.Array:
+    def sample(self, key: jax.Array, states: Sequences) -> Sequences:
         """Sample observations conditional on discrete state indices."""
-        return batch.take_along_last_batch(
-            self.dist, self.dist.batch_shape, states
+        samples = batch.take_along_last_batch(
+            self.dist,
+            self.dist.batch_shape,
+            states.values,
         ).sample(key)
+
+        return Sequences.from_padded(samples, states.lengths)
 
     def permute_states(self, permutation: jax.Array) -> 'GaussianEmissions':
         """Relabel state-specific emission parameters."""
@@ -362,9 +366,13 @@ class PoissonEmissions(typing.NamedTuple):
     def sample(
         self,
         key: jax.Array,
-        states: jax.Array,
-    ) -> jax.Array:
+        states: Sequences,
+    ) -> Sequences:
         """Sample observations conditional on discrete state indices."""
-        return batch.take_along_last_batch(
-            self.dist, self.dist.batch_shape, states
+        samples = batch.take_along_last_batch(
+            self.dist,
+            self.dist.batch_shape,
+            states.values,
         ).sample(key)
+
+        return Sequences.from_padded(samples, states.lengths)

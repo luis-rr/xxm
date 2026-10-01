@@ -13,7 +13,7 @@ from xxm.core.chains.gaussian import (
     GaussianChainMarginals,
     GaussianPotential,
 )
-from xxm.core.data import WeightedObservations
+from xxm.core.data import Sequences, WeightedObservations
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
 from xxm.core.optim import gaussian as gaussian_fit
@@ -38,7 +38,7 @@ class Emissions(typing.Protocol):
 
     def move_axis(self, source: int, destination: int) -> typing.Self: ...
 
-    def sample(self, key, latents) -> jax.Array:
+    def sample(self, key, latents) -> Sequences:
         """Sample observations conditional on latent values."""
         ...
 
@@ -282,10 +282,11 @@ class GaussianEmissions(typing.NamedTuple):
     def sample(
         self,
         key: jax.Array,
-        latents: jax.Array,  # (*B, *Q, D)
-    ) -> jax.Array:  # (*B, *Q, O)
+        latents: Sequences,  # (*B, *Q, D)
+    ) -> Sequences:  # (*B, *Q, O)
         """Sample observations conditional on latent values."""
-        return self.conditional(latents).sample(key)
+        samples = self.conditional(latents.values).sample(key)
+        return Sequences.from_padded(samples, latents.lengths)
 
     def fit_params(
         self,
@@ -541,10 +542,11 @@ class PoissonEmissions(typing.NamedTuple):
     def sample(
         self,
         key: jax.Array,
-        latents: jax.Array,  # (*B, *Q, D)
-    ) -> jax.Array:  # (*B, *Q, O)
+        latents: Sequences,  # (*B, *Q, D)
+    ) -> Sequences:  # (*B, *Q, O)
         """Sample observations conditional on latent values."""
-        return self.conditional(latents).sample(key)
+        samples = self.conditional(latents.values).sample(key)
+        return Sequences.from_padded(samples, latents.lengths)
 
     def fit_params(
         self,

@@ -4,7 +4,7 @@ from jax import numpy as jnp
 
 from xxm.core.affine import Affine
 from xxm.core.chains.gaussian import GaussianChainMarginals
-from xxm.core.data import WeightedObservations
+from xxm.core.data import Sequences, WeightedObservations
 from xxm.core.dists.gaussian import LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
@@ -157,11 +157,13 @@ def test_gaussian_sample_has_expected_shape():
 
     sample = emissions.sample(
         jax.random.key(0),
-        jnp.zeros(2),
+        Sequences.from_sequence(jnp.zeros((1, 2))),
     )
 
-    assert sample.shape == (3,)
-    assert jnp.all(jnp.isfinite(sample))
+    assert sample.values.shape == (1, 3)
+    assert sample.event_shape == (3,)
+    np.testing.assert_array_equal(sample.lengths.values, 1)
+    assert jnp.all(jnp.isfinite(sample.values))
 
 
 def test_gaussian_emissions_potential_has_one_factor_per_observation():
@@ -372,12 +374,14 @@ def test_poisson_sample_has_expected_shape_and_values():
 
     sample = emissions.sample(
         jax.random.key(0),
-        jnp.zeros(2),
+        Sequences.from_sequence(jnp.zeros((1, 2))),
     )
 
-    assert sample.shape == (3,)
-    assert jnp.all(sample >= 0)
-    assert jnp.issubdtype(sample.dtype, jnp.integer)
+    assert sample.values.shape == (1, 3)
+    assert sample.event_shape == (3,)
+    np.testing.assert_array_equal(sample.lengths.values, 1)
+    assert jnp.all(sample.values >= 0)
+    assert jnp.issubdtype(sample.values.dtype, jnp.integer)
 
 
 # ---------------------------------------------------------------------
@@ -404,7 +408,10 @@ def test_gaussian_methods_are_jittable():
 
     jax.jit(emissions.compute_potential)(observations)
     jax.jit(emissions.log_likelihood)(observations, latents)
-    jax.jit(emissions.sample)(jax.random.key(0), latents[0])
+    latent_sequences = Sequences.from_padded(latents, posterior.lengths)
+    sampled = jax.jit(emissions.sample)(jax.random.key(0), latent_sequences)
+    assert sampled.values.shape == (3, 2)
+    np.testing.assert_array_equal(sampled.lengths.values, posterior.lengths.values)
     jax.jit(emissions.fit_params)(observations, posterior)
 
 
@@ -427,5 +434,8 @@ def test_poisson_methods_are_jittable():
     jax.jit(emissions.rates)(latents)
     jax.jit(emissions.log_likelihood)(observations, latents)
     jax.jit(emissions.compute_local_potential)(observations, latents)
-    jax.jit(emissions.sample)(jax.random.key(0), latents[0])
+    latent_sequences = Sequences.from_padded(latents, posterior.lengths)
+    sampled = jax.jit(emissions.sample)(jax.random.key(0), latent_sequences)
+    assert sampled.values.shape == (3, 2)
+    np.testing.assert_array_equal(sampled.lengths.values, posterior.lengths.values)
     jax.jit(emissions.fit_params)(observations, posterior)

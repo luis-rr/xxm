@@ -5,6 +5,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from xxm.core.data import Sequences
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
@@ -124,6 +125,7 @@ def test_gated_random_walk_aligns_gates_and_replicates(steps):
     )
 
     key = jax.random.key(20)
+    gate_sequences = Sequences.from_padded(gates, ls.lengths.transitions())
 
     actual = jax.jit(
         lambda k, ls, gates: rw.sample(
@@ -134,7 +136,7 @@ def test_gated_random_walk_aligns_gates_and_replicates(steps):
     )(
         key,
         ls,
-        gates,
+        gate_sequences,
     )
 
     assert rw.batch_shape == (3,)
@@ -200,12 +202,12 @@ def test_gated_random_walk_aligns_gates_and_replicates(steps):
 
     with pytest.raises(
         ValueError,
-        match='gates must have shape',
+        match='gates must be scalar events',
     ):
         rw.sample(
             key=key,
             ls=ls,
-            gates=gates.T[..., None],
+            gates=Sequences.from_padded(gates[..., None], ls.lengths.transitions()),
         )
 
 
@@ -219,6 +221,22 @@ def hermite():
         ),
         num_motifs=2,
     )
+
+
+def test_hermite_uses_each_sequences_normalized_transition_grid():
+    spline = HermiteSpline(gaussian(batch=(3,), dim=1), num_motifs=1)
+    ls = LengthsSpec(Lengths.from_values([4, 2, 1]), 4).transitions()
+    weights = spline.sample_from_coefficients(jnp.ones((3, 1)), ls)
+    np.testing.assert_array_equal(weights.lengths.values, [3, 1, 0])
+    assert weights.values.shape == (3, 3, 1)
+
+    # With two knots, zero integral means opposite endpoints and a zero midpoint.
+    assert abs(float(weights.values[0, 0, 0])) > 0.1
+    np.testing.assert_allclose(weights.values[0, 1], 0, atol=1e-6)
+    np.testing.assert_allclose(weights.values[0, 2], -weights.values[0, 0], atol=1e-6)
+    np.testing.assert_allclose(weights.values[1, 0], weights.values[0, 0], atol=1e-6)
+    np.testing.assert_array_equal(weights.values[1, 1:], 0)
+    np.testing.assert_array_equal(weights.values[2], 0)
 
 
 def test_hermite_function_prior_constructor():

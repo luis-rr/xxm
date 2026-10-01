@@ -1,4 +1,4 @@
-"""Centered Hermite basis mathematics and Gaussian coefficient."""
+"""Gaussian coefficient priors and temporal Hermite spline realizations."""
 
 from __future__ import annotations
 
@@ -12,337 +12,8 @@ import jax.numpy as jnp
 from xxm.core import batch
 from xxm.core.data import Sequences
 from xxm.core.dists.gaussian import Gaussian
+from xxm.core.latents.hermite_core import HermiteBasis
 from xxm.core.lengths import LengthsSpec
-
-
-def _hermite_segment_data(
-    positions: jax.Array,
-    num_knots: int,
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
-    """Return knot-value and slope maps, segment indices, and local coordinates."""
-    values_basis = jnp.eye(
-        num_knots,
-        dtype=positions.dtype,
-    )
-
-    # Slopes multiplied by the knot spacing. Interior centered derivatives are
-    # 0.5 * (beta[j + 1] - beta[j - 1]); endpoint slopes are fixed to zero.
-    slope_basis = jnp.zeros_like(values_basis)
-    interior = jnp.arange(1, num_knots - 1)
-    slope_basis = slope_basis.at[interior, interior - 1].set(-0.5)
-    slope_basis = slope_basis.at[interior, interior + 1].set(0.5)
-
-    scaled = positions * (num_knots - 1)
-    segment = jnp.clip(
-        jnp.floor(scaled).astype(jnp.int32),
-        0,
-        num_knots - 2,
-    )
-    u = scaled - segment
-    return values_basis, slope_basis, segment, u
-
-
-def _raw_hermite_basis(
-    positions: jax.Array,
-    num_knots: int,
-) -> jax.Array:
-    """Evaluate the unconstrained cubic Hermite knot-value basis."""
-    values_basis, slope_basis, segment, u = _hermite_segment_data(positions, num_knots)
-
-    h00 = 2.0 * u**3 - 3.0 * u**2 + 1.0
-    h10 = u**3 - 2.0 * u**2 + u
-    h01 = -2.0 * u**3 + 3.0 * u**2
-    h11 = u**3 - u**2
-
-    return (
-        h00[..., None] * values_basis[segment]
-        + h10[..., None] * slope_basis[segment]
-        + h01[..., None] * values_basis[segment + 1]
-        + h11[..., None] * slope_basis[segment + 1]
-    )
-
-
-def _raw_hermite_second_derivative(
-    positions: jax.Array,
-    num_knots: int,
-) -> jax.Array:
-    """Evaluate second time derivatives of the unconstrained Hermite basis."""
-    values_basis, slope_basis, segment, u = _hermite_segment_data(positions, num_knots)
-
-    h00 = 12.0 * u - 6.0
-    h10 = 6.0 * u - 4.0
-    h01 = -12.0 * u + 6.0
-    h11 = 6.0 * u - 2.0
-
-    scale = (num_knots - 1) ** 2
-
-    return scale * (
-        h00[:, None] * values_basis[segment]
-        + h10[:, None] * slope_basis[segment]
-        + h01[:, None] * values_basis[segment + 1]
-        + h11[:, None] * slope_basis[segment + 1]
-    )
-
-
-def _hermite_quadrature(
-    num_knots: int,
-    *,
-    dtype: jax.typing.DTypeLike,
-) -> tuple[jax.Array, jax.Array]:
-    """Return four-point Gauss-Legendre quadrature over all knot intervals."""
-    nodes = jnp.asarray(
-        [
-            -0.8611363115940526,
-            -0.3399810435848563,
-            0.3399810435848563,
-            0.8611363115940526,
-        ],
-        dtype=dtype,
-    )
-    weights = jnp.asarray(
-        [
-            0.3478548451374538,
-            0.6521451548625461,
-            0.6521451548625461,
-            0.3478548451374538,
-        ],
-        dtype=dtype,
-    )
-
-    num_segments = num_knots - 1
-
-    segment = jnp.arange(
-        num_segments,
-        dtype=dtype,
-    )[:, None]
-
-    local_positions = 0.5 * (nodes[None, :] + 1.0)
-
-    positions = ((segment + local_positions) / num_segments).reshape(-1)
-
-    integration_weights = jnp.broadcast_to(
-        weights[None, :] / (2.0 * num_segments),
-        (num_segments, weights.shape[0]),
-    ).reshape(-1)
-
-    return positions, integration_weights
-
-
-def _centered_hermite_map(
-    num_knots: int,
-    *,
-    dtype: jax.typing.DTypeLike,
-) -> jax.Array:
-    r"""Map $J-1$ free coefficients to zero-integral Hermite curves."""
-    positions, weights = _hermite_quadrature(
-        num_knots,
-        dtype=dtype,
-    )
-
-    raw_basis = _raw_hermite_basis(
-        positions,
-        num_knots,
-    )
-
-    # mean_functional @ knot_values is the exact integral of the cubic
-    # Hermite curve on [0, 1].
-    mean_functional = jnp.einsum(
-        't,tj->j',
-        weights,
-        raw_basis,
-    )
-
-    # The remaining columns span exactly the null space of the temporal mean.
-    orthogonal, _ = jnp.linalg.qr(
-        mean_functional[:, None],
-        mode='complete',
-    )
-
-    return orthogonal[:, 1:]
-
-
-def hermite_basis_at_positions(
-    positions: jax.Array,
-    num_knots: int,
-) -> jax.Array:
-    """Evaluate the centered Hermite basis at normalized positions in `[0, 1]`.
-
-    Positions may have arbitrary leading dimensions. The returned basis has
-    shape `(*positions.shape, num_knots - 1)` and uses the same zero-integral
-    coefficient coordinates for every position array.
-    """
-    if num_knots < 2:
-        raise ValueError('num_knots must be at least 2')
-
-    positions = jnp.asarray(positions)
-    positions = positions.astype(jnp.result_type(positions, jnp.float32))
-    raw_basis = _raw_hermite_basis(positions, num_knots)
-    coefficient_map = _centered_hermite_map(num_knots, dtype=raw_basis.dtype)
-    return raw_basis @ coefficient_map
-
-
-def hermite_basis(
-    num_steps: int,
-    num_knots: int,
-) -> jax.Array:
-    r"""Construct the centered cubic Hermite basis for dynamics steps.
-
-    Knot locations are equally spaced on $[0,1]$. Interior slopes use centered
-    finite differences and endpoint slopes are fixed to zero. The returned
-    basis has shape `(num_steps - 1, num_knots - 1)`.
-
-    It evaluates a continuous temporal family satisfying
-
-    $$\int_0^1 \lambda(s)\,ds = 0.$$
-
-    Thus the temporal family contains no constant component while using
-    exactly $J-1$ free coefficients for $J$ knots.
-
-    Row `t - 1` corresponds to the incoming dynamics that generate `x[t]`
-    from `x[t - 1]`, for `t = 1, ..., num_steps - 1`.
-    """
-    if num_steps < 1:
-        raise ValueError('num_steps must be at least 1')
-
-    if num_knots < 2:
-        raise ValueError('num_knots must be at least 2')
-
-    if num_steps == 1:
-        return jnp.zeros((0, num_knots - 1))
-
-    positions = jnp.linspace(
-        0.0,
-        1.0,
-        num_steps - 1,
-    )
-
-    return hermite_basis_at_positions(positions, num_knots)
-
-
-def hermite_penalty_matrices(
-    num_knots: int,
-    *,
-    dtype: jax.typing.DTypeLike,
-) -> tuple[jax.Array, jax.Array]:
-    r"""Return amplitude and curvature penalties for the centered Hermite basis.
-
-    For $\lambda(t)=H(t)\beta$,
-
-    $$\beta^\top R_0\beta = \int_0^1 \lambda(t)^2\,dt,$$
-
-    and
-
-    $$\beta^\top R_2\beta = \int_0^1 \lambda''(t)^2\,dt.$$
-    """
-    if num_knots < 2:
-        raise ValueError('num_knots must be at least 2')
-
-    coefficient_map = _centered_hermite_map(
-        num_knots,
-        dtype=dtype,
-    )
-
-    positions, integration_weights = _hermite_quadrature(
-        num_knots,
-        dtype=dtype,
-    )
-
-    basis = (
-        _raw_hermite_basis(
-            positions,
-            num_knots,
-        )
-        @ coefficient_map
-    )
-
-    second_derivative = (
-        _raw_hermite_second_derivative(
-            positions,
-            num_knots,
-        )
-        @ coefficient_map
-    )
-
-    amplitude = jnp.einsum(
-        't,ti,tj->ij',
-        integration_weights,
-        basis,
-        basis,
-    )
-
-    curvature = jnp.einsum(
-        't,ti,tj->ij',
-        integration_weights,
-        second_derivative,
-        second_derivative,
-    )
-
-    amplitude = 0.5 * (amplitude + amplitude.T)
-    curvature = 0.5 * (curvature + curvature.T)
-
-    return amplitude, curvature
-
-
-def _coefficient_prior(
-    *,
-    num_motifs: int,
-    num_knots: int,
-    alpha_amp: float,
-    alpha_smooth: float,
-    dtype: jax.typing.DTypeLike,
-    batch_shape: tuple[int, ...] = (),
-) -> Gaussian:
-    r"""Construct the Gaussian prior over centered Hermite coefficients.
-
-    For one motif,
-
-    $$\Lambda_\beta
-    =
-    \alpha_{\rm amp}R_0
-    +
-    \alpha_{\rm smooth}R_2,$$
-
-    where $R_0$ measures integrated squared temporal amplitude and $R_2$
-    measures integrated squared temporal curvature.
-    """
-    amplitude, curvature = hermite_penalty_matrices(
-        num_knots=num_knots,
-        dtype=dtype,
-    )
-
-    coefficient_precision = alpha_amp * amplitude + alpha_smooth * curvature
-
-    precision = jnp.kron(
-        jnp.eye(
-            num_motifs,
-            dtype=dtype,
-        ),
-        coefficient_precision,
-    )
-
-    num_coefficients = num_knots - 1
-    variable_dim = num_motifs * num_coefficients
-
-    covariance = jnp.linalg.solve(
-        precision,
-        jnp.eye(
-            variable_dim,
-            dtype=dtype,
-        ),
-    )
-
-    covariance = 0.5 * (covariance + covariance.T)
-
-    return Gaussian(
-        mean=jnp.zeros(
-            batch_shape + (variable_dim,),
-            dtype=dtype,
-        ),
-        covariance=jnp.broadcast_to(
-            covariance,
-            batch_shape + (variable_dim, variable_dim),
-        ),
-    )
 
 
 @functools.partial(
@@ -396,41 +67,67 @@ class HermiteSpline:
         """Number of Hermite knots defining the temporal basis."""
         return self.num_coefficients + 1
 
-    def temporal_weights(
-        self,
-        coefficients: jax.Array,
-        num_steps: int,
-    ) -> jax.Array:
-        r"""Compute motif weights from batched centered coefficients.
+    @property
+    def basis(self) -> HermiteBasis:
+        """Temporal basis implied by the coefficient prior."""
+        return HermiteBasis.from_num_knots(self.num_knots)
 
-        `coefficients` has shape `(*B, P * C)` and the returned weights have
-        shape `(*B, num_steps - 1, P)`.
+    @staticmethod
+    def _coefficient_prior(
+        *,
+        num_motifs: int,
+        basis: HermiteBasis,
+        alpha_amp: float,
+        alpha_smooth: float,
+        dtype: jax.typing.DTypeLike,
+        batch_shape: tuple[int, ...] = (),
+    ) -> Gaussian:
+        r"""Construct the Gaussian prior over centered Hermite coefficients.
+
+        For one motif,
+
+        $$\Lambda_\beta
+        =
+        \alpha_{\rm amp}R_0
+        +
+        \alpha_{\rm smooth}R_2,$$
+
+        where $R_0$ measures integrated squared temporal amplitude and $R_2$
+        measures integrated squared temporal curvature.
         """
-        expected_shape = self.batch_shape + (self.num_motifs * self.num_coefficients,)
+        penalties = basis.penalty_matrices(dtype=dtype)
 
-        if coefficients.shape != expected_shape:
-            raise ValueError(
-                f'coefficients must have shape {expected_shape}; '
-                f'got {coefficients.shape}'
-            )
-
-        basis = hermite_basis(
-            num_steps=num_steps,
-            num_knots=self.num_knots,
-        ).astype(coefficients.dtype)
-
-        coefficients = coefficients.reshape(
-            self.batch_shape
-            + (
-                self.num_motifs,
-                self.num_coefficients,
-            )
+        coefficient_precision = (
+            alpha_amp * penalties.amplitude + alpha_smooth * penalties.curvature
         )
 
-        return jnp.einsum(
-            'tc,...pc->...tp',
-            basis,
-            coefficients,
+        precision = jnp.kron(
+            jnp.eye(num_motifs, dtype=dtype),
+            coefficient_precision,
+        )
+
+        num_coefficients = basis.num_coefficients
+        variable_dim = num_motifs * num_coefficients
+
+        covariance = jnp.linalg.solve(
+            precision,
+            jnp.eye(
+                variable_dim,
+                dtype=dtype,
+            ),
+        )
+
+        covariance = 0.5 * (covariance + covariance.T)
+
+        return Gaussian(
+            mean=jnp.zeros(
+                batch_shape + (variable_dim,),
+                dtype=dtype,
+            ),
+            covariance=jnp.broadcast_to(
+                covariance,
+                batch_shape + (variable_dim, variable_dim),
+            ),
         )
 
     @classmethod
@@ -447,8 +144,7 @@ class HermiteSpline:
         """Construct identical amplitude/curvature priors over batch `*B`."""
         if num_motifs < 1:
             raise ValueError('num_motifs must be at least 1')
-        if num_knots < 2:
-            raise ValueError('num_knots must be at least 2')
+        basis = HermiteBasis.from_num_knots(num_knots)
         if alpha_amp <= 0.0:
             raise ValueError('alpha_amp must be positive')
         if alpha_smooth < 0.0:
@@ -457,9 +153,9 @@ class HermiteSpline:
             raise ValueError('batch dimensions must all be positive')
 
         return cls(
-            coefficient_prior=_coefficient_prior(
+            coefficient_prior=cls._coefficient_prior(
                 num_motifs=num_motifs,
-                num_knots=num_knots,
+                basis=basis,
                 alpha_amp=alpha_amp,
                 alpha_smooth=alpha_smooth,
                 dtype=dtype,
@@ -488,6 +184,11 @@ class HermiteSpline:
         coefficients: jax.Array,
         ls: LengthsSpec,
     ) -> Sequences:
+        """Evaluate coefficients on exactly the timeline described by `ls`."""
+        batch.require_same_shape(self.batch_shape, ls.batch_shape)
+        expected_shape = self.batch_shape + (self.num_motifs * self.num_coefficients,)
+        if coefficients.shape != expected_shape:
+            raise ValueError(f'coefficients must have shape {expected_shape}')
 
         denominator = ls.lengths.shift(-1).clip_min(1).values
 
@@ -495,7 +196,7 @@ class HermiteSpline:
 
         positions = ls.lengths.clear(positions)
 
-        basis = hermite_basis_at_positions(positions, self.num_knots)
+        basis = self.basis.at_positions(positions).centered_basis()
         basis = basis.astype(coefficients.dtype)
 
         coefficients = coefficients.reshape(

@@ -172,17 +172,13 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     def sample(
         self,
         key: jax.Array,
-        ls: LengthsSpec,
         *,
-        inputs: jax.Array,
+        inputs: Sequences,
     ) -> Sample:
         """Sample aligned switching states, latents, and observations."""
 
-        model_batch_shape = self.batch_shape
-
-        model, ls = batch.cartesian_broadcast(self, ls)
-
-        inputs = batch.broadcast_array(inputs, model_batch_shape, axis=0)
+        model, inputs = batch.cartesian_broadcast(self, inputs)
+        ls = LengthsSpec(inputs.lengths, inputs.max_steps)
 
         (
             key_state_initial,
@@ -194,24 +190,20 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
         initial_state = model.state_initial.sample(key_state_initial)
 
-        states = model.transitions.sample(key_states, initial_state, ls.max_steps)
+        states = model.transitions.sample(key_states, initial_state, ls)
 
-        initial_latent = model.latent_initial.sample(key_latent_initial, states[..., 0])
+        initial_latent = model.latent_initial.sample(
+            key_latent_initial, states.values[..., 0]
+        )
 
         latents = model.dynamics.sample(
             key_latents,
             initial_latent,
-            states[..., 1:],
-            inputs=inputs[..., 1:, :],
+            states,
+            inputs=inputs,
         )
 
-        states = Sequences.from_padded(states[..., None], ls.lengths)
-
-        latents = Sequences.from_padded(latents, ls.lengths)
-
-        observations = model.emissions.sample(key_observations, latents.values)
-
-        observations = Sequences.from_padded(observations, ls.lengths)
+        observations = model.emissions.sample(key_observations, latents)
 
         return Sample(
             states=states,

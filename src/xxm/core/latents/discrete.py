@@ -7,6 +7,7 @@ import jax.numpy as jnp
 
 from xxm.core import batch
 from xxm.core.chains.discrete import DiscreteChain
+from xxm.core.data import Sequences
 from xxm.core.dists.categorical import Categorical
 from xxm.core.lengths import LengthsSpec
 from xxm.core.optim import categorical as categorical_fit
@@ -151,11 +152,12 @@ class CategoricalTransitions(typing.NamedTuple):
         self,
         key: jax.Array,
         initial_state: jax.Array,
-        max_steps: int,
-    ) -> jax.Array:
+        ls: LengthsSpec,
+    ) -> Sequences:
         """Sample one dense state trajectory up to `max_steps`."""
-        if max_steps < 1:
+        if ls.max_steps < 1:
             raise ValueError('max_steps must be at least 1')
+        batch.require_same_shape(self.batch_shape, ls.batch_shape)
 
         if initial_state.shape != self.batch_shape:
             raise ValueError(
@@ -178,7 +180,7 @@ class CategoricalTransitions(typing.NamedTuple):
             step,
             (initial_state, key),
             xs=None,
-            length=max_steps - 1,
+            length=ls.max_steps - 1,
         )
 
         subsequent_states = jnp.moveaxis(
@@ -187,13 +189,14 @@ class CategoricalTransitions(typing.NamedTuple):
             -1,
         )
 
-        return jnp.concatenate(
+        values = jnp.concatenate(
             [
                 initial_state[..., None],
                 subsequent_states,
             ],
             axis=-1,
         )
+        return Sequences.from_padded(values, ls.lengths)
 
     def permute_states(self, permutation: jax.Array) -> 'CategoricalTransitions':
         """Relabel states by permutation."""

@@ -13,7 +13,7 @@ from xxm.core import batch
 from xxm.core.affine import Affine
 from xxm.core.chains.discrete import DiscreteChainMarginals
 from xxm.core.chains.gaussian import GaussianChainMarginals
-from xxm.core.data import Dataset, WeightedObservations
+from xxm.core.data import Dataset, Sequences, WeightedObservations
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
@@ -233,11 +233,19 @@ def test_discrete_latent_fit_and_sampling():
             )
     states = initial.sample(jax.random.key(0))
     assert states.shape == FIT_B
-    trajectory = transitions.sample(jax.random.key(1), states, T)
-    assert trajectory.shape == FIT_B + (T,)
-    np.testing.assert_array_equal(trajectory[..., 0], states)
-    assert bool(jnp.all((trajectory >= 0) & (trajectory < K)))
-    assert transitions.sample(jax.random.key(1), states, 1).shape == FIT_B + (1,)
+    ls = LengthsSpec(Lengths.full(FIT_B, T), T)
+    trajectory = transitions.sample(jax.random.key(1), states, ls)
+    assert trajectory.values.shape == FIT_B + (T,)
+    assert trajectory.event_shape == ()
+    np.testing.assert_array_equal(trajectory.lengths.values, ls.lengths.values)
+    np.testing.assert_array_equal(trajectory.values[..., 0], states)
+    assert bool(jnp.all((trajectory.values >= 0) & (trajectory.values < K)))
+    one_step = LengthsSpec(Lengths.full(FIT_B, 1), 1)
+    short_trajectory = transitions.sample(jax.random.key(1), states, one_step)
+    assert short_trajectory.values.shape == FIT_B + (1,)
+    np.testing.assert_array_equal(
+        short_trajectory.lengths.values, one_step.lengths.values
+    )
     chain = homogeneous_chain(
         initial, transitions, LengthsSpec(Lengths(jnp.full(FIT_B, T)), T)
     )
@@ -275,20 +283,25 @@ def test_gaussian_latent_sampling_and_potentials(kind, component):
         assert component.sample(key).shape == FIT_B + (D,)
     else:
         initial = posterior.means[..., 0, :]
+        inputs = Sequences.from_padded(
+            jnp.empty(FIT_B + (T, 0), dtype=initial.dtype),
+            posterior.lengths,
+        )
         if kind == 'switching':
-            states = jnp.zeros(FIT_B + (T - 1,), dtype=jnp.int32)
+            states = Sequences.from_padded(
+                jnp.zeros(FIT_B + (T,), dtype=jnp.int32), posterior.lengths
+            )
             sampled = component.sample(
                 key,
                 initial,
                 states,
-                inputs=jnp.empty(FIT_B + (T - 1, 0), dtype=initial.dtype),
+                inputs=inputs,
             )
         else:
-            sampled = component.sample(
-                key, initial, T, inputs=jnp.empty(FIT_B + (T, 0), dtype=initial.dtype)
-            )
-        assert sampled.shape == FIT_B + (T, D)
-        np.testing.assert_array_equal(sampled[..., 0, :], initial)
+            sampled = component.sample(key, initial, inputs=inputs)
+        assert sampled.values.shape == FIT_B + (T, D)
+        np.testing.assert_array_equal(sampled.lengths.values, posterior.lengths.values)
+        np.testing.assert_array_equal(sampled.values[..., 0, :], initial)
     if kind == 'switching':
         assert component.compute_pair_potentials(
             jnp.empty(FIT_B + (T - 1, 0), dtype=posterior.means.dtype)
@@ -331,7 +344,9 @@ def test_state_emission_likelihood_and_sampling(kind, component):
     ).astype(jnp.float32)
     is_ar = kind.startswith('ar_')
     data = (
-        ARDataset.from_dataset(Dataset.from_batch(observations), L)
+        ARDataset.from_dataset(
+            Dataset.from_padded(observations, Lengths.full(FIT_B, T)), L
+        )
         if is_ar
         else WeightedObservations(
             observations,
@@ -351,14 +366,18 @@ def test_state_emission_likelihood_and_sampling(kind, component):
         np.testing.assert_allclose(
             likelihood[index], standalone.log_likelihoods(data_i), atol=2e-5
         )
-    states = jnp.zeros(FIT_B + (T,), dtype=jnp.int32)
-    assert component.sample(jax.random.key(3), states).shape == FIT_B + (T, O)
+    states = Sequences.from_padded(
+        jnp.zeros(FIT_B + (T,), dtype=jnp.int32), Lengths.full(FIT_B, T)
+    )
+    sampled = component.sample(jax.random.key(3), states)
+    assert sampled.values.shape == FIT_B + (T, O)
+    np.testing.assert_array_equal(sampled.lengths.values, states.lengths.values)
     if is_ar:
         assert isinstance(data, ARDataset)
         assert component.conditional(data.predictors).batch_shape == FIT_B + (T - L, K)
         assert component.sample_continuation(
             jax.random.key(3), states, observations[..., :L, :]
-        ).shape == FIT_B + (T, O)
+        ).values.shape == FIT_B + (T, O)
         with pytest.raises(ValueError, match='initial_history'):
             component.sample_continuation(
                 jax.random.key(3), states, observations[0, :L]
@@ -384,7 +403,10 @@ def test_continuous_emission_evaluation(kind, component):
     likelihood = component.log_likelihood(data, latents)
     assert likelihood.shape == FIT_B
     assert component.conditional(latents).batch_shape == FIT_B + (T,)
-    assert component.sample(jax.random.key(4), latents).shape == FIT_B + (T, O)
+    latent_sequences = Sequences.from_padded(latents, posterior.lengths)
+    sampled = component.sample(jax.random.key(4), latent_sequences)
+    assert sampled.values.shape == FIT_B + (T, O)
+    np.testing.assert_array_equal(sampled.lengths.values, posterior.lengths.values)
     assert component.invert(observations).shape == FIT_B + (T, D)
     potential = (
         component.compute_potential(data)
@@ -561,7 +583,9 @@ def test_unoccupied_states_retain_each_batchs_parameters(kind, component):
     else:
         observations = 2.0 + _values(B + (T, O))
         data = (
-            ARDataset.from_dataset(Dataset.from_batch(observations), L)
+            ARDataset.from_dataset(
+                Dataset.from_padded(observations, Lengths.full(B, T)), L
+            )
             if kind.startswith('ar_')
             else WeightedObservations(
                 observations, jnp.ones(B + (T,), dtype=bool), Lengths(jnp.full(B, T))

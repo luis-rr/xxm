@@ -99,15 +99,11 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
             key_initial,
         )
 
-        states = model.transitions.sample(
+        return model.transitions.sample(
             key_transitions,
             initial_state,
-            ls.max_steps,
+            ls,
         )
-
-        states = ls.lengths.clear(states)
-
-        return Sequences.from_padded(states[..., None], ls.lengths)
 
     def sample(
         self,
@@ -127,16 +123,12 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
         observations = emissions.sample(
             key_observations,
-            states.values[..., 0],
-        )
-
-        observations = states.lengths.clear(
-            observations,
+            states,
         )
 
         return Sample(
             states=states,
-            observations=Sequences.from_padded(observations, states.lengths),
+            observations=observations,
         )
 
     def fit_params(

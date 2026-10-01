@@ -48,7 +48,9 @@ def test_dataset_optional_arguments_use_none_and_default_to_valid_visibility():
     assert data.inputs.values.shape == (2, 2, 0)
     np.testing.assert_array_equal(data.visible.values, [[True, True], [True, False]])
     visibility = ArbitraryMask(jnp.array([[True, False], [False, True]]))
-    batch = Dataset.from_batch(jnp.ones((2, 2, 1)), visible=visibility)
+    batch = Dataset.from_padded(
+        jnp.ones((2, 2, 1)), Lengths.full((2,), 2), visible=visibility
+    )
     assert batch.visible is visibility
     with pytest.raises(ValueError, match='false outside valid'):
         Dataset.from_padded(
