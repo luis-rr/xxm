@@ -57,7 +57,7 @@ def test_exact_posterior_matches_enumerated_paths(family, num_targets):
         )
         conditional_mean = np.exp(means)
 
-    data = ARDataset.from_dataset(Dataset.from_sequence(observations), num_lags=2)
+    data = ARDataset.from_dataset(Dataset.from_array(observations), num_lags=2)
     np.testing.assert_allclose(
         model._model.emissions.log_likelihoods(data), log_likelihoods, atol=1e-6
     )
@@ -66,7 +66,7 @@ def test_exact_posterior_matches_enumerated_paths(family, num_targets):
         log_likelihoods,
         atol=1e-6,
     )
-    dataset = Dataset.from_sequence(observations)
+    dataset = Dataset.from_array(observations)
     assert model.states_conditional(dataset).batch_shape == (num_targets, 2)
 
     paths = list(itertools.product(range(2), repeat=num_targets))
@@ -124,7 +124,7 @@ def test_fitting_and_multiple_initializations(facade):
     # k-means initialization plus fit without duplicating the explicit em_step
     # calculation already covered by lower-level/integration tests.
     observations = jnp.array([[0.0], [1.0], [2.0], [1.0]])
-    data = Dataset.from_sequence(observations)
+    data = Dataset.from_array(observations)
     initialized = facade.via_kmeans(jax.random.key(2), data, num_states=2, num_lags=1)
     assert initialized.states.affine.coefficients.shape == (2, 1, 1, 1)
 

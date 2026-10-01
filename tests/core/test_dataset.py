@@ -12,7 +12,7 @@ def test_visibility_and_validity_survive_padding_stacking_and_jit():
     observations = [jnp.ones((3, 1)), jnp.ones((1, 1))]
     visibility = [jnp.array([True, False, True]), jnp.array([False])]
     inputs = [jnp.arange(3.0)[:, None], jnp.ones((1, 1))]
-    data = Dataset.from_sequences(observations, inputs=inputs, visible=visibility)
+    data = Dataset.from_arrays(observations, inputs=inputs, visible=visibility)
     np.testing.assert_array_equal(data.lengths.values, [3, 1])
     np.testing.assert_array_equal(
         data.lengths.to_mask(3).values, [[True, True, True], [True, False, False]]
@@ -26,7 +26,7 @@ def test_visibility_and_validity_survive_padding_stacking_and_jit():
 
     stacked = Dataset.stack(
         [
-            Dataset.from_sequence(y, inputs=u, visible=v)
+            Dataset.from_array(y, inputs=u, visible=v)
             for y, u, v in zip(observations, inputs, visibility, strict=True)
         ]
     )
@@ -42,7 +42,7 @@ def test_visibility_and_validity_survive_padding_stacking_and_jit():
 
 
 def test_dataset_optional_arguments_use_none_and_default_to_valid_visibility():
-    data = Dataset.from_sequences(
+    data = Dataset.from_arrays(
         [jnp.ones((2, 1)), jnp.ones((1, 1))], inputs=None, visible=None
     )
     assert data.inputs.values.shape == (2, 2, 0)

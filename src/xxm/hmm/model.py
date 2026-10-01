@@ -159,9 +159,9 @@ class GaussianHMM:
 
         return cls(model)
 
-    def sample(self, key: jax.Array, lengths: LengthsLike) -> Sample:
+    def sample(self, key: jax.Array, steps: LengthsLike) -> Sample:
         r"""Sample state and observation sequences with requested lengths."""
-        ls = LengthsSpec.from_params(lengths, min_length=1)
+        ls = LengthsSpec.from_params(steps, min_length=1)
         return self._model.sample(key, ls=ls)
 
     def infer(
@@ -296,9 +296,9 @@ class PoissonHMM:
 
         return cls(model)
 
-    def sample(self, key: jax.Array, lengths: LengthsLike) -> Sample:
+    def sample(self, key: jax.Array, steps: LengthsLike) -> Sample:
         r"""Sample state and observation sequences with requested lengths."""
-        ls = LengthsSpec.from_params(lengths, min_length=1)
+        ls = LengthsSpec.from_params(steps, min_length=1)
         return self._model.sample(key, ls=ls)
 
     def infer(

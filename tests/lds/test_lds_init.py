@@ -16,7 +16,7 @@ OBSERVATIONS = jnp.array(
 
 
 def test_gaussian_via_pca_returns_model_with_requested_latent_dimension():
-    model = init_gaussian_via_pca(Dataset.from_sequence(OBSERVATIONS), latent_dim=2)
+    model = init_gaussian_via_pca(Dataset.from_array(OBSERVATIONS), latent_dim=2)
 
     assert model.initial.dist.mean.shape == (2,)
     assert model.dynamics.dist.affine.coefficients.shape == (2, 2)

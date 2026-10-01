@@ -79,7 +79,7 @@ class WeightedObservations(typing.NamedTuple):
         batch.require_same_shape(self.batch_shape, self.lengths.batch_shape)
 
     @classmethod
-    def from_sequence(
+    def from_array(
         cls,
         values: jax.Array,
         *,
@@ -302,7 +302,7 @@ class Sequences:
         )
 
     @classmethod
-    def from_sequence(cls, values: jax.Array) -> typing.Self:
+    def from_array(cls, values: jax.Array) -> typing.Self:
         """Construct one unbatched sequence `(T, *E)`."""
         values = jnp.asarray(values)
         if values.ndim < 1:
@@ -327,12 +327,12 @@ class Sequences:
         )
 
     @classmethod
-    def from_sequences(
+    def from_arrays(
         cls,
         values: typing.Sequence[jax.Array],
     ) -> typing.Self:
         """Pad a flat collection of `(T_i, *E)` arrays to a common time size."""
-        sequences = tuple(cls.from_sequence(value) for value in values)
+        sequences = tuple(cls.from_array(value) for value in values)
         return cls.stack(sequences)
 
     @classmethod
@@ -559,7 +559,7 @@ class Dataset:
             raise ValueError('inputs must contain only finite values')
 
     @classmethod
-    def from_sequence(
+    def from_array(
         cls,
         observations: jax.Array,
         *,
@@ -567,7 +567,7 @@ class Dataset:
         visible: jax.Array | ArbitraryMask | None = None,
     ) -> typing.Self:
         """Construct one unbatched trajectory from `(T, D_y)` observations."""
-        sequence = Sequences.from_sequence(observations)
+        sequence = Sequences.from_array(observations)
         return cls.from_padded(
             sequence.values,
             sequence.lengths,
@@ -576,7 +576,7 @@ class Dataset:
         )
 
     @classmethod
-    def from_sequences(
+    def from_arrays(
         cls,
         observations: typing.Sequence[jax.Array],
         *,
@@ -585,7 +585,7 @@ class Dataset:
     ) -> typing.Self:
         """Pad a flat collection of unequal-length observation trajectories."""
         observations = tuple(jnp.asarray(values) for values in observations)
-        sequences = Sequences.from_sequences(observations)
+        sequences = Sequences.from_arrays(observations)
 
         padded_inputs = None
         if inputs is not None:
@@ -597,7 +597,7 @@ class Dataset:
                 observations,
                 name='inputs',
             )
-            padded_inputs = Sequences.from_sequences(inputs).values
+            padded_inputs = Sequences.from_arrays(inputs).values
 
         padded_visible = None
         if visible is not None:

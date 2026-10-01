@@ -133,7 +133,7 @@ def _two_state_model() -> Model:
 def test_single_state_slds_matches_gaussian_chain():
     model = _single_state_model()
     observations = jnp.array([[0.2], [1.0]])
-    data = Dataset.from_sequence(observations)
+    data = Dataset.from_array(observations)
 
     posterior = infer_variational(
         model,
@@ -151,7 +151,7 @@ def test_single_state_slds_matches_gaussian_chain():
         jnp.empty((observations.shape[0] - 1, 0))
     ).weighted_sum(state_probs[1:], axis=1)
     observation_potential = model.emissions.compute_potential(
-        WeightedObservations.from_sequence(observations)
+        WeightedObservations.from_array(observations)
     )
 
     expected, _ = (
@@ -189,7 +189,7 @@ def test_single_state_slds_matches_gaussian_chain():
 def test_zero_iterations_uses_initial_latents():
     model = _two_state_model()
     observations = jnp.zeros((1, 1))
-    data = Dataset.from_sequence(observations)
+    data = Dataset.from_array(observations)
     initial_latents = jnp.zeros((observations.shape[0], 1))
 
     posterior = infer_variational(
@@ -224,7 +224,7 @@ def test_infer_variational_is_jittable():
 
     model = _two_state_model()
     observations = jnp.array([[0.0], [0.5]])
-    data = Dataset.from_sequence(observations)
+    data = Dataset.from_array(observations)
     initial_latents = jnp.zeros((observations.shape[0], 1))
 
     eager = infer_variational(

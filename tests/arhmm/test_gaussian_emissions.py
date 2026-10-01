@@ -126,7 +126,7 @@ def test_ar_gaussian_conditional_means_known_solution():
     )
 
     means = emissions.conditional(
-        ARDataset.from_sequence(observations, emissions.num_lags).predictors
+        ARDataset.from_array(observations, emissions.num_lags).predictors
     ).mean
 
     expected = jnp.array(
@@ -159,7 +159,7 @@ def test_ar_gaussian_log_likelihoods_known_solution():
     )
 
     log_likelihoods = emissions.log_likelihoods(
-        ARDataset.from_sequence(observations, emissions.num_lags)
+        ARDataset.from_array(observations, emissions.num_lags)
     )
 
     # y1 | y0 ~ N(1, 4), residual = 1
@@ -205,7 +205,7 @@ def test_ar_gaussian_log_likelihoods_shortest_valid_sequence():
     )
 
     log_likelihoods = emissions.log_likelihoods(
-        ARDataset.from_sequence(observations, emissions.num_lags)
+        ARDataset.from_array(observations, emissions.num_lags)
     )
 
     # history = (y1, y0) = (2, 1)
@@ -255,7 +255,7 @@ def test_ar_gaussian_fit_recovers_known_ar2_parameters():
     )
 
     fitted = emissions.fit_params(
-        ARDataset.from_sequence(observations, emissions.num_lags),
+        ARDataset.from_array(observations, emissions.num_lags),
         posterior,
     )
 
@@ -321,7 +321,7 @@ def test_ar_gaussian_sample_follows_ar_recurrence():
         covariances=jnp.array([[[0.25]]]),
     )
 
-    states = Sequences.from_sequence(jnp.zeros(4, dtype=int))
+    states = Sequences.from_array(jnp.zeros(4, dtype=int))
     key = jax.random.key(0)
 
     observations = emissions.sample(key, states)
@@ -397,9 +397,9 @@ def test_ar_gaussian_methods_are_jittable():
         ),
     )
 
-    states = Sequences.from_sequence(jnp.zeros(5, dtype=int))
+    states = Sequences.from_array(jnp.zeros(5, dtype=int))
     key = jax.random.key(0)
-    data = ARDataset.from_sequence(observations, emissions.num_lags)
+    data = ARDataset.from_array(observations, emissions.num_lags)
 
     conditional_means_jit = jax.jit(
         lambda emissions, data: emissions.conditional(data.predictors).mean
@@ -490,7 +490,7 @@ def test_ar_gaussian_sample_uses_zero_history():
         covariances=jnp.array([[[0.5]]]),
     )
 
-    states = Sequences.from_sequence(jnp.zeros(5, dtype=int))
+    states = Sequences.from_array(jnp.zeros(5, dtype=int))
     key = jax.random.key(0)
 
     initial_history = jnp.zeros(

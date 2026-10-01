@@ -113,7 +113,7 @@ class ARDataset(typing.NamedTuple):
         return prepared
 
     @classmethod
-    def from_sequence(
+    def from_array(
         cls,
         observations: jax.Array,
         num_lags: int,
@@ -123,7 +123,7 @@ class ARDataset(typing.NamedTuple):
     ) -> typing.Self:
         """Prepare compact AR rows from a single sequence of observations."""
         return cls.from_dataset(
-            Dataset.from_sequence(
+            Dataset.from_array(
                 observations,
                 inputs=inputs,
                 visible=visible,

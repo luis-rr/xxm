@@ -22,7 +22,7 @@ def test_prior_mean_starts_at_initial_mean():
     model = make_model()
 
     means = model.compute_prior_means(
-        inputs=Sequences.from_sequence(jnp.empty((3, 0))),
+        inputs=Sequences.from_array(jnp.empty((3, 0))),
     )
     means = means.get()
 
@@ -35,7 +35,7 @@ def test_sample_returns_one_latent_and_observation_per_time_step():
 
     latents, observations = model.sample(
         key=jax.random.key(0),
-        inputs=Sequences.from_sequence(jnp.empty((4, 0))),
+        inputs=Sequences.from_array(jnp.empty((4, 0))),
     )
     latents = latents.get()
     observations = observations.get()

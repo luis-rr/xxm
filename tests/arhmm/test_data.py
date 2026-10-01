@@ -12,7 +12,7 @@ def test_prepared_rows_preserve_lag_and_target_order(num_lags):
     observations = jnp.array(
         [[0.0, 10.0], [1.0, 11.0], [2.0, 12.0], [3.0, 13.0], [4.0, 14.0]]
     )
-    data = ARDataset.from_dataset(Dataset.from_sequence(observations), num_lags)
+    data = ARDataset.from_dataset(Dataset.from_array(observations), num_lags)
     assert data.max_steps == 5 - num_lags
     assert data.num_lags == num_lags
     assert data.output_dim == 2
@@ -34,6 +34,6 @@ def test_prepared_rows_preserve_structural_batch():
     np.testing.assert_array_equal(data.targets, observations[..., 2:, :])
     for i, j in np.ndindex(2, 3):
         standalone = ARDataset.from_dataset(
-            Dataset.from_sequence(observations[i, j]), num_lags=2
+            Dataset.from_array(observations[i, j]), num_lags=2
         )
         np.testing.assert_array_equal(data.predictors[i, j], standalone.predictors)

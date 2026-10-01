@@ -97,7 +97,7 @@ MODEL_CASES = [
             lds_laplace_em_step,
             params=FAST_LAPLACE_PARAMS,
         ),
-        observations=Dataset.from_sequence(POISSON_OBSERVATIONS),
+        observations=Dataset.from_array(POISSON_OBSERVATIONS),
     ),
     ModelCase(
         name='slds-gaussian',
@@ -111,7 +111,7 @@ MODEL_CASES = [
             slds_variational_em_step,
             num_inference_iters=0,
         ),
-        observations=Dataset.from_sequence(GAUSSIAN_OBSERVATIONS),
+        observations=Dataset.from_array(GAUSSIAN_OBSERVATIONS),
     ),
     ModelCase(
         name='slds-poisson',
@@ -127,7 +127,7 @@ MODEL_CASES = [
             params=FAST_LAPLACE_PARAMS,
             num_inference_iters=0,
         ),
-        observations=Dataset.from_sequence(POISSON_OBSERVATIONS),
+        observations=Dataset.from_array(POISSON_OBSERVATIONS),
     ),
 ]
 

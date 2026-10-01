@@ -335,7 +335,7 @@ For example:
 ```python
 import xxm
 
-data = xxm.Dataset.from_sequence(observations)
+data = xxm.Dataset.from_array(observations)
 model = xxm.GaussianLDS.via_pca(data, latent_dim=3)
 
 fit = model.fit(data, num_iters=50)

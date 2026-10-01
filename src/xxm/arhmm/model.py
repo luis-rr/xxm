@@ -246,12 +246,12 @@ class GaussianARHMM:
     def sample(
         self,
         key: jax.Array,
-        lengths: LengthsLike,
+        steps: LengthsLike,
         *,
         initial_history: jax.Array | None = None,
     ) -> Sample:
 
-        ls = LengthsSpec.from_params(lengths, min_length=1)
+        ls = LengthsSpec.from_params(steps, min_length=1)
 
         if initial_history is None:
             return self._model.sample(key, ls)
@@ -481,12 +481,12 @@ class PoissonARHMM:
     def sample(
         self,
         key: jax.Array,
-        lengths: LengthsLike,
+        steps: LengthsLike,
         *,
         initial_history: jax.Array | None = None,
     ) -> Sample:
 
-        ls = LengthsSpec.from_params(lengths, min_length=1)
+        ls = LengthsSpec.from_params(steps, min_length=1)
 
         if initial_history is None:
             return self._model.sample(key, ls)
@@ -620,6 +620,9 @@ class Inferred(typing.Generic[ARHMMFacadeT]):
             most_likely,
             self.data.lengths.shift(-self.model.num_lags),
         )
+
+    def states_conditional(self) -> Poisson | Gaussian:
+        return self.model.states_conditional(self.data)
 
 
 class Fit(typing.NamedTuple, typing.Generic[ARHMMFacadeT]):

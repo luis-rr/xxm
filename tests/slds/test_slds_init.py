@@ -23,7 +23,7 @@ def test_gaussian_via_pca_returns_requested_model_structure():
 
     model = init_gaussian_via_pca(
         key=jax.random.key(0),
-        data=Dataset.from_sequence(observations),
+        data=Dataset.from_array(observations),
         num_states=2,
         latent_dim=1,
     )
@@ -61,7 +61,7 @@ def test_slds_arhmm_warm_start(facade):
     )
     model = facade.via_arhmm(
         jax.random.key(3),
-        Dataset.from_sequence(observations),
+        Dataset.from_array(observations),
         num_states=2,
         latent_dim=1,
         num_arhmm_iters=1,

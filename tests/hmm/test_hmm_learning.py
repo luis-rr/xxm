@@ -154,7 +154,7 @@ def test_poisson_log_likelihoods():
         ]
     )
 
-    result = emissions.log_likelihoods(WeightedObservations.from_sequence(observations))
+    result = emissions.log_likelihoods(WeightedObservations.from_array(observations))
 
     # log P(x | lambda) = x log(lambda) - lambda - log(x!)
     expected = np.array(
@@ -193,7 +193,7 @@ def test_poisson_m_step():
     )
 
     result = emissions.fit_params(
-        WeightedObservations.from_sequence(observations), posterior
+        WeightedObservations.from_array(observations), posterior
     )
 
     expected = np.array(
@@ -231,7 +231,7 @@ def test_gaussian_log_likelihoods():
         ]
     )
 
-    result = emissions.log_likelihoods(WeightedObservations.from_sequence(observations))
+    result = emissions.log_likelihoods(WeightedObservations.from_array(observations))
 
     c = -0.5 * np.log(2 * np.pi)
 
@@ -270,7 +270,7 @@ def test_gaussian_m_step():
     )
 
     result = emissions.fit_params(
-        WeightedObservations.from_sequence(observations), posterior
+        WeightedObservations.from_array(observations), posterior
     )
 
     expected_means = np.array(
@@ -339,7 +339,7 @@ def test_em_step_is_jit_compatible():
         ]
     )
 
-    data = Dataset.from_sequence(observations)
+    data = Dataset.from_array(observations)
     inferred = infer_exact(model, data)
     eager = em_step(inferred, data)
     jitted = jax.jit(em_step)(inferred, data)

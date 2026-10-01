@@ -1,6 +1,7 @@
 """Autoregressive Hidden Markov model public API."""
 
 from .core import Posterior
+from .data import ARDataset
 from .inference import infer_exact
 from .init import (
     init_gaussian_via_kmeans,
@@ -13,6 +14,7 @@ from .model import (
 )
 
 __all__ = [
+    'ARDataset',
     'GaussianARHMM',
     'PoissonARHMM',
     'Posterior',

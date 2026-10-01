@@ -359,9 +359,9 @@ def test_state_emission_likelihood_and_sampling(kind, component):
     for index in FIT_INDICES:
         standalone = component.select(index)
         data_i = (
-            ARDataset.from_sequence(observations[index], L)
+            ARDataset.from_array(observations[index], L)
             if is_ar
-            else WeightedObservations.from_sequence(observations[index])
+            else WeightedObservations.from_array(observations[index])
         )
         np.testing.assert_allclose(
             likelihood[index], standalone.log_likelihoods(data_i), atol=2e-5

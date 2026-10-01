@@ -126,13 +126,13 @@ def test_switching_dynamics_sample_includes_initial():
     dynamics = _make_model().dynamics
 
     initial_latent = jnp.array([2.0])
-    states = Sequences.from_sequence(jnp.array([0, 0, 1, 1]))
+    states = Sequences.from_array(jnp.array([0, 0, 1, 1]))
 
     latents = dynamics.sample(
         jax.random.key(0),
         initial_latent,
         states,
-        inputs=Sequences.from_sequence(jnp.empty((4, 0))),
+        inputs=Sequences.from_array(jnp.empty((4, 0))),
     )
 
     assert latents.values.shape == (4, 1)
@@ -155,7 +155,7 @@ def test_sample():
 
     states, latents, observations = model.sample(
         jax.random.key(0),
-        inputs=Sequences.from_sequence(jnp.empty((4, 0))),
+        inputs=Sequences.from_array(jnp.empty((4, 0))),
     )
     states = states.get()
     latents = latents.get(squeeze=False)
@@ -189,7 +189,7 @@ def test_sample_jittable():
     model = _make_model()
     key = jax.random.key(0)
 
-    inputs = Sequences.from_sequence(jnp.empty((4, 0)))
+    inputs = Sequences.from_array(jnp.empty((4, 0)))
 
     eager = model.sample(key, inputs=inputs)
 

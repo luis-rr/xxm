@@ -210,6 +210,7 @@ def init_poisson_via_kmeans(
     num_states: int,
     num_lags: int,
     self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
+    dtype=jnp.float32,
 ) -> Model[LinearPoisson]:
     """
     Initialize a Poisson AR-HMM conditional on the first ``num_lags`` values.
@@ -232,5 +233,5 @@ def init_poisson_via_kmeans(
         emissions=emissions,
         num_states=num_states,
         self_transition_prob=self_transition_prob,
-        dtype=prepared.dtype,
+        dtype=jnp.result_type(prepared.dtype, dtype),
     )

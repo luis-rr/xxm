@@ -144,7 +144,7 @@ def test_model_fit_params_updates_latent_initial_from_posterior():
     model = _model()
 
     fitted = model.fit_params(
-        data=Dataset.from_sequence(
+        data=Dataset.from_array(
             jnp.array(
                 [
                     [0.0],
@@ -174,7 +174,7 @@ def test_model_fit_params_updates_latent_initial_from_posterior():
 
 def test_variational_em_step_returns_finite_objective():
     model = _model()
-    data = Dataset.from_sequence(jnp.array([[0.0], [1.0], [3.0]]))
+    data = Dataset.from_array(jnp.array([[0.0], [1.0], [3.0]]))
 
     inferred = variational_em_step(
         InferenceState(model=model, posterior=_posterior(), objective=jnp.array(0.0)),

@@ -45,7 +45,7 @@ def make_scalar_poisson_model() -> Model[PoissonEmissions]:
 
 
 def test_exact_inference_returns_one_posterior_per_observation():
-    inferred = infer_exact(make_model(), Dataset.from_sequence(make_observations()))
+    inferred = infer_exact(make_model(), Dataset.from_array(make_observations()))
     posterior = inferred.posterior
     log_normalizer = inferred.objective
 
@@ -59,7 +59,7 @@ def test_exact_inference_returns_one_posterior_per_observation():
 
 def test_exact_inference_is_jittable():
     model = make_model()
-    observations = Dataset.from_sequence(make_observations())
+    observations = Dataset.from_array(make_observations())
 
     eager = infer_exact(model, observations)
     jitted = jax.jit(infer_exact)(model, observations)
@@ -80,8 +80,8 @@ def test_withheld_observations_do_not_change_inference(make, infer):
     dim = model.emissions.dist.output_dim
     values = jnp.ones((3, dim))
     visible = jnp.array([True, False, True])
-    original = Dataset.from_sequence(values, visible=visible)
-    changed = Dataset.from_sequence(values.at[1].set(100.0), visible=visible)
+    original = Dataset.from_array(values, visible=visible)
+    changed = Dataset.from_array(values.at[1].set(100.0), visible=visible)
     expected = infer(model, original)
     actual = infer(model, changed)
     np.testing.assert_allclose(
@@ -130,9 +130,7 @@ def test_hidden_timesteps_keep_known_inputs_and_padding_excludes_transitions():
 def test_laplace_recovers_known_scalar_map():
     model = make_scalar_poisson_model()
 
-    posterior = infer_laplace(
-        model, Dataset.from_sequence(jnp.array([[1.0]]))
-    ).posterior
+    posterior = infer_laplace(model, Dataset.from_array(jnp.array([[1.0]]))).posterior
 
     assert posterior.batch_shape == ()
     np.testing.assert_allclose(posterior.means, [[0.0]], atol=1e-6)
@@ -142,7 +140,7 @@ def test_laplace_newton_steps_do_not_decrease_objective():
     model = make_scalar_poisson_model()
     observations = jnp.array([[3.0]])
 
-    data = Dataset.from_sequence(observations)
+    data = Dataset.from_array(observations)
 
     laplace_model = _NewtonSearchModel(
         latent_chain=to_chain(model=model, data=data),

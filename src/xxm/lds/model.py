@@ -200,13 +200,13 @@ class GaussianLDS:
     def sample(
         self,
         key: jax.Array,
-        lengths: LengthsLike,
+        steps: LengthsLike,
         *,
         inputs: jax.Array | None = None,
     ) -> Sample:
         r"""Sample latent states and observations."""
 
-        ls = LengthsSpec.from_params(lengths, min_length=1)
+        ls = LengthsSpec.from_params(steps, min_length=1)
         input_sequences = _sampling_inputs(self._model, ls, inputs)
 
         return self._model.sample(key, inputs=input_sequences)
@@ -369,13 +369,13 @@ class PoissonLDS:
     def sample(
         self,
         key: jax.Array,
-        lengths: LengthsLike,
+        steps: LengthsLike,
         *,
         inputs: jax.Array | None = None,
     ) -> Sample:
         r"""Sample latent states and observations."""
 
-        ls = LengthsSpec.from_params(lengths, min_length=1)
+        ls = LengthsSpec.from_params(steps, min_length=1)
         input_sequences = _sampling_inputs(self._model, ls, inputs)
 
         return self._model.sample(key, inputs=input_sequences)

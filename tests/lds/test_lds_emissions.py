@@ -33,7 +33,7 @@ def test_gaussian_potential_matches_known_value():
     )
 
     potential = emissions.compute_potential(
-        WeightedObservations.from_sequence(jnp.array([[2.0, 3.0]]))
+        WeightedObservations.from_array(jnp.array([[2.0, 3.0]]))
     )
 
     expected_precision = jnp.array(
@@ -75,7 +75,7 @@ def test_gaussian_log_likelihood_matches_known_value():
     )
 
     value = emissions.log_likelihood(
-        observations=WeightedObservations.from_sequence(jnp.array([[1.0, 0.0]])),
+        observations=WeightedObservations.from_array(jnp.array([[1.0, 0.0]])),
         latents=jnp.array([[1.0, -1.0]]),
     )
 
@@ -124,7 +124,7 @@ def test_gaussian_fit_recovers_known_parameters():
     )
 
     fitted = emissions.fit_params(
-        WeightedObservations.from_sequence(observations), posterior
+        WeightedObservations.from_array(observations), posterior
     )
 
     expected_coefficient = 2.0 / (1.0 + gaussian_fit.DEFAULT_RIDGE)
@@ -157,7 +157,7 @@ def test_gaussian_sample_has_expected_shape():
 
     sample = emissions.sample(
         jax.random.key(0),
-        Sequences.from_sequence(jnp.zeros((1, 2))),
+        Sequences.from_array(jnp.zeros((1, 2))),
     )
 
     assert sample.values.shape == (1, 3)
@@ -184,7 +184,7 @@ def test_gaussian_emissions_potential_has_one_factor_per_observation():
     )
 
     potential = emissions.compute_potential(
-        WeightedObservations.from_sequence(observations)
+        WeightedObservations.from_array(observations)
     )
 
     # For R = 4 and C = 2:
@@ -251,7 +251,7 @@ def test_poisson_log_likelihood_matches_known_scalar_value():
     )
 
     value = emissions.log_likelihood(
-        observations=WeightedObservations.from_sequence(jnp.array([[2.0]])),
+        observations=WeightedObservations.from_array(jnp.array([[2.0]])),
         latents=jnp.array([[0.0]]),
     )
 
@@ -272,7 +272,7 @@ def test_poisson_log_likelihood_handles_zero_count():
     )
 
     value = emissions.log_likelihood(
-        observations=WeightedObservations.from_sequence(jnp.array([[0.0]])),
+        observations=WeightedObservations.from_array(jnp.array([[0.0]])),
         latents=jnp.array([[0.0]]),
     )
 
@@ -286,7 +286,7 @@ def test_poisson_local_potential_matches_value_gradient_and_hessian():
         ),
     )
 
-    observations = WeightedObservations.from_sequence(jnp.array([[3.0]]))
+    observations = WeightedObservations.from_array(jnp.array([[3.0]]))
     reference = jnp.array([[0.5]])
 
     potential = emissions.compute_local_potential(
@@ -350,7 +350,7 @@ def test_poisson_fit_recovers_known_parameters():
     )
 
     fitted = initial_emissions.fit_params(
-        WeightedObservations.from_sequence(observations), posterior
+        WeightedObservations.from_array(observations), posterior
     )
 
     np.testing.assert_allclose(
@@ -374,7 +374,7 @@ def test_poisson_sample_has_expected_shape_and_values():
 
     sample = emissions.sample(
         jax.random.key(0),
-        Sequences.from_sequence(jnp.zeros((1, 2))),
+        Sequences.from_array(jnp.zeros((1, 2))),
     )
 
     assert sample.values.shape == (1, 3)
@@ -397,7 +397,7 @@ def test_gaussian_methods_are_jittable():
         ),
     )
 
-    observations = WeightedObservations.from_sequence(jnp.ones((3, 2)))
+    observations = WeightedObservations.from_array(jnp.ones((3, 2)))
     latents = jnp.zeros((3, 2))
     posterior = GaussianChainMarginals(
         means=latents,
@@ -422,7 +422,7 @@ def test_poisson_methods_are_jittable():
         ),
     )
 
-    observations = WeightedObservations.from_sequence(jnp.ones((3, 2)))
+    observations = WeightedObservations.from_array(jnp.ones((3, 2)))
     latents = jnp.zeros((3, 2))
     posterior = GaussianChainMarginals(
         means=latents,

@@ -48,16 +48,16 @@ def test_sequences_store_lengths_and_crop_without_losing_dense_horizon():
 
 
 def test_sequences_allow_scalar_events_and_empty_time():
-    scalar = Sequences.from_sequence(jnp.arange(2))
+    scalar = Sequences.from_array(jnp.arange(2))
     assert (scalar.batch_shape, scalar.event_shape, scalar.max_steps) == ((), (), 2)
     stacked = Sequences.stack(
-        [scalar, Sequences.from_sequence(jnp.empty((0,), dtype=int))]
+        [scalar, Sequences.from_array(jnp.empty((0,), dtype=int))]
     )
     assert stacked.values.shape == (2, 2)
     np.testing.assert_array_equal(stacked.lengths.values, [2, 0])
     np.testing.assert_array_equal(stacked.values, [[0, 1], [0, 0]])
 
-    vectors = Sequences.from_sequences([jnp.empty((0, 1)), jnp.ones((2, 1))])
+    vectors = Sequences.from_arrays([jnp.empty((0, 1)), jnp.ones((2, 1))])
     assert vectors.values.shape == (2, 2, 1)
     assert vectors.event_shape == (1,)
     np.testing.assert_array_equal(vectors.lengths.values, [0, 2])
@@ -95,7 +95,7 @@ def test_weighted_observations_validate_lengths_and_outside_weights_on_host():
     assert observations.max_steps == 3
     transformed = jax.jit(lambda data: data.broadcast(1).squeeze(0))(observations)
     np.testing.assert_array_equal(transformed.lengths.values, lengths.values)
-    empty = WeightedObservations.from_sequence(jnp.zeros((0, 1)))
+    empty = WeightedObservations.from_array(jnp.zeros((0, 1)))
     assert empty.max_steps == 0
     assert int(empty.lengths.values) == 0
 
