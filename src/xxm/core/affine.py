@@ -275,3 +275,56 @@ class Affine(typing.NamedTuple):
     def permute(self, permutation, axis: int = 0) -> typing.Self:
         """Reorder entries along a batch axis."""
         return batch.permute(self, permutation, axis=axis)
+
+    @classmethod
+    def build_reorientation(
+        cls,
+        signs: jax.Array,
+        dtype: jax.typing.DTypeLike,
+    ) -> typing.Self:
+        signs = jnp.asarray(signs, dtype=dtype)
+        variable_dim = signs.shape[-1]
+
+        coefficients = jnp.eye(variable_dim, dtype=dtype) * signs[..., None, :]
+
+        return cls(
+            coefficients=coefficients,
+            bias=jnp.zeros_like(signs),
+        )
+
+    @classmethod
+    def build_permutation(
+        cls,
+        permutation: jax.Array,
+        dtype: jax.typing.DTypeLike,
+    ) -> typing.Self:
+        permutation = jnp.asarray(permutation)
+        variable_dim = permutation.shape[-1]
+
+        return cls(
+            coefficients=jax.nn.one_hot(
+                permutation,
+                variable_dim,
+                dtype=dtype,
+            ),
+            bias=jnp.zeros(permutation.shape, dtype=dtype),
+        )
+
+    @classmethod
+    def build_shift(
+        cls,
+        offset: jax.Array,
+        dtype: jax.typing.DTypeLike,
+    ) -> typing.Self:
+        offset = jnp.asarray(offset, dtype=dtype)
+        variable_dim = offset.shape[-1]
+
+        coefficients = jnp.broadcast_to(
+            jnp.eye(variable_dim, dtype=dtype),
+            offset.shape[:-1] + (variable_dim, variable_dim),
+        )
+
+        return cls(
+            coefficients=coefficients,
+            bias=-offset,
+        )

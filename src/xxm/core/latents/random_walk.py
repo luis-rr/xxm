@@ -205,30 +205,9 @@ class GaussianRandomWalk(typing.NamedTuple):
         self,
         offset: jax.Array,
     ) -> typing.Self:
-        r"""Shift random-walk coordinates by a constant offset.
-
-        Defines
-
-        $$
-        x'_t = x_t - c.
-        $$
-
-        The initial mean is shifted by $-c$ while the innovation
-        distribution is unchanged.
-        """
-        offset = jnp.asarray(offset)
-
-        expected_shape = self.batch_shape + (self.variable_dim,)
-
-        if offset.shape != expected_shape:
-            raise ValueError(
-                f'offset must have shape {expected_shape}, got {offset.shape}'
-            )
-
+        """Shift the random-walk level while preserving its increments."""
         return self._replace(
-            initial=self.initial._replace(
-                mean=self.initial.mean - offset,
-            ),
+            initial=self.initial.shift_variables(offset),
         )
 
     def select(self, index: batch.SelT) -> typing.Self:
@@ -460,52 +439,31 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
         self,
         signs: jax.Array,
     ) -> typing.Self:
-        """Reorient random-walk variable dimensions."""
+        """Reorient gated random-walk variable dimensions."""
         return self._replace(
             initial=self.initial.reorient_variables(signs),
-            active_innovation=(self.active_innovation.reorient_variables(signs)),
-            inactive_innovation=(self.inactive_innovation.reorient_variables(signs)),
+            active_innovation=self.active_innovation.reorient_variables(signs),
+            inactive_innovation=self.inactive_innovation.reorient_variables(signs),
         )
 
     def permute_variables(
         self,
         permutation: jax.Array,
     ) -> typing.Self:
-        """Relabel random-walk variable dimensions."""
+        """Relabel gated random-walk variable dimensions."""
         return self._replace(
             initial=self.initial.permute_variables(permutation),
-            active_innovation=(self.active_innovation.permute_variables(permutation)),
-            inactive_innovation=(
-                self.inactive_innovation.permute_variables(permutation)
-            ),
+            active_innovation=self.active_innovation.permute_variables(permutation),
+            inactive_innovation=self.inactive_innovation.permute_variables(permutation),
         )
 
     def shift_variables(
         self,
         offset: jax.Array,
     ) -> typing.Self:
-        r"""Shift gated random-walk coordinates by a constant offset.
-
-        Defines
-
-        $$
-        x'_{t,k} = x_{t,k} - c_k.
-        $$
-
-        Initial means are shifted by $-c_k$ while active and inactive
-        innovation distributions are unchanged.
-        """
-        offset = jnp.asarray(offset)
-
-        if offset.shape != self.initial.mean.shape:
-            raise ValueError(
-                f'offset must have shape {self.initial.mean.shape}, got {offset.shape}'
-            )
-
+        """Shift the gated random-walk level while preserving its increments."""
         return self._replace(
-            initial=self.initial._replace(
-                mean=self.initial.mean - offset,
-            ),
+            initial=self.initial.shift_variables(offset),
         )
 
     def select(

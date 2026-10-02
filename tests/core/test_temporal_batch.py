@@ -9,7 +9,7 @@ from xxm.core.data import Sequences
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
-from xxm.core.latents.hermite import HermiteSpline
+from xxm.core.latents.hermite import HermiteGaussian
 from xxm.core.latents.random_walk import GatedGaussianRandomWalk, GaussianRandomWalk
 from xxm.core.lengths import Lengths, LengthsSpec
 
@@ -213,44 +213,81 @@ def test_gated_random_walk_aligns_gates_and_replicates(steps):
 
 def hermite():
     # The common-batch test is about structural operations, so construct a
-    # valid spline directly instead of rebuilding the function prior each time.
-    return HermiteSpline(
-        coefficient_prior=Gaussian(
+    # valid Hermite Gaussian directly from its flattened coefficient Gaussian.
+    return HermiteGaussian.from_coefficient_gaussian(
+        Gaussian(
             mean=jnp.zeros((2, 3, 4)),
-            covariance=jnp.broadcast_to(jnp.eye(4), (2, 3, 4, 4)),
+            covariance=jnp.broadcast_to(
+                jnp.eye(4),
+                (2, 3, 4, 4),
+            ),
         ),
-        num_motifs=2,
+        variable_dim=2,
     )
 
 
 def test_hermite_uses_each_sequences_normalized_transition_grid():
-    spline = HermiteSpline(gaussian(batch=(3,), dim=1), num_motifs=1)
-    ls = LengthsSpec(Lengths.from_values([4, 2, 1]), 4).transitions()
-    weights = spline.sample_from_coefficients(jnp.ones((3, 1)), ls)
-    np.testing.assert_array_equal(weights.lengths.values, [3, 1, 0])
+    spline = HermiteGaussian.from_coefficient_gaussian(
+        gaussian(batch=(3,), dim=1),
+        variable_dim=1,
+    )
+
+    ls = LengthsSpec(
+        Lengths.from_values([4, 2, 1]),
+        4,
+    ).transitions()
+
+    weights = spline.sample_from_coefficients(
+        jnp.ones((3, 1)),
+        ls,
+    )
+
+    np.testing.assert_array_equal(
+        weights.lengths.values,
+        [3, 1, 0],
+    )
     assert weights.values.shape == (3, 3, 1)
 
     # With two knots, zero integral means opposite endpoints and a zero midpoint.
     assert abs(float(weights.values[0, 0, 0])) > 0.1
-    np.testing.assert_allclose(weights.values[0, 1], 0, atol=1e-6)
-    np.testing.assert_allclose(weights.values[0, 2], -weights.values[0, 0], atol=1e-6)
-    np.testing.assert_allclose(weights.values[1, 0], weights.values[0, 0], atol=1e-6)
-    np.testing.assert_array_equal(weights.values[1, 1:], 0)
-    np.testing.assert_array_equal(weights.values[2], 0)
+    np.testing.assert_allclose(
+        weights.values[0, 1],
+        0,
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        weights.values[0, 2],
+        -weights.values[0, 0],
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        weights.values[1, 0],
+        weights.values[0, 0],
+        atol=1e-6,
+    )
+    np.testing.assert_array_equal(
+        weights.values[1, 1:],
+        0,
+    )
+    np.testing.assert_array_equal(
+        weights.values[2],
+        0,
+    )
 
 
 def test_hermite_function_prior_constructor():
     # Keep explicit coverage of the factory, but use its minimal valid problem.
-    spline = HermiteSpline.from_function_prior(
-        num_motifs=1,
+    spline = HermiteGaussian.from_function_prior(
+        variable_dim=1,
         num_knots=2,
         alpha_amp=1.0,
         alpha_smooth=1.0,
     )
+
     assert spline.batch_shape == ()
-    assert spline.num_motifs == 1
+    assert spline.variable_dim == 1
     assert spline.num_knots == 2
-    assert spline.coefficient_prior.mean.shape == (1,)
+    assert spline.coefficients.mean.shape == (1,)
 
 
 @pytest.mark.parametrize(
@@ -341,4 +378,5 @@ def test_temporal_common_batch_api(process):
         assert transformed.num_gates == 4
         assert transformed.initial.batch_shape == (3, 4)
     elif process == 'hermite':
-        assert transformed.num_motifs == obj.num_motifs
+        assert transformed.variable_dim == obj.variable_dim
+        assert transformed.basis == obj.basis

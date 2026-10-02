@@ -23,6 +23,29 @@ class Batchable(typing.Protocol):
     def batch_shape(self) -> ShapeT: ...
 
 
+class VariableBatchable(Batchable, typing.Protocol):
+    """Batchable object with a transformable semantic variable dimension."""
+
+    @property
+    def variable_dim(self) -> int:
+        """Number of represented variables."""
+        ...
+
+    def reorient_variables(
+        self,
+        signs: jax.Array,
+    ) -> typing.Self:
+        """Flip variable coordinate orientations."""
+        ...
+
+    def permute_variables(
+        self,
+        permutation: jax.Array,
+    ) -> typing.Self:
+        """Relabel variable coordinates."""
+        ...
+
+
 _BatchableT = typing.TypeVar('_BatchableT', bound=Batchable)
 _LeftT = typing.TypeVar('_LeftT', bound=Batchable)
 _RightT = typing.TypeVar('_RightT', bound=Batchable)
@@ -346,13 +369,41 @@ def insertion(shape, axis: int, ndim: int) -> tuple[ShapeT, int]:
     return shape, axis_index(axis, ndim + 1)
 
 
-def broadcast_array(values: jax.Array, shape: ShapeT, axis: int) -> jax.Array:
+def broadcast_array(
+    values: jax.Array,
+    shape: ShapeT,
+    axis: int,
+) -> jax.Array:
     """Insert replicated dimensions at a normalized batch position."""
     prefix, suffix = values.shape[:axis], values.shape[axis:]
     return jnp.broadcast_to(
         values.reshape(prefix + (1,) * len(shape) + suffix),
         prefix + shape + suffix,
     )
+
+
+def broadcast_trailing(
+    values: jax.Array,
+    batch_shape: ShapeT,
+    trailing_shape: ShapeT,
+) -> jax.Array:
+    """Broadcast values over a structural batch with fixed trailing shape."""
+    values = jnp.asarray(values)
+
+    ndim = len(trailing_shape)
+
+    if ndim and values.shape[-ndim:] != trailing_shape:
+        raise ValueError(f'Values must end with {trailing_shape}; got {values.shape}')
+
+    target_shape = batch_shape + trailing_shape
+
+    try:
+        return jnp.broadcast_to(values, target_shape)
+
+    except ValueError as error:
+        raise ValueError(
+            f'Values must broadcast to {target_shape}; got {values.shape}'
+        ) from error
 
 
 def squeeze_axes(shape: ShapeT, axis) -> tuple[int, ...]:

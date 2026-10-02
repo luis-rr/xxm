@@ -1370,6 +1370,109 @@ class GaussianChainMarginals(typing.NamedTuple):
 
         return self.covariances + extra
 
+    def reorient_variables(
+        self,
+        signs: jax.Array,
+    ) -> typing.Self:
+        """Flip variable signs globally or independently by chain batch."""
+        signs = batch.broadcast_trailing(
+            signs,
+            self.batch_shape,
+            (self.variable_dim,),
+        )
+
+        return self._replace(
+            means=(self.means * signs[..., None, :]),
+            covariances=(
+                signs[..., None, :, None] * self.covariances * signs[..., None, None, :]
+            ),
+            cross_covariances=(
+                signs[..., None, :, None]
+                * self.cross_covariances
+                * signs[..., None, None, :]
+            ),
+        )
+
+    def permute_variables(
+        self,
+        permutation: jax.Array,
+    ) -> typing.Self:
+        """Relabel variable dimensions globally or independently by chain batch."""
+        permutation = batch.broadcast_trailing(
+            permutation,
+            self.batch_shape,
+            (self.variable_dim,),
+        )
+
+        mean_indices = jnp.broadcast_to(permutation[..., None, :], self.means.shape)
+
+        means = jnp.take_along_axis(self.means, mean_indices, axis=-1)
+
+        covariance_row_indices = jnp.broadcast_to(
+            permutation[..., None, :, None],
+            self.covariances.shape,
+        )
+
+        covariances = jnp.take_along_axis(
+            self.covariances,
+            covariance_row_indices,
+            axis=-2,
+        )
+
+        covariance_column_indices = jnp.broadcast_to(
+            permutation[..., None, None, :],
+            self.covariances.shape,
+        )
+
+        covariances = jnp.take_along_axis(
+            covariances,
+            covariance_column_indices,
+            axis=-1,
+        )
+
+        cross_row_indices = jnp.broadcast_to(
+            permutation[..., None, :, None],
+            self.cross_covariances.shape,
+        )
+
+        cross_covariances = jnp.take_along_axis(
+            self.cross_covariances,
+            cross_row_indices,
+            axis=-2,
+        )
+
+        cross_column_indices = jnp.broadcast_to(
+            permutation[..., None, None, :],
+            self.cross_covariances.shape,
+        )
+
+        cross_covariances = jnp.take_along_axis(
+            cross_covariances,
+            cross_column_indices,
+            axis=-1,
+        )
+
+        return self._replace(
+            means=means,
+            covariances=covariances,
+            cross_covariances=cross_covariances,
+        )
+
+    def shift_variables(
+        self,
+        offset: jax.Array,
+    ) -> typing.Self:
+        """Shift all chain-variable coordinates as x_t' = x_t - offset."""
+        offset = batch.broadcast_trailing(
+            offset,
+            self.batch_shape,
+            (self.variable_dim,),
+        )
+
+        return self._replace(
+            means=(self.means - offset[..., None, :]),
+        )
+
     def raw_cross_moments(self) -> jax.Array:
         r"""Return raw cross moments $\mathbb{E}_q[x_t x_{t+1}^\top]$ for $T-1$ pairs."""
         extra = jnp.einsum(

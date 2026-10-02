@@ -59,22 +59,11 @@ class Gaussian(typing.NamedTuple):
         permutation: jax.Array,
     ) -> typing.Self:
         """Reorder variable dimensions globally or independently by batch."""
-        permutation = jnp.asarray(permutation)
-
-        global_shape = (self.variable_dim,)
-        batched_shape = self.batch_shape + global_shape
-
-        if permutation.shape == global_shape:
-            permutation = jnp.broadcast_to(
-                permutation,
-                batched_shape,
-            )
-        elif permutation.shape != batched_shape:
-            raise ValueError(
-                'permutation must have shape '
-                f'{global_shape} or {batched_shape}, '
-                f'got {permutation.shape}'
-            )
+        permutation = batch.broadcast_trailing(
+            permutation,
+            self.batch_shape,
+            (self.variable_dim,),
+        )
 
         mean = jnp.take_along_axis(
             self.mean,
@@ -86,6 +75,7 @@ class Gaussian(typing.NamedTuple):
             permutation[..., :, None],
             self.covariance.shape,
         )
+
         covariance = jnp.take_along_axis(
             self.covariance,
             row_indices,
@@ -96,6 +86,7 @@ class Gaussian(typing.NamedTuple):
             permutation[..., None, :],
             self.covariance.shape,
         )
+
         covariance = jnp.take_along_axis(
             covariance,
             column_indices,
@@ -109,33 +100,33 @@ class Gaussian(typing.NamedTuple):
 
     def reorient_variables(
         self,
-        coefficient_signs: jax.Array,
+        signs: jax.Array,
     ) -> typing.Self:
         """Flip variable signs globally or independently by batch."""
-        coefficient_signs = jnp.asarray(coefficient_signs)
-
-        global_shape = (self.variable_dim,)
-        batched_shape = self.batch_shape + global_shape
-
-        if coefficient_signs.shape == global_shape:
-            coefficient_signs = jnp.broadcast_to(
-                coefficient_signs,
-                batched_shape,
-            )
-        elif coefficient_signs.shape != batched_shape:
-            raise ValueError(
-                'coefficient_signs must have shape '
-                f'{global_shape} or {batched_shape}, '
-                f'got {coefficient_signs.shape}'
-            )
+        signs = batch.broadcast_trailing(
+            signs,
+            self.batch_shape,
+            (self.variable_dim,),
+        )
 
         return self._replace(
-            mean=self.mean * coefficient_signs,
-            covariance=(
-                coefficient_signs[..., :, None]
-                * self.covariance
-                * coefficient_signs[..., None, :]
-            ),
+            mean=self.mean * signs,
+            covariance=(signs[..., :, None] * self.covariance * signs[..., None, :]),
+        )
+
+    def shift_variables(
+        self,
+        offset: jax.Array,
+    ) -> typing.Self:
+        """Shift variable coordinates as x' = x - offset."""
+        offset = batch.broadcast_trailing(
+            offset,
+            self.batch_shape,
+            (self.variable_dim,),
+        )
+
+        return self._replace(
+            mean=self.mean - offset,
         )
 
     @property
