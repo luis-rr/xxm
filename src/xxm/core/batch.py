@@ -1,5 +1,6 @@
 """Structural batch helpers for batch-aligned arrays and PyTrees."""
 
+import itertools
 import math
 import operator
 import typing
@@ -376,6 +377,10 @@ def validate_selection(index: SelT, shape: ShapeT) -> None:
             raise IndexError(
                 f'selection index out of bounds for batch axis {axis} with size {size}'
             )
+
+
+def iter_keys(batch_shape: ShapeT) -> typing.Iterator[tuple[int, ...]]:
+    return itertools.product(*(range(size) for size in batch_shape))
 
 
 def insertion(shape, axis: int, ndim: int) -> tuple[ShapeT, int]:

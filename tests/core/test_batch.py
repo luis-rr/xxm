@@ -109,6 +109,22 @@ def test_sequences_get_preserves_negative_indices_and_crops_valid_prefix():
     )
 
 
+@pytest.mark.parametrize('shape', [(), (3,), (2, 3), (2, 1, 3), (2, 0, 3)])
+def test_sequences_items_follow_batch_order_and_crop_and_squeeze_arrays(shape):
+    lengths = (jnp.arange(np.prod(shape), dtype=int) % 4).reshape(shape)
+    values = jnp.arange(np.prod(shape) * 4).reshape(shape + (4, 1))
+    sequences = Sequences.from_padded(values, Lengths(lengths))
+
+    items = sequences.items()
+    assert iter(items) is items
+    pairs = list(items)
+    assert [index for index, _ in pairs] == list(np.ndindex(shape))
+    for index, array in pairs:
+        expected = jnp.squeeze(values[index][: int(lengths[index])])
+        np.testing.assert_array_equal(array, expected)
+        np.testing.assert_array_equal(array, sequences.get(index))
+
+
 def test_paired_batch_operations_preserve_all_components():
     left = _gaussian()
     right = left._replace(mean=left.mean + 20.0)

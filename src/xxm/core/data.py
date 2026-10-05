@@ -429,6 +429,16 @@ class Sequences:
 
         return result
 
+    def items(self) -> typing.Iterator[tuple[tuple[int, ...], jax.Array]]:
+        """Yield `(index, get(index))` pairs on the host in batch order.
+
+        Indices are tuples with one integer per batch axis; the last axis
+        varies fastest. An unbatched sequence yields index `()` once, and an
+        empty batch yields no items. Arrays use the default squeezing of `get`.
+        """
+        for index in batch.iter_keys(self.batch_shape):
+            yield index, self.get(index)
+
     def unpack(self) -> tuple[jax.Array, ...]:
         """Crop an unbatched sequence or flat collection on the host."""
         if not self.batch_shape:
