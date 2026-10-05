@@ -411,10 +411,12 @@ class Sequences:
         *,
         squeeze: bool = True,
     ) -> jax.Array:
-        """Retrieve exactly one unpadded `(T_i, *E)` array on the host."""
+        """Retrieve one unpadded `(T_i, *E)` array on the host."""
         if index is None:
             selected = self
+
         else:
+            batch.validate_selection(index, self.batch_shape)
             selected = self.select(index)
 
         if selected.batch_shape:

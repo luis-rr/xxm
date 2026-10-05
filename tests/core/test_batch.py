@@ -67,6 +67,48 @@ def test_select_integer_arrays_is_jittable():
     )
 
 
+@pytest.mark.parametrize(
+    'index',
+    [(2, 0), (-3, 0), (0, 3), (0, -4), ([0, 2], 0), (0, jnp.array([0, -4]))],
+)
+def test_validate_selection_rejects_out_of_bounds_indices(index):
+    with pytest.raises(IndexError, match='out of bounds'):
+        batch.validate_selection(index, (2, 3))
+
+
+@pytest.mark.parametrize(
+    'index',
+    [(0, 2), (-2, -3), (Ellipsis, -1), ([1, 0], slice(None)), slice(0, 10)],
+)
+def test_validate_selection_accepts_valid_indices_and_clipped_slices(index):
+    batch.validate_selection(index, (2, 3))
+
+
+@pytest.mark.parametrize('index', [0, -1])
+def test_validate_selection_rejects_integer_indices_on_empty_axes(index):
+    with pytest.raises(IndexError, match='out of bounds'):
+        batch.validate_selection(index, (0,))
+
+
+@pytest.mark.parametrize('index', [(2, 0), (-3, 0), (0, 3), (0, -4)])
+def test_sequences_get_rejects_out_of_bounds_indices(index):
+    sequences = Sequences.from_padded(
+        jnp.arange(24).reshape(2, 3, 4), Lengths.full((2, 3), 4)
+    )
+    with pytest.raises(IndexError, match='out of bounds'):
+        sequences.get(index)
+
+
+def test_sequences_get_preserves_negative_indices_and_crops_valid_prefix():
+    sequences = Sequences.from_padded(
+        jnp.arange(24).reshape(2, 3, 4), Lengths(jnp.array([[4, 3, 2], [1, 2, 3]]))
+    )
+    np.testing.assert_array_equal(sequences.get((-1, -1)), sequences.values[1, 2, :3])
+    np.testing.assert_array_equal(
+        sequences.get((jnp.array(0), jnp.array(2))), sequences.values[0, 2, :2]
+    )
+
+
 def test_paired_batch_operations_preserve_all_components():
     left = _gaussian()
     right = left._replace(mean=left.mean + 20.0)

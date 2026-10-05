@@ -7,6 +7,7 @@ from types import EllipsisType
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 ShapeT = tuple[int, ...]
 
@@ -358,6 +359,23 @@ def selection(index: SelT, ndim: int) -> tuple:
     if not ellipses:
         result += (slice(None),) * (ndim - consumed)
     return result
+
+
+def validate_selection(index: SelT, shape: ShapeT) -> None:
+    """Validate batch selection bounds on the host, outside JAX transforms.
+
+    Integer indices must lie in ``[-size, size)`` for their axis. Slices retain
+    ordinary clipping semantics; valid negative indices count from the end.
+    """
+    index = selection(index, len(shape))
+    for axis, (item, size) in enumerate(zip(index, shape, strict=True)):
+        if isinstance(item, slice):
+            continue
+        indices = np.asarray(item)
+        if np.any(indices < -size) or np.any(indices >= size):
+            raise IndexError(
+                f'selection index out of bounds for batch axis {axis} with size {size}'
+            )
 
 
 def insertion(shape, axis: int, ndim: int) -> tuple[ShapeT, int]:
