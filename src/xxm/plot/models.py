@@ -124,7 +124,13 @@ def plot_seq_2d_comparison(
 
 
 def plot_fit_progress(
-    objective, *, name='Log Likelihood', title='', figsize=(6, 6), **kwargs
+    objective,
+    *,
+    name='Log Likelihood',
+    title='',
+    figsize=(6, 6),
+    linthresh=1e-3,
+    **kwargs,
 ):
     """Plot an objective and its iteration-to-iteration changes."""
     values = np.asarray(objective)
@@ -147,7 +153,7 @@ def plot_fit_progress(
         ax.set_xlabel('iteration')
     axs[0, 0].set(ylabel=name, title=title)
     axs[1, 0].set_ylabel('change in ' + name)
-    axs[1, 0].set_yscale('symlog', linthresh=1e-3)
+    axs[1, 0].set_yscale('symlog', linthresh=linthresh)
     return axs[:, 0]
 
 
