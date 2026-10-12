@@ -5,7 +5,7 @@ from xxm.core.optim.loop import Fit
 from xxm.core.optim.loop import fit_one as _fit_one
 
 from .core import Model, Posterior
-from .data import ARDataset
+from .data import ARDatasetCollection
 from .emissions import ConditionalDistT
 from .inference import _infer_prepared
 
@@ -15,7 +15,7 @@ def _em_step(
         Model[ConditionalDistT],
         Posterior,
     ],
-    data: ARDataset,
+    data: ARDatasetCollection,
 ) -> InferenceState[
     Model[ConditionalDistT],
     Posterior,
@@ -36,7 +36,7 @@ def em_step(
         Model[ConditionalDistT],
         Posterior,
     ],
-    data: ARDataset,
+    data: ARDatasetCollection,
 ) -> InferenceState[
     Model[ConditionalDistT],
     Posterior,
@@ -55,7 +55,7 @@ def em_step(
 
 def _fit_prepared(
     model: Model[ConditionalDistT],
-    data: ARDataset,
+    data: ARDatasetCollection,
     num_iters: int,
     progress: bool | str = 'EM',
 ) -> Fit[
@@ -64,10 +64,7 @@ def _fit_prepared(
         Posterior,
     ]
 ]:
-    inferred = _infer_prepared(
-        model,
-        data,
-    )
+    inferred = _infer_prepared(model, data)
 
     return _fit_one(
         inferred,
@@ -80,7 +77,7 @@ def _fit_prepared(
 
 def fit_em(
     model: Model[ConditionalDistT],
-    data: ARDataset,
+    data: ARDatasetCollection,
     num_iters: int,
     progress: bool | str = 'EM',
 ) -> Fit[

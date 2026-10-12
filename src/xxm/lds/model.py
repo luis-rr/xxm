@@ -10,9 +10,10 @@ from jax import numpy as jnp
 
 from xxm.core.affine import Affine
 from xxm.core.chains.gaussian import GaussianChainMarginals as Posterior
-from xxm.core.data import Dataset, Sequences
+from xxm.core.data import DatasetCollection, Sequences
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
+from xxm.core.emissions.collection import EmissionsCollection
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
 from xxm.core.lengths import LengthsLike, LengthsSpec
@@ -113,10 +114,9 @@ class GaussianLDS:
         """Dimension $D_x$ of the continuous latent state."""
         return self._model.dynamics.latent_dim
 
-    @property
-    def observation_dim(self) -> int:
+    def observation_dim(self, session: int | None = None) -> int:
         """Dimension $D_y$ of each observation."""
-        return self._model.emissions.dist.output_dim
+        return self._model.emissions.get(session).observation_dim
 
     @property
     def input_dim(self) -> int:
@@ -132,10 +132,9 @@ class GaussianLDS:
         r"""Return $p(x_t\mid x_{t-1},u_t)$ conditioned on a known input."""
         return _conditioned_dynamics(self._model, inputs)
 
-    @property
-    def emissions(self) -> LinearGaussian:
+    def emissions(self, session: int | None = None) -> LinearGaussian:
         """Linear-Gaussian observation distribution."""
-        return self._model.emissions.dist
+        return self._model.emissions.get(session).dist
 
     @classmethod
     def from_params(
@@ -166,13 +165,17 @@ class GaussianLDS:
             _model=Model(
                 initial=initial,
                 dynamics=dynamics,
-                emissions=GaussianEmissions(
-                    dist=LinearGaussian(
-                        affine=Affine(
-                            coefficients=emission_coefficients,
-                            bias=emission_bias,
+                emissions=EmissionsCollection(
+                    (
+                        GaussianEmissions(
+                            dist=LinearGaussian(
+                                affine=Affine(
+                                    coefficients=emission_coefficients,
+                                    bias=emission_bias,
+                                ),
+                                covariance=emission_covariance,
+                            )
                         ),
-                        covariance=emission_covariance,
                     )
                 ),
             ),
@@ -181,7 +184,7 @@ class GaussianLDS:
     @classmethod
     def via_pca(
         cls,
-        data: Dataset,
+        data: DatasetCollection,
         latent_dim: int,
         *,
         ridge=gaussian_fit.DEFAULT_RIDGE,
@@ -203,19 +206,21 @@ class GaussianLDS:
         steps: LengthsLike,
         *,
         inputs: jax.Array | None = None,
+        session: int | None = None,
     ) -> Sample:
         r"""Sample latent states and observations."""
 
         ls = LengthsSpec.from_params(steps, min_length=1)
         input_sequences = _sampling_inputs(self._model, ls, inputs)
 
-        return self._model.sample(key, inputs=input_sequences)
+        return self._model.sample(key, inputs=input_sequences, session=session)
 
     def infer(
         self,
-        data: Dataset,
+        data: DatasetCollection,
     ) -> Inferred[GaussianLDS]:
         """Compute exact posteriors with the Dataset's batch shape."""
+
         inferred = _infer_exact_jit(
             self._model,
             data,
@@ -229,7 +234,7 @@ class GaussianLDS:
 
     def fit(
         self,
-        data: Dataset,
+        data: DatasetCollection,
         *,
         num_iters: int,
         progress: bool | str = 'EM',
@@ -282,10 +287,9 @@ class PoissonLDS:
         """Dimension $D_x$ of the continuous latent state."""
         return self._model.dynamics.latent_dim
 
-    @property
-    def observation_dim(self) -> int:
+    def observation_dim(self, session: int | None = None) -> int:
         """Dimension $D_y$ of each observation."""
-        return self._model.emissions.dist.output_dim
+        return self._model.emissions.get(session).observation_dim
 
     @property
     def input_dim(self) -> int:
@@ -301,10 +305,9 @@ class PoissonLDS:
         r"""Return $p(x_t\mid x_{t-1},u_t)$ conditioned on a known input."""
         return _conditioned_dynamics(self._model, inputs)
 
-    @property
-    def emissions(self) -> LinearPoisson:
+    def emissions(self, session: int | None = None) -> LinearPoisson:
         """Linear-Poisson observation distribution in log-rate form."""
-        return self._model.emissions.dist
+        return self._model.emissions.get(session).dist
 
     @classmethod
     def from_params(
@@ -334,12 +337,16 @@ class PoissonLDS:
             _model=Model(
                 initial=initial,
                 dynamics=dynamics,
-                emissions=PoissonEmissions(
-                    dist=LinearPoisson(
-                        affine=Affine(
-                            coefficients=emission_coefficients,
-                            bias=emission_bias,
-                        )
+                emissions=EmissionsCollection(
+                    (
+                        PoissonEmissions(
+                            dist=LinearPoisson(
+                                affine=Affine(
+                                    coefficients=emission_coefficients,
+                                    bias=emission_bias,
+                                )
+                            )
+                        ),
                     )
                 ),
             ),
@@ -348,7 +355,7 @@ class PoissonLDS:
     @classmethod
     def via_pca(
         cls,
-        data: Dataset,
+        data: DatasetCollection,
         latent_dim: int,
         *,
         ridge=gaussian_fit.DEFAULT_RIDGE,
@@ -372,17 +379,18 @@ class PoissonLDS:
         steps: LengthsLike,
         *,
         inputs: jax.Array | None = None,
+        session: int | None = None,
     ) -> Sample:
         r"""Sample latent states and observations."""
 
         ls = LengthsSpec.from_params(steps, min_length=1)
         input_sequences = _sampling_inputs(self._model, ls, inputs)
 
-        return self._model.sample(key, inputs=input_sequences)
+        return self._model.sample(key, inputs=input_sequences, session=session)
 
     def infer(
         self,
-        data: Dataset,
+        data: DatasetCollection,
         *,
         initial_latents: jax.Array | None = None,
         laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
@@ -406,7 +414,7 @@ class PoissonLDS:
 
     def fit(
         self,
-        data: Dataset,
+        data: DatasetCollection,
         *,
         num_iters: int,
         progress: bool | str = 'Laplace EM',
@@ -442,7 +450,7 @@ LDSFacadeT = typing.TypeVar('LDSFacadeT', GaussianLDS, PoissonLDS)
 
 @dataclasses.dataclass(frozen=True, eq=False)
 class Inferred(typing.Generic[LDSFacadeT]):
-    """Singular LDS facade, posterior, and the exact source Dataset.
+    """Singular LDS facade, posterior, and the exact source data.
 
     Temporal accessors return `Sequences` with the source batch shape and lengths.
     Use `get(index)` to retrieve one unpadded trajectory on the host.
@@ -451,10 +459,11 @@ class Inferred(typing.Generic[LDSFacadeT]):
 
     model: LDSFacadeT
     posterior: Posterior
-    data: Dataset
+    data: DatasetCollection
 
     def __post_init__(self) -> None:
-        expected_batch = self.data.batch_shape
+        dataset = self.data.single()
+        expected_batch = dataset.batch_shape
 
         if self.posterior.batch_shape != expected_batch:
             raise ValueError(
@@ -462,26 +471,27 @@ class Inferred(typing.Generic[LDSFacadeT]):
                 f'got {self.posterior.batch_shape}'
             )
 
-        if self.posterior.max_steps != self.data.max_steps:
+        if self.posterior.max_steps != dataset.max_steps:
             raise ValueError('posterior must match the padded time dimension')
 
         if self.posterior.variable_dim != self.model.latent_dim:
             raise ValueError('posterior variable dimension must match model latent_dim')
 
-    def latent_mean(self) -> Sequences:
+    def latent_mean(self, session: int | None = None) -> Sequences:
         """Return latent means with the source batch shape and lengths."""
         return Sequences.from_padded(
             values=self.posterior.means,
-            lengths=self.data.lengths,
+            lengths=self.data.get(session).lengths,
         )
 
-    def observation_mean(self) -> Sequences:
+    def observation_mean(self, session: int | None = None) -> Sequences:
         """Return expected observations, including masked valid steps."""
-        emissions = self.model._model.emissions
+        dataset = self.data.get(session)
+        emissions = self.model._model.emissions.get(session)
 
-        if self.data.batch_shape:
+        if dataset.batch_shape:
             emissions = emissions.broadcast(
-                self.data.batch_shape,
+                dataset.batch_shape,
                 axis=0,
             )
 
@@ -489,15 +499,19 @@ class Inferred(typing.Generic[LDSFacadeT]):
 
         return Sequences.from_padded(
             values=values,
-            lengths=self.data.lengths,
+            lengths=dataset.lengths,
         )
 
     def align(self, alignment: Affine) -> Inferred[LDSFacadeT]:
         """Transform model and posterior coordinates exactly, without reinference."""
         model = self.model.align(alignment)
+
         posterior_alignment = alignment
-        if self.data.batch_shape:
-            posterior_alignment = alignment.broadcast(self.data.batch_shape, axis=0)
+        if self.posterior.batch_shape:
+            posterior_alignment = alignment.broadcast(
+                self.posterior.batch_shape,
+                axis=0,
+            )
 
         return self.__class__(
             model=model,

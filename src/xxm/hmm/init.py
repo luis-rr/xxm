@@ -3,8 +3,9 @@
 import jax
 from jax import numpy as jnp
 
-from xxm.core.data import Dataset
+from xxm.core.data import Dataset, DatasetCollection
 from xxm.core.dists.categorical import Categorical
+from xxm.core.emissions.collection import EmissionsCollection
 from xxm.core.emissions.discrete import (
     Emissions,
     GaussianEmissions,
@@ -74,7 +75,7 @@ def _init(
     return Model(
         initial=CategoricalInitial(Categorical(probs=initial_probs)),
         transitions=CategoricalTransitions(Categorical(probs=transition_probs)),
-        emissions=emissions,
+        emissions=EmissionsCollection((emissions,)),
     )
 
 
@@ -104,15 +105,16 @@ def _init_gaussian_emissions(
 
 def init_gaussian_via_kmeans(
     key: jax.Array,
-    data: Dataset,
+    data: DatasetCollection,
     num_states: int,
     self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
     covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
 ) -> Model:
     """Initialize a shared Gaussian HMM from visible valid Dataset rows."""
-    _validate_inputs(data, num_states)
+    dataset = data.single()
+    _validate_inputs(dataset, num_states)
 
-    observations = _visible_observations(data, num_states)
+    observations = _visible_observations(dataset, num_states)
     emissions = _init_gaussian_emissions(
         observations=observations,
         num_states=num_states,
@@ -151,15 +153,16 @@ def _init_poisson_emissions(
 
 def init_poisson_via_kmeans(
     key: jax.Array,
-    data: Dataset,
+    data: DatasetCollection,
     num_states: int,
     self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
     dtype=jnp.float32,
 ) -> Model:
     """Initialize a shared Poisson HMM from visible valid Dataset rows."""
-    _validate_inputs(data, num_states)
+    dataset = data.single()
+    _validate_inputs(dataset, num_states)
 
-    observations = _visible_observations(data, num_states)
+    observations = _visible_observations(dataset, num_states)
     emissions = _init_poisson_emissions(
         key=key,
         observations=observations,

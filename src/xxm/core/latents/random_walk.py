@@ -114,7 +114,7 @@ class GaussianRandomWalk(typing.NamedTuple):
         return self.initial.variable_dim
 
     @property
-    def dtype(self) -> jax.typing.DTypeLike:
+    def dtype(self) -> jnp.dtype:
         """Common parameter dtype."""
         return jnp.result_type(
             self.initial.dtype,
@@ -344,7 +344,7 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
         return variable_dim
 
     @property
-    def dtype(self) -> jax.typing.DTypeLike:
+    def dtype(self) -> jnp.dtype:
         """Common parameter dtype."""
         return jnp.result_type(
             self.initial.dtype,

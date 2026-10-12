@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core import batch
-from xxm.core.data import Dataset, Sequences, WeightedObservations
+from xxm.core.data import Dataset, DatasetCollection, Sequences, WeightedObservations
 from xxm.core.lengths import Lengths, LengthsSpec
 from xxm.core.mask import ArbitraryMask
 
@@ -157,11 +157,6 @@ class ARDataset(typing.NamedTuple):
         return self.observations.values.shape[-1]
 
     @property
-    def output_dim(self) -> int:
-        """Compatibility name used by AR emission code."""
-        return self.observation_dim
-
-    @property
     def input_dim(self) -> int:
         return self.inputs.values.shape[-1]
 
@@ -268,3 +263,73 @@ class ARDataset(typing.NamedTuple):
         This avoids evaluating nonlinear conditionals on inaccessible history.
         """
         return self.weighted_observations().safe_aligned(self.predictors)
+
+
+class ARDatasetCollection(typing.NamedTuple):
+    datasets: tuple[ARDataset, ...]
+
+    @property
+    def dtype(self) -> jnp.dtype:
+        """Shared observation dtype across sessions."""
+        return jnp.result_type(*(dataset.dtype for dataset in self.datasets))
+
+    def get(
+        self,
+        session: int | None = None,
+    ) -> ARDataset:
+        if session is None:
+            return self.single()
+
+        return self.datasets[session]
+
+    def single(self) -> ARDataset:
+        if len(self.datasets) != 1:
+            raise ValueError(
+                f'operation requires exactly one session; got {len(self.datasets)}'
+            )
+
+        return self.datasets[0]
+
+    @classmethod
+    def from_datasets(
+        cls,
+        data: DatasetCollection,
+        num_lags: int,
+    ) -> typing.Self:
+        """Prepare a common compact horizon from normalized source sessions."""
+        data.validate()
+        return cls(
+            tuple(
+                ARDataset.from_dataset(
+                    dataset,
+                    num_lags=num_lags,
+                )
+                for dataset in data.datasets
+            )
+        )
+
+    @property
+    def num_lags(self) -> int:
+        values = tuple(dataset.num_lags for dataset in self.datasets)
+
+        first = values[0]
+
+        if any(value != first for value in values[1:]):
+            raise ValueError(f'all AR datasets must share num_lags; got {values}')
+
+        return first
+
+    @property
+    def observation_dims(self) -> tuple[int, ...]:
+        return tuple(dataset.observation_dim for dataset in self.datasets)
+
+    @property
+    def input_dim(self) -> int:
+        values = tuple(dataset.input_dim for dataset in self.datasets)
+
+        first = values[0]
+
+        if any(value != first for value in values[1:]):
+            raise ValueError(f'all AR datasets must share input_dim; got {values}')
+
+        return first

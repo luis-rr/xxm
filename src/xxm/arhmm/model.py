@@ -9,10 +9,11 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core.affine import Affine
-from xxm.core.data import Dataset, Sequences
+from xxm.core.data import DatasetCollection, Sequences
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
+from xxm.core.emissions.collection import EmissionsCollection
 from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
@@ -20,7 +21,7 @@ from xxm.core.latents.discrete import (
 from xxm.core.lengths import Lengths, LengthsLike, LengthsSpec
 
 from .core import Model, Posterior, Sample
-from .data import ARDataset
+from .data import ARDataset, ARDatasetCollection
 from .emissions import AREmissions
 from .inference import infer_exact
 from .init import (
@@ -45,6 +46,7 @@ def _sampling_history(
     model: Model,
     lengths: Lengths,
     initial_history: jax.Array,
+    session: int | None = None,
 ) -> jax.Array:
 
     return jnp.broadcast_to(
@@ -52,7 +54,7 @@ def _sampling_history(
         (
             *lengths.batch_shape,
             model.num_lags,
-            model.observation_dim,
+            model.observation_dim(session),
         ),
     )
 
@@ -108,14 +110,16 @@ class GaussianARHMM:
 
     _model: Model[LinearGaussian]
 
+    def __post_init__(self) -> None:
+        _ = self._model.batch_shape
+
     @property
     def model(self) -> Model[LinearGaussian]:
         """Underlying core model."""
         return self._model
 
-    @property
-    def observation_dim(self) -> int:
-        return self._model.emissions.observation_dim
+    def observation_dim(self, session: int | None = None) -> int:
+        return self._model.emissions.get(session).observation_dim
 
     @property
     def num_states(self) -> int:
@@ -125,7 +129,7 @@ class GaussianARHMM:
     @property
     def num_lags(self) -> int:
         """Number of autoregressive lags $L$."""
-        return self._model.emissions.num_lags
+        return self._model.num_lags
 
     def permute_states(
         self,
@@ -136,14 +140,15 @@ class GaussianARHMM:
             _model=self._model.permute_states(permutation),
         )
 
-    @property
-    def states(self) -> LinearGaussian:
+    def states(self, session: int | None = None) -> LinearGaussian:
         """State-conditional autoregressive Gaussian distributions."""
-        return self._model.emissions.dist
+        return self._model.emissions.get(session).dist
 
     def states_conditional(
         self,
-        data: Dataset,
+        data: DatasetCollection,
+        *,
+        session: int | None = None,
     ) -> Gaussian:
         """
         Conditional distributions for observations following the AR history.
@@ -151,8 +156,9 @@ class GaussianARHMM:
         For an input sequence of length ``T``, the returned distributions have
         ``T - num_lags`` time steps.
         """
-        prepared = ARDataset.from_dataset(data, self.num_lags)
-        return self._model.emissions.conditional(
+        dataset = data.get(session)
+        prepared = ARDataset.from_dataset(dataset, self.num_lags)
+        return self._model.emissions.get(session).conditional(
             prepared.predictors,
         )
 
@@ -165,15 +171,18 @@ class GaussianARHMM:
 
     def observation_mean(
         self,
-        data: Dataset,
+        data: DatasetCollection,
         posterior: Posterior,
+        *,
+        session: int | None = None,
     ) -> jax.Array:
         """Return the posterior mean observation conditional on the AR history."""
         return self.states_conditional(
             data,
+            session=session,
         ).mixture_mean(
             posterior.state_probs,
-            axis=1,
+            axis=-1,
         )
 
     @classmethod
@@ -200,13 +209,17 @@ class GaussianARHMM:
             _model=Model(
                 initial=initial,
                 transitions=transitions,
-                emissions=AREmissions(
-                    dist=LinearGaussian(
-                        affine=Affine(
-                            coefficients=emission_coefficients,
-                            bias=emission_bias,
+                emissions=EmissionsCollection(
+                    (
+                        AREmissions(
+                            dist=LinearGaussian(
+                                affine=Affine(
+                                    coefficients=emission_coefficients,
+                                    bias=emission_bias,
+                                ),
+                                covariance=emission_covariances,
+                            )
                         ),
-                        covariance=emission_covariances,
                     )
                 ),
             ),
@@ -216,7 +229,7 @@ class GaussianARHMM:
     def via_kmeans(
         cls,
         key: jax.Array,
-        data: Dataset,
+        data: DatasetCollection,
         num_states: int,
         num_lags: int,
         *,
@@ -229,7 +242,7 @@ class GaussianARHMM:
         history.
         """
 
-        prepared = ARDataset.from_dataset(
+        prepared = ARDatasetCollection.from_datasets(
             data,
             num_lags,
         )
@@ -249,20 +262,22 @@ class GaussianARHMM:
         steps: LengthsLike,
         *,
         initial_history: jax.Array | None = None,
+        session: int | None = None,
     ) -> Sample:
 
         ls = LengthsSpec.from_params(steps, min_length=1)
 
         if initial_history is None:
-            return self._model.sample(key, ls)
+            return self._model.sample(key, ls, session=session)
 
         return self._model.sample_continuation(
             key,
             ls,
-            _sampling_history(self._model, ls.lengths, initial_history),
+            _sampling_history(self._model, ls.lengths, initial_history, session),
+            session=session,
         )
 
-    def infer(self, data: Dataset) -> Inferred[typing.Self]:
+    def infer(self, data: DatasetCollection) -> Inferred[typing.Self]:
         """
         Infer states conditional on the first ``num_lags`` observations.
 
@@ -270,7 +285,7 @@ class GaussianARHMM:
         ``T - num_lags`` latent steps.
         """
 
-        prepared = ARDataset.from_dataset(
+        prepared = ARDatasetCollection.from_datasets(
             data,
             self.num_lags,
         )
@@ -288,14 +303,14 @@ class GaussianARHMM:
 
     def fit(
         self,
-        data: Dataset,
+        data: DatasetCollection,
         *,
         num_iters: int,
         progress: bool | str = 'EM',
     ) -> Fit[typing.Self]:
         """Fit the conditional AR-HMM with expectation maximization."""
 
-        prepared = ARDataset.from_dataset(
+        prepared = ARDatasetCollection.from_datasets(
             data,
             self.num_lags,
         )
@@ -350,14 +365,16 @@ class PoissonARHMM:
 
     _model: Model[LinearPoisson]
 
+    def __post_init__(self) -> None:
+        _ = self._model.batch_shape
+
     @property
     def model(self) -> Model[LinearPoisson]:
         """Underlying core model."""
         return self._model
 
-    @property
-    def observation_dim(self) -> int:
-        return self._model.emissions.observation_dim
+    def observation_dim(self, session: int | None = None) -> int:
+        return self._model.emissions.get(session).observation_dim
 
     @property
     def num_states(self) -> int:
@@ -367,7 +384,7 @@ class PoissonARHMM:
     @property
     def num_lags(self) -> int:
         """Number of autoregressive lags $L$."""
-        return self._model.emissions.num_lags
+        return self._model.num_lags
 
     def permute_states(
         self,
@@ -378,14 +395,15 @@ class PoissonARHMM:
             _model=self._model.permute_states(permutation),
         )
 
-    @property
-    def states(self) -> LinearPoisson:
+    def states(self, session: int | None = None) -> LinearPoisson:
         """State-conditional autoregressive Poisson distributions."""
-        return self._model.emissions.dist
+        return self._model.emissions.get(session).dist
 
     def states_conditional(
         self,
-        data: Dataset,
+        data: DatasetCollection,
+        *,
+        session: int | None = None,
     ) -> Poisson:
         """
         Conditional distributions for observations following the AR history.
@@ -393,8 +411,9 @@ class PoissonARHMM:
         For an input sequence of length ``T``, the returned distributions have
         ``T - num_lags`` time steps.
         """
-        prepared = ARDataset.from_dataset(data, self.num_lags)
-        return self._model.emissions.conditional(
+        dataset = data.get(session)
+        prepared = ARDataset.from_dataset(dataset, self.num_lags)
+        return self._model.emissions.get(session).conditional(
             prepared.predictors,
         )
 
@@ -407,15 +426,18 @@ class PoissonARHMM:
 
     def observation_mean(
         self,
-        data: Dataset,
+        data: DatasetCollection,
         posterior: Posterior,
+        *,
+        session: int | None = None,
     ) -> jax.Array:
         """Return the posterior mean observation conditional on the AR history."""
         return self.states_conditional(
             data,
+            session=session,
         ).mixture_mean(
             posterior.state_probs,
-            axis=1,
+            axis=-1,
         )
 
     @classmethod
@@ -441,12 +463,16 @@ class PoissonARHMM:
             _model=Model(
                 initial=initial,
                 transitions=transitions,
-                emissions=AREmissions(
-                    dist=LinearPoisson(
-                        affine=Affine(
-                            coefficients=emission_coefficients,
-                            bias=emission_bias,
-                        )
+                emissions=EmissionsCollection(
+                    (
+                        AREmissions(
+                            dist=LinearPoisson(
+                                affine=Affine(
+                                    coefficients=emission_coefficients,
+                                    bias=emission_bias,
+                                )
+                            )
+                        ),
                     )
                 ),
             ),
@@ -456,7 +482,7 @@ class PoissonARHMM:
     def via_kmeans(
         cls,
         key: jax.Array,
-        data: Dataset,
+        data: DatasetCollection,
         num_states: int,
         num_lags: int,
         *,
@@ -484,20 +510,22 @@ class PoissonARHMM:
         steps: LengthsLike,
         *,
         initial_history: jax.Array | None = None,
+        session: int | None = None,
     ) -> Sample:
 
         ls = LengthsSpec.from_params(steps, min_length=1)
 
         if initial_history is None:
-            return self._model.sample(key, ls)
+            return self._model.sample(key, ls, session=session)
 
         return self._model.sample_continuation(
             key,
             ls,
-            _sampling_history(self._model, ls.lengths, initial_history),
+            _sampling_history(self._model, ls.lengths, initial_history, session),
+            session=session,
         )
 
-    def infer(self, data: Dataset) -> Inferred[typing.Self]:
+    def infer(self, data: DatasetCollection) -> Inferred[typing.Self]:
         """
         Infer states conditional on the first ``num_lags`` observations.
 
@@ -505,7 +533,7 @@ class PoissonARHMM:
         ``T - num_lags`` latent steps.
         """
 
-        prepared = ARDataset.from_dataset(
+        prepared = ARDatasetCollection.from_datasets(
             data,
             self.num_lags,
         )
@@ -523,14 +551,14 @@ class PoissonARHMM:
 
     def fit(
         self,
-        data: Dataset,
+        data: DatasetCollection,
         *,
         num_iters: int,
         progress: bool | str = 'EM',
     ) -> Fit[typing.Self]:
         """Fit the conditional AR-HMM with expectation maximization."""
 
-        prepared = ARDataset.from_dataset(
+        prepared = ARDatasetCollection.from_datasets(
             data,
             self.num_lags,
         )
@@ -557,41 +585,47 @@ ARHMMFacadeT = typing.TypeVar('ARHMMFacadeT', GaussianARHMM, PoissonARHMM)
 
 @dataclasses.dataclass(frozen=True, eq=False)
 class Inferred(typing.Generic[ARHMMFacadeT]):
-    """AR-HMM, posterior, and exact source Dataset."""
+    """AR-HMM, posterior, and exact source data."""
 
     model: ARHMMFacadeT
     posterior: Posterior
-    data: Dataset
+    data: DatasetCollection
 
     def __post_init__(self) -> None:
-        if self.posterior.batch_shape != self.data.batch_shape:
+        dataset = self.data.single()
+
+        if self.posterior.batch_shape != dataset.batch_shape:
             raise ValueError('posterior batch must match the source dataset')
 
-        expected_max_steps = self.data.max_steps - self.model.num_lags
+        expected_max_steps = dataset.max_steps - self.model.num_lags
         if self.posterior.max_steps != expected_max_steps:
             raise ValueError('posterior must match the modeled AR time dimension')
 
         if self.posterior.num_states != self.model.num_states:
             raise ValueError('posterior must match the model number of states')
 
-    def state_probs(self) -> Sequences:
+    def state_probs(self, session: int | None = None) -> Sequences:
         """State probabilities on the compact AR timeline."""
         return Sequences.from_padded(
             self.posterior.state_probs,
-            self.data.lengths.shift(-self.model.num_lags),
+            self.data.get(session).lengths.shift(-self.model.num_lags),
         )
 
-    def observation_mean(self) -> Sequences:
+    def observation_mean(self, session: int | None = None) -> Sequences:
         """Return posterior conditional means on the compact AR timeline."""
-        ar_data = ARDataset.from_dataset(
+        ar_data_col = ARDatasetCollection.from_datasets(
             self.data,
             self.model.num_lags,
         )
 
-        conditional = self.model.model.emissions.broadcast(
-            self.posterior.batch_shape
-        ).conditional(
-            ar_data.safe_predictors(),
+        ar_data = ar_data_col.get(session)
+
+        conditional = (
+            self.model.model.emissions.get(session)
+            .broadcast(self.posterior.batch_shape)
+            .conditional(
+                ar_data.safe_predictors(),
+            )
         )
 
         means = conditional.mixture_mean(
@@ -609,7 +643,7 @@ class Inferred(typing.Generic[ARHMMFacadeT]):
             data=self.data,
         )
 
-    def most_likely_states(self) -> Sequences:
+    def most_likely_states(self, session: int | None = None) -> Sequences:
         """Return the marginally most likely state on the compact AR timeline."""
         most_likely = jnp.argmax(
             self.posterior.state_probs,
@@ -618,11 +652,12 @@ class Inferred(typing.Generic[ARHMMFacadeT]):
 
         return Sequences.from_padded(
             most_likely,
-            self.data.lengths.shift(-self.model.num_lags),
+            self.data.get(session).lengths.shift(-self.model.num_lags),
         )
 
-    def states_conditional(self) -> Poisson | Gaussian:
-        return self.model.states_conditional(self.data)
+    def states_conditional(self, session: int | None = None) -> Poisson | Gaussian:
+        """Return state-conditional observations for the selected session."""
+        return self.model.states_conditional(self.data, session=session)
 
 
 class Fit(typing.NamedTuple, typing.Generic[ARHMMFacadeT]):

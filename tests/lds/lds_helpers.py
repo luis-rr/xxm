@@ -3,6 +3,7 @@ from jax import numpy as jnp
 
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.emissions.collection import EmissionsCollection
 from xxm.core.emissions.continuous import GaussianEmissions
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
 from xxm.lds.core import Model
@@ -25,13 +26,17 @@ def make_model() -> Model[GaussianEmissions]:
                 covariance=jnp.array([[0.5, 0.05], [0.05, 0.4]]),
             ),
         ),
-        emissions=GaussianEmissions(
-            dist=LinearGaussian(
-                affine=Affine(
-                    coefficients=jnp.eye(2),
-                    bias=jnp.array([0.1, -0.2]),
+        emissions=EmissionsCollection(
+            (
+                GaussianEmissions(
+                    dist=LinearGaussian(
+                        affine=Affine(
+                            coefficients=jnp.eye(2),
+                            bias=jnp.array([0.1, -0.2]),
+                        ),
+                        covariance=jnp.array([[1.5, 0.1], [0.1, 1.0]]),
+                    ),
                 ),
-                covariance=jnp.array([[1.5, 0.1], [0.1, 1.0]]),
             ),
         ),
     )

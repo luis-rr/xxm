@@ -16,7 +16,7 @@ from xxm.core.chains.gaussian import (
     GaussianPotential,
 )
 from xxm.core.chains.gaussian import GaussianChainMarginals as ContinuousPosterior
-from xxm.core.data import Dataset, WeightedObservations
+from xxm.core.data import Dataset, DatasetCollection, WeightedObservations
 from xxm.core.emissions.continuous import (
     EmissionsT,
     LaplaceEmissionsT,
@@ -66,7 +66,7 @@ class QuadraticContinuousFactors(typing.NamedTuple):
         cls, model: Model[QuadraticEmissionsT], data: Dataset
     ) -> typing.Self:
         return cls(
-            model.emissions.compute_potential(data.weighted_observations()),
+            model.emissions.single().compute_potential(data.weighted_observations()),
             data.lengths,
         )
 
@@ -93,7 +93,9 @@ class LaplaceContinuousFactors(typing.NamedTuple, typing.Generic[LaplaceEmission
         data: Dataset,
         search_params: OptimParams,
     ) -> typing.Self:
-        return cls(model.emissions, data.weighted_observations(), search_params)
+        return cls(
+            model.emissions.single(), data.weighted_observations(), search_params
+        )
 
     def approximate(
         self,
@@ -300,7 +302,7 @@ def _sum_data_objectives(values: jax.Array, model: Model, data: Dataset) -> jax.
 
 def infer_variational(
     model: Model[QuadraticEmissionsT],
-    data: Dataset,
+    data: DatasetCollection,
     num_iters: int,
     initial_latents: jax.Array,
 ) -> InferenceState[Model[QuadraticEmissionsT], Posterior]:
@@ -309,8 +311,9 @@ def infer_variational(
     Initial latents have Cartesian shape `(*B_model, *B_data, T, D_x)`.
     The facade provides a visibility-respecting completion/inversion default.
     """
+    dataset = data.single()
     working_model, working_data, initial_latents = _align_inference_inputs(
-        model, data, initial_latents
+        model, dataset, initial_latents
     )
     inference = QuadraticVI.from_model(working_model, working_data)
 
@@ -327,7 +330,7 @@ def infer_variational(
     return InferenceState(
         model=model,
         posterior=Posterior(discrete, continuous),
-        objective=_sum_data_objectives(objective, model, data),
+        objective=_sum_data_objectives(objective, model, dataset),
     )
 
 
@@ -405,7 +408,7 @@ def _laplace_elbo(
     states = data.lengths.clear(discrete_posterior.state_probs)
     log_values = jnp.where(states != 0, latent_potential.log_values, 0)
     expected_latent = jnp.sum(states * log_values, axis=(-2, -1))
-    expected_observation = model.emissions.expected_log_likelihood(
+    expected_observation = model.emissions.single().expected_log_likelihood(
         data.weighted_observations(),
         continuous_posterior,
     )
@@ -420,14 +423,15 @@ def _laplace_elbo(
 
 def infer_laplace(
     model: Model[LaplaceEmissionsT],
-    data: Dataset,
+    data: DatasetCollection,
     num_iters: int,
     initial_latents: jax.Array,
     params: OptimParams = DEFAULT_OPTIM_PARAMS,
 ) -> InferenceState[Model[LaplaceEmissionsT], Posterior]:
     """Infer independent trajectories by alternating discrete and Laplace updates."""
+    dataset = data.single()
     working_model, working_data, initial_latents = _align_inference_inputs(
-        model, data, initial_latents
+        model, dataset, initial_latents
     )
     inference = LaplaceVI.from_model(working_model, working_data, params)
 
@@ -450,5 +454,5 @@ def infer_laplace(
     return InferenceState(
         model=model,
         posterior=Posterior(state.discrete, state.continuous),
-        objective=_sum_data_objectives(objective, model, data),
+        objective=_sum_data_objectives(objective, model, dataset),
     )

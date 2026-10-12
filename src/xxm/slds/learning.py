@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import jax
 
-from xxm.core.data import Dataset
+from xxm.core.data import DatasetCollection
 from xxm.core.emissions.continuous import LaplaceEmissionsT, QuadraticEmissionsT
 from xxm.core.inference import InferenceState
 from xxm.core.optim.loop import Fit
@@ -20,7 +20,7 @@ from .inference import infer_laplace, infer_variational
 
 def variational_em_step(
     inferred: InferenceState[Model[QuadraticEmissionsT], Posterior],
-    data: Dataset,
+    data: DatasetCollection,
     *,
     num_inference_iters: int,
 ) -> InferenceState[Model[QuadraticEmissionsT], Posterior]:
@@ -38,7 +38,7 @@ def variational_em_step(
 
 def fit_variational_em(
     model: Model[QuadraticEmissionsT],
-    data: Dataset,
+    data: DatasetCollection,
     *,
     num_iters: int,
     num_inference_iters: int,
@@ -73,7 +73,7 @@ def fit_variational_em(
 
 def laplace_em_step(
     inferred: InferenceState[Model[LaplaceEmissionsT], Posterior],
-    data: Dataset,
+    data: DatasetCollection,
     *,
     num_inference_iters: int,
     params: OptimParams,
@@ -96,7 +96,7 @@ def laplace_em_step(
 
 def fit_laplace_em(
     model: Model[LaplaceEmissionsT],
-    data: Dataset,
+    data: DatasetCollection,
     *,
     num_iters: int,
     num_inference_iters: int,

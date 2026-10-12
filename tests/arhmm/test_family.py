@@ -9,7 +9,7 @@ import pytest
 import xxm
 from xxm import arhmm, hmm
 from xxm.arhmm.data import ARDataset
-from xxm.core.data import Dataset
+from xxm.core.data import Dataset, DatasetCollection
 
 
 def _model(family):
@@ -32,8 +32,8 @@ def test_exact_posterior_matches_enumerated_paths(family, num_targets):
     model = _model(family)
     observations = jnp.array([[0.0], [1.0], [2.0], [0.0], [1.0]])[: 2 + num_targets]
     values = np.asarray(observations[:, 0])
-    coefficients = np.asarray(model.states.affine.coefficients[:, 0, :, 0])
-    bias = np.asarray(model.states.affine.bias[:, 0])
+    coefficients = np.asarray(model.states().affine.coefficients[:, 0, :, 0])
+    bias = np.asarray(model.states().affine.bias[:, 0])
     means = np.array(
         [
             bias
@@ -59,15 +59,15 @@ def test_exact_posterior_matches_enumerated_paths(family, num_targets):
 
     data = ARDataset.from_dataset(Dataset.from_array(observations), num_lags=2)
     np.testing.assert_allclose(
-        model._model.emissions.log_likelihoods(data), log_likelihoods, atol=1e-6
+        model._model.emissions.get().log_likelihoods(data), log_likelihoods, atol=1e-6
     )
     np.testing.assert_allclose(
-        model._model.emissions.compute_potential(data).log_values,
+        model._model.emissions.get().compute_potential(data).log_values,
         log_likelihoods,
         atol=1e-6,
     )
-    dataset = Dataset.from_array(observations)
-    assert model.states_conditional(dataset).batch_shape == (num_targets, 2)
+    dataset = DatasetCollection.from_datasets((Dataset.from_array(observations),))
+    assert model.states_conditional(dataset).batch_shape == (1, num_targets, 2)
 
     paths = list(itertools.product(range(2), repeat=num_targets))
     initial = np.array([0.6, 0.4])
@@ -92,15 +92,17 @@ def test_exact_posterior_matches_enumerated_paths(family, num_targets):
 
     inferred = model.infer(dataset)
     np.testing.assert_allclose(
-        inferred.posterior.state_probs, expected_states, atol=2e-6
+        inferred.posterior.state_probs, expected_states[None], atol=2e-6
     )
-    np.testing.assert_allclose(inferred.posterior.pair_probs, expected_pairs, atol=2e-6)
+    np.testing.assert_allclose(
+        inferred.posterior.pair_probs, expected_pairs[None], atol=2e-6
+    )
     np.testing.assert_array_equal(
-        model.most_likely_states(inferred.posterior), expected_states.argmax(-1)
+        model.most_likely_states(inferred.posterior), expected_states.argmax(-1)[None]
     )
     np.testing.assert_allclose(
         model.observation_mean(dataset, inferred.posterior),
-        (expected_states * conditional_mean).sum(-1, keepdims=True),
+        (expected_states * conditional_mean).sum(-1, keepdims=True)[None],
         atol=2e-6,
     )
 
@@ -109,11 +111,11 @@ def test_exact_posterior_matches_enumerated_paths(family, num_targets):
     permuted_inferred = permuted.infer(dataset)
     np.testing.assert_allclose(
         permuted_inferred.posterior.state_probs,
-        expected_states[:, ::-1],
+        expected_states[None, :, ::-1],
         atol=2e-6,
     )
     for actual, expected in zip(
-        jax.tree.leaves(permuted.states), jax.tree.leaves(model.states), strict=True
+        jax.tree.leaves(permuted.states()), jax.tree.leaves(model.states()), strict=True
     ):
         np.testing.assert_array_equal(actual, expected[permutation])
 
@@ -124,14 +126,14 @@ def test_fitting_and_multiple_initializations(facade):
     # k-means initialization plus fit without duplicating the explicit em_step
     # calculation already covered by lower-level/integration tests.
     observations = jnp.array([[0.0], [1.0], [2.0], [1.0]])
-    data = Dataset.from_array(observations)
+    data = DatasetCollection.from_datasets((Dataset.from_array(observations),))
     initialized = facade.via_kmeans(jax.random.key(2), data, num_states=2, num_lags=1)
-    assert initialized.states.affine.coefficients.shape == (2, 1, 1, 1)
+    assert initialized.states().affine.coefficients.shape == (2, 1, 1, 1)
 
     fit = initialized.fit(data, num_iters=1, progress=False)
 
-    assert fit.inferred.posterior.state_probs.shape == (3, 2)
-    assert fit.inferred.model.states.affine.coefficients.shape == (2, 1, 1, 1)
+    assert fit.inferred.posterior.state_probs.shape == (1, 3, 2)
+    assert fit.inferred.model.states().affine.coefficients.shape == (2, 1, 1, 1)
     assert fit.objective_trace.shape == (2,)
 
 
@@ -150,14 +152,14 @@ def test_continuation_uses_chronological_history(family):
     recent, older = history[1], history[0]
     for state in states:
         observation_key, sample_key = jax.random.split(observation_key)
-        coefficients = model.states.affine.coefficients[state, 0, :, 0]
+        coefficients = model.states().affine.coefficients[state, 0, :, 0]
         mean = (
-            model.states.affine.bias[state]
+            model.states().affine.bias[state]
             + coefficients[0] * recent
             + coefficients[1] * older
         )
         if isinstance(model, arhmm.GaussianARHMM):
-            covariance = model.states.covariance[state]
+            covariance = model.states().covariance[state]
             value = jax.random.multivariate_normal(sample_key, mean, covariance)
         else:
             value = jax.random.poisson(sample_key, jnp.exp(mean))

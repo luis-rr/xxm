@@ -28,6 +28,12 @@ class Emissions(typing.Protocol):
     @property
     def batch_shape(self) -> tuple[int, ...]: ...
 
+    @property
+    def latent_dim(self) -> int: ...
+
+    @property
+    def observation_dim(self) -> int: ...
+
     def select(self, index: batch.SelT) -> typing.Self: ...
 
     def broadcast(self, shape, axis: int = 0) -> typing.Self: ...
@@ -186,6 +192,16 @@ class GaussianEmissions(typing.NamedTuple):
     """
 
     dist: LinearGaussian  # structural batch *B
+
+    @property
+    def latent_dim(self) -> int:
+        if len(self.dist.input_shape) != 1:
+            raise ValueError('continuous emissions require a vector latent input')
+        return self.dist.input_shape[0]
+
+    @property
+    def observation_dim(self) -> int:
+        return self.dist.output_dim
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
@@ -414,6 +430,16 @@ class PoissonEmissions(typing.NamedTuple):
     """
 
     dist: LinearPoisson  # structural batch *B
+
+    @property
+    def latent_dim(self) -> int:
+        if len(self.dist.input_shape) != 1:
+            raise ValueError('continuous emissions require a vector latent input')
+        return self.dist.input_shape[0]
+
+    @property
+    def observation_dim(self) -> int:
+        return self.dist.output_dim
 
     @property
     def batch_shape(self) -> tuple[int, ...]:

@@ -135,7 +135,7 @@ class Gaussian(typing.NamedTuple):
         return self.mean.shape[-1]
 
     @property
-    def dtype(self) -> jax.typing.DTypeLike:
+    def dtype(self) -> jnp.dtype:
         """Data type."""
         return jnp.result_type(self.mean, self.covariance)
 
@@ -410,7 +410,7 @@ class LinearGaussian(typing.NamedTuple):
         return self.affine.output_dim
 
     @property
-    def dtype(self) -> jax.typing.DTypeLike:
+    def dtype(self) -> jnp.dtype:
         """Data type."""
         return jnp.result_type(self.affine.dtype, self.covariance)
 
@@ -693,7 +693,7 @@ class PairedGaussian(typing.NamedTuple):
         return self.left_dim + self.right_dim
 
     @property
-    def dtype(self) -> jax.typing.DTypeLike:
+    def dtype(self) -> jnp.dtype:
         """Common dtype implied by both marginals and the cross-covariance."""
         return jnp.result_type(
             self.left.dtype,

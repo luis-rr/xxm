@@ -126,3 +126,8 @@ class ArbitraryMask:
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another batch position."""
         return batch.move_axis(self, source, destination)
+
+    def pad_time(self, max_steps: int) -> typing.Self:
+        return self.__class__._unchecked(
+            batch.pad_axis(self.values, max_steps, axis=-1)
+        )

@@ -269,3 +269,62 @@ def zscore_samples(data: jax.Array, covariance_floor: float = 0.0) -> Affine:
             covariance_floor=covariance_floor,
         )
     )
+
+
+def align_lda(
+    latent: jax.Array,  # (T, D)
+    labels: jax.Array,  # (T,), integer labels
+    ridge: float = 1e-6,
+) -> Affine:
+    num_classes = int(jnp.max(labels)) + 1
+    dim = latent.shape[-1]
+
+    mean = jnp.mean(latent, axis=0)
+
+    counts = jnp.bincount(labels, length=num_classes)
+    sums = jax.ops.segment_sum(
+        latent,
+        labels,
+        num_segments=num_classes,
+    )
+    class_means = sums / counts[:, None]
+
+    centered_within = latent - class_means[labels]
+
+    within = centered_within.T @ centered_within
+    within = within + ridge * jnp.eye(dim)
+
+    centered_classes = class_means - mean
+    between = centered_classes.T @ (counts[:, None] * centered_classes)
+
+    chol = jnp.linalg.cholesky(within)
+
+    tmp = jax.scipy.linalg.solve_triangular(
+        chol,
+        between,
+        lower=True,
+    )
+    whitened_between = jax.scipy.linalg.solve_triangular(
+        chol,
+        tmp.T,
+        lower=True,
+    ).T
+
+    eigenvalues, eigenvectors_white = jnp.linalg.eigh(whitened_between)
+
+    order = jnp.argsort(eigenvalues)[::-1]
+    eigenvectors_white = eigenvectors_white[:, order]
+
+    directions = jax.scipy.linalg.solve_triangular(
+        chol.T,
+        eigenvectors_white,
+        lower=False,
+    )
+
+    coefficients = directions.T
+    bias = -coefficients @ mean
+
+    return Affine(
+        coefficients=coefficients,
+        bias=bias,
+    )

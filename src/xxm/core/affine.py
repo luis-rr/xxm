@@ -79,7 +79,7 @@ class Affine(typing.NamedTuple):
         return self.bias.shape[-1]
 
     @property
-    def dtype(self) -> jax.typing.DTypeLike:
+    def dtype(self) -> jnp.dtype:
         """Data type of the affine map."""
         return jnp.result_type(self.coefficients, self.bias)
 

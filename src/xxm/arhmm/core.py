@@ -11,13 +11,14 @@ from xxm.core.chains.discrete import (
     DiscreteChainMarginals as Posterior,
 )
 from xxm.core.data import Sequences
+from xxm.core.emissions.collection import EmissionsCollection
 from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
 )
 from xxm.core.lengths import LengthsSpec
 
-from .data import ARDataset
+from .data import ARDatasetCollection
 from .emissions import AREmissions, ConditionalDistT
 
 
@@ -34,7 +35,7 @@ class Model(
 
     initial: CategoricalInitial
     transitions: CategoricalTransitions
-    emissions: AREmissions[ConditionalDistT]
+    emissions: EmissionsCollection[AREmissions[ConditionalDistT]]
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
@@ -43,6 +44,12 @@ class Model(
             self.transitions.batch_shape,
             self.emissions.batch_shape,
         )
+        if self.initial.num_states != self.transitions.num_states or any(
+            emission.num_states != self.initial.num_states
+            for emission in self.emissions.emissions
+        ):
+            raise ValueError('AR-HMM components must share their number of states')
+        _ = self.num_lags
         return self.initial.batch_shape
 
     def select(self, index: batch.SelT) -> typing.Self:
@@ -82,11 +89,12 @@ class Model(
 
     @property
     def num_lags(self) -> int:
-        return self.emissions.num_lags
+        values = [emission.num_lags for emission in self.emissions.emissions]
+        assert all(value == values[0] for value in values[1:])
+        return values[0]
 
-    @property
-    def observation_dim(self) -> int:
-        return self.emissions.observation_dim
+    def observation_dim(self, session: int | None = None) -> int:
+        return self.emissions.get(session).observation_dim
 
     def permute_states(
         self,
@@ -122,6 +130,8 @@ class Model(
         self,
         key: jax.Array,
         ls: LengthsSpec,
+        *,
+        session: int | None = None,
     ) -> Sample:
 
         key_states, key_observations = jax.random.split(key)
@@ -131,7 +141,7 @@ class Model(
             ls,
         )
 
-        emissions, ls = batch.cartesian_broadcast(self.emissions, ls)
+        emissions, ls = batch.cartesian_broadcast(self.emissions.get(session), ls)
 
         observations = emissions.sample(key_observations, states)
 
@@ -145,6 +155,8 @@ class Model(
         key: jax.Array,
         ls: LengthsSpec,
         initial_history: jax.Array,
+        *,
+        session: int | None = None,
     ) -> Sample:
 
         key_states, key_observations = jax.random.split(key)
@@ -154,7 +166,7 @@ class Model(
             ls,
         )
 
-        emissions, ls = batch.cartesian_broadcast(self.emissions, ls)
+        emissions, ls = batch.cartesian_broadcast(self.emissions.get(session), ls)
 
         initial_history = batch.broadcast_array(
             initial_history,
@@ -175,13 +187,14 @@ class Model(
 
     def fit_params(
         self,
-        data: ARDataset,
+        data: ARDatasetCollection,
         posterior: Posterior,
     ) -> typing.Self:
         """Pool independent AR sequences while preserving model batch."""
+        dataset = data.single()
         expected_batch = (
             *self.batch_shape,
-            *data.batch_shape,
+            *dataset.batch_shape,
         )
 
         if posterior.batch_shape != expected_batch:
@@ -189,10 +202,10 @@ class Model(
                 f'posterior batch must be {expected_batch}; got {posterior.batch_shape}'
             )
 
-        working_data = data
+        working_data = dataset
 
         if self.batch_shape:
-            working_data = data.broadcast(
+            working_data = dataset.broadcast(
                 self.batch_shape,
                 axis=0,
             )
@@ -204,8 +217,12 @@ class Model(
             transitions=self.transitions.fit_params(
                 posterior,
             ),
-            emissions=self.emissions.fit_params(
-                working_data,
-                posterior,
+            emissions=EmissionsCollection(
+                (
+                    self.emissions.single().fit_params(
+                        working_data,
+                        posterior,
+                    ),
+                )
             ),
         )

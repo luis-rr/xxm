@@ -6,6 +6,7 @@ from xxm.core.affine import Affine
 from xxm.core.data import Sequences
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.emissions.collection import EmissionsCollection
 from xxm.core.emissions.continuous import GaussianEmissions
 from xxm.core.latents.discrete import (
     CategoricalInitial,
@@ -118,7 +119,7 @@ def _make_model() -> Model:
         transitions=transitions,
         latent_initial=latent_initial,
         dynamics=dynamics,
-        emissions=emissions,
+        emissions=EmissionsCollection((emissions,)),
     )
 
 

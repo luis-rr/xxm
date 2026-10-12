@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 import xxm
-from xxm.core.data import Dataset
+from xxm.core.data import Dataset, DatasetCollection
 from xxm.slds.init import init_gaussian_via_pca
 
 
@@ -23,7 +23,7 @@ def test_gaussian_via_pca_returns_requested_model_structure():
 
     model = init_gaussian_via_pca(
         key=jax.random.key(0),
-        data=Dataset.from_array(observations),
+        data=DatasetCollection.from_datasets((Dataset.from_array(observations),)),
         num_states=2,
         latent_dim=1,
     )
@@ -38,9 +38,9 @@ def test_gaussian_via_pca_returns_requested_model_structure():
     assert model.dynamics.dist.affine.bias.shape == (2, 1)
     assert model.dynamics.dist.covariance.shape == (2, 1, 1)
 
-    assert model.emissions.dist.affine.coefficients.shape == (2, 1)
-    assert model.emissions.dist.affine.bias.shape == (2,)
-    assert model.emissions.dist.covariance.shape == (2, 2)
+    assert model.emissions.get().dist.affine.coefficients.shape == (2, 1)
+    assert model.emissions.get().dist.affine.bias.shape == (2,)
+    assert model.emissions.get().dist.covariance.shape == (2, 2)
 
     np.testing.assert_allclose(model.state_initial.dist.probs.sum(), 1.0)
     np.testing.assert_allclose(model.transitions.dist.probs.sum(axis=-1), 1.0)
@@ -61,7 +61,7 @@ def test_slds_arhmm_warm_start(facade):
     )
     model = facade.via_arhmm(
         jax.random.key(3),
-        Dataset.from_array(observations),
+        DatasetCollection.from_datasets((Dataset.from_array(observations),)),
         num_states=2,
         latent_dim=1,
         num_arhmm_iters=1,

@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from xxm import lds, slds
-from xxm.core.data import Dataset
+from xxm.core.data import Dataset, DatasetCollection
 from xxm.core.optim.newton import OptimParams
 from xxm.lds.inference import infer_laplace as infer_lds_laplace
 from xxm.lds.learning import laplace_em_step as lds_laplace_em_step
@@ -24,7 +24,7 @@ class ModelCase(typing.NamedTuple):
     infer: Callable
     infer_kwargs: dict
     em_step: Callable
-    observations: jax.Array | Dataset
+    observations: DatasetCollection
 
 
 GAUSSIAN_OBSERVATIONS = jnp.array([[0.0], [0.5], [-0.25]])
@@ -97,7 +97,9 @@ MODEL_CASES = [
             lds_laplace_em_step,
             params=FAST_LAPLACE_PARAMS,
         ),
-        observations=Dataset.from_array(POISSON_OBSERVATIONS),
+        observations=DatasetCollection.from_datasets(
+            (Dataset.from_array(POISSON_OBSERVATIONS),)
+        ),
     ),
     ModelCase(
         name='slds-gaussian',
@@ -105,13 +107,15 @@ MODEL_CASES = [
         infer=infer_slds,
         infer_kwargs={
             'num_iters': 0,
-            'initial_latents': jnp.zeros((GAUSSIAN_OBSERVATIONS.shape[0], 1)),
+            'initial_latents': jnp.zeros((1, GAUSSIAN_OBSERVATIONS.shape[0], 1)),
         },
         em_step=partial(
             slds_variational_em_step,
             num_inference_iters=0,
         ),
-        observations=Dataset.from_array(GAUSSIAN_OBSERVATIONS),
+        observations=DatasetCollection.from_datasets(
+            (Dataset.from_array(GAUSSIAN_OBSERVATIONS),)
+        ),
     ),
     ModelCase(
         name='slds-poisson',
@@ -119,7 +123,7 @@ MODEL_CASES = [
         infer=infer_slds_laplace,
         infer_kwargs={
             'num_iters': 0,
-            'initial_latents': jnp.zeros((POISSON_OBSERVATIONS.shape[0], 1)),
+            'initial_latents': jnp.zeros((1, POISSON_OBSERVATIONS.shape[0], 1)),
             'params': FAST_LAPLACE_PARAMS,
         },
         em_step=partial(
@@ -127,7 +131,9 @@ MODEL_CASES = [
             params=FAST_LAPLACE_PARAMS,
             num_inference_iters=0,
         ),
-        observations=Dataset.from_array(POISSON_OBSERVATIONS),
+        observations=DatasetCollection.from_datasets(
+            (Dataset.from_array(POISSON_OBSERVATIONS),)
+        ),
     ),
 ]
 

@@ -6,6 +6,7 @@ from xxm.arhmm import (
 )
 from xxm.core.data import (
     Dataset,
+    DatasetCollection,
     Sequences,
 )
 from xxm.core.lengths import Lengths
@@ -24,6 +25,7 @@ from xxm.slds import (
 
 __all__ = [
     'Dataset',
+    'DatasetCollection',
     'GaussianARHMM',
     'GaussianHMM',
     'GaussianLDS',

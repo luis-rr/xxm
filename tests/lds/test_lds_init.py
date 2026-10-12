@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from xxm.core.data import Dataset
+from xxm.core.data import Dataset, DatasetCollection
 from xxm.lds.init import init_gaussian_via_pca, pca_latents
 
 OBSERVATIONS = jnp.array(
@@ -16,12 +16,13 @@ OBSERVATIONS = jnp.array(
 
 
 def test_gaussian_via_pca_returns_model_with_requested_latent_dimension():
-    model = init_gaussian_via_pca(Dataset.from_array(OBSERVATIONS), latent_dim=2)
+    data = DatasetCollection.from_datasets((Dataset.from_array(OBSERVATIONS),))
+    model = init_gaussian_via_pca(data, latent_dim=2)
 
     assert model.initial.dist.mean.shape == (2,)
     assert model.dynamics.dist.affine.coefficients.shape == (2, 2)
-    assert model.emissions.dist.affine.coefficients.shape == (3, 2)
-    assert model.emissions.dist.covariance.shape == (3, 3)
+    assert model.emissions.get().dist.affine.coefficients.shape == (3, 2)
+    assert model.emissions.get().dist.covariance.shape == (3, 3)
 
 
 def test_pca_latents_are_jittable():

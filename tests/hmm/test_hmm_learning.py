@@ -3,10 +3,11 @@ import jax.numpy as jnp
 import numpy as np
 
 from xxm.core.chains.discrete import DiscreteChainMarginals
-from xxm.core.data import Dataset, WeightedObservations
+from xxm.core.data import Dataset, DatasetCollection, WeightedObservations
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
+from xxm.core.emissions.collection import EmissionsCollection
 from xxm.core.emissions.discrete import GaussianEmissions, PoissonEmissions
 from xxm.core.latents.discrete import CategoricalInitial, CategoricalTransitions
 from xxm.core.lengths import Lengths
@@ -316,16 +317,20 @@ def test_em_step_is_jit_compatible():
                 )
             )
         ),
-        emissions=PoissonEmissions(
-            dist=Poisson(
-                log_rates=jnp.log(
-                    jnp.array(
-                        [
-                            [1.0],
-                            [5.0],
-                        ]
-                    )
-                )
+        emissions=EmissionsCollection(
+            (
+                PoissonEmissions(
+                    dist=Poisson(
+                        log_rates=jnp.log(
+                            jnp.array(
+                                [
+                                    [1.0],
+                                    [5.0],
+                                ]
+                            )
+                        )
+                    ),
+                ),
             ),
         ),
     )
@@ -339,7 +344,7 @@ def test_em_step_is_jit_compatible():
         ]
     )
 
-    data = Dataset.from_array(observations)
+    data = DatasetCollection.from_datasets((Dataset.from_array(observations),))
     inferred = infer_exact(model, data)
     eager = em_step(inferred, data)
     jitted = jax.jit(em_step)(inferred, data)
@@ -355,8 +360,8 @@ def test_em_step_is_jit_compatible():
         atol=1e-6,
     )
     np.testing.assert_allclose(
-        jitted.model.emissions.dist.rates,
-        eager.model.emissions.dist.rates,
+        jitted.model.emissions.get().dist.rates,
+        eager.model.emissions.get().dist.rates,
         atol=1e-6,
     )
     np.testing.assert_allclose(

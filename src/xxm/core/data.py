@@ -10,6 +10,8 @@ from xxm.core import batch
 from xxm.core.lengths import FillT, Lengths, LengthsSpec
 from xxm.core.mask import ArbitraryMask
 
+BatchableT = typing.TypeVar('BatchableT', bound=batch.Batchable)
+
 
 def _require_matching_lengths(values, observations, *, name: str) -> None:
     """Require one time-aligned array per observation sequence."""
@@ -55,7 +57,7 @@ class WeightedObservations(typing.NamedTuple):
         return self.values.shape[-1]
 
     @property
-    def dtype(self) -> jax.typing.DTypeLike:
+    def dtype(self) -> jnp.dtype:
         """Observation dtype."""
         return self.values.dtype
 
@@ -439,6 +441,13 @@ class Sequences:
         for index in batch.iter_keys(self.batch_shape):
             yield index, self.get(index)
 
+    def pad_time(self, max_steps: int) -> typing.Self:
+        """Extend dense storage with zeros and false visibility, preserving lengths."""
+        return self.__class__._unchecked(
+            batch.pad_axis(self.values, max_steps, axis=len(self.batch_shape)),
+            self.lengths,
+        )
+
     def unpack(self) -> tuple[jax.Array, ...]:
         """Crop an unbatched sequence or flat collection on the host."""
         if not self.batch_shape:
@@ -739,6 +748,24 @@ class Dataset:
         """Inputs for `x[t-1] -> x[t]`; input zero is unused."""
         return self.inputs.values[..., 1:, :]
 
+    def pad_time(self, max_steps: int) -> typing.Self:
+        """Extend dense storage with zeros and false visibility, preserving lengths.
+
+        The target must be a static Python integer. This transformation also
+        supports working datasets with arbitrary model/sequence batch prefixes.
+        """
+        if max_steps < 0 or max_steps < self.max_steps:
+            raise ValueError('max_steps must be nonnegative and cannot shrink time')
+
+        if max_steps == self.max_steps:
+            return self
+
+        return self._unchecked(
+            self.observations.pad_time(max_steps),
+            self.inputs.pad_time(max_steps),
+            self.visible.pad_time(max_steps),
+        )
+
     def observation_weights(self) -> jax.Array:
         """Boolean weights combining structural validity and observation visibility."""
         return self.lengths.clear(self.visible.values)
@@ -750,3 +777,179 @@ class Dataset:
             weights=self.observation_weights(),
             lengths=self.lengths,
         )
+
+
+class DatasetCollection(typing.NamedTuple):
+    """
+    Positional collection of independent recording sessions.
+
+    Use `from_datasets` to normalize source sessions to flat batches `(N_s,)`
+    and a common dense time horizon and input dimension. Observation dimensions
+    and sequence counts may differ. Direct construction assumes normalized
+    datasets; call `validate` explicitly to diagnose their layout.
+
+    Session position is meaningful:
+
+        datasets[i] <-> emissions[i]
+
+    Sessions are not model batch dimensions. Collection structure is static
+    PyTree structure; heterogeneous session arrays are never stacked directly.
+    """
+
+    datasets: tuple[Dataset, ...]
+
+    @classmethod
+    def from_datasets(cls, datasets: typing.Sequence[Dataset]) -> typing.Self:
+        """Promote single trajectories and pad sessions once, outside JIT."""
+        datasets = tuple(datasets)
+        if not datasets:
+            raise ValueError('datasets must contain at least one session')
+        normalized = []
+        for session, data in enumerate(datasets):
+            if len(data.batch_shape) > 1:
+                raise ValueError(
+                    f'session {session} must have at most one source batch axis; '
+                    'flatten sequence axes explicitly before collection construction'
+                )
+            normalized.append(data if data.batch_shape else data.broadcast((1,)))
+        input_dims = tuple(data.input_dim for data in normalized)
+        if any(dim != input_dims[0] for dim in input_dims[1:]):
+            raise ValueError(
+                f'all sessions must share their input dimension; got {input_dims}'
+            )
+        max_steps = max(data.max_steps for data in normalized)
+        collection = cls(tuple(data.pad_time(max_steps) for data in normalized))
+        collection.validate()
+        return collection
+
+    @property
+    def dtype(self) -> jnp.dtype:
+        """Shared observation dtype across sessions."""
+        return jnp.result_type(*(dataset.dtype for dataset in self.datasets))
+
+    def get(
+        self,
+        session: int | None = None,
+    ) -> Dataset:
+        """
+        Return one session.
+
+        If `session` is omitted, require a singleton collection. This keeps
+        ordinary single-session APIs ergonomic while making ambiguity explicit
+        for multi-session models.
+        """
+        if session is None:
+            return self.single()
+
+        return self.datasets[session]
+
+    def single(self) -> Dataset:
+        """Require exactly one session and return it."""
+        if len(self.datasets) != 1:
+            raise ValueError(
+                f'operation requires exactly one session; got {len(self.datasets)}'
+            )
+
+        return self.datasets[0]
+
+    def validate(self) -> None:
+        """Validate collection-level structural invariants."""
+        if not self.datasets:
+            raise ValueError('datasets must contain at least one session')
+
+        for session, data in enumerate(self.datasets):
+            if len(data.batch_shape) != 1:
+                raise ValueError(
+                    f'session {session} must have one source sequence axis; '
+                    'use from_datasets and flatten sequence axes explicitly'
+                )
+            if data.max_steps != self.max_steps:
+                raise ValueError('all sessions must share max_steps; use from_datasets')
+
+        input_dims = tuple(data.input_dim for data in self.datasets)
+
+        if any(input_dim != input_dims[0] for input_dim in input_dims[1:]):
+            raise ValueError(
+                f'all sessions must share their input dimension; got {input_dims}'
+            )
+
+    @property
+    def input_dim(self) -> int:
+        """Shared input dimension."""
+        return self.datasets[0].input_dim
+
+    @property
+    def observation_dims(self) -> tuple[int, ...]:
+        """Observation dimension of every session."""
+        return tuple(data.observation_dim for data in self.datasets)
+
+    @property
+    def sequence_counts(self) -> tuple[int, ...]:
+        """Number of source sequences in each session, in positional order."""
+        return tuple(data.batch_shape[0] for data in self.datasets)
+
+    @property
+    def pooled_batch_size(self) -> int:
+        """Total number of independent sequences across sessions."""
+        return sum(self.sequence_counts)
+
+    @property
+    def max_steps(self) -> int:
+        """Common dense temporal horizon of normalized sessions."""
+        return self.datasets[0].max_steps
+
+    def session_slice(
+        self,
+        session: int,
+    ) -> slice:
+        """Flat pooled-sequence slice occupied by one session."""
+        session = range(len(self.datasets))[session]
+
+        sizes = self.sequence_counts
+        start = sum(sizes[:session])
+
+        return slice(
+            start,
+            start + sizes[session],
+        )
+
+    def pool_batchables(
+        self,
+        items: typing.Sequence[BatchableT],
+        *,
+        model_batch_shape: tuple[int, ...] = (),
+    ) -> BatchableT:
+        """Concatenate compatible common-space objects along the sequence axis."""
+        items = tuple(items)
+        if len(items) != len(self.datasets):
+            raise ValueError('items must contain exactly one object per session')
+
+        for session, (item, count) in enumerate(
+            zip(items, self.sequence_counts, strict=True)
+        ):
+            expected = (*model_batch_shape, count)
+
+            if item.batch_shape != expected:
+                raise ValueError(
+                    f'session {session} must have batch shape {expected}; '
+                    f'got {item.batch_shape}'
+                )
+
+        return batch.concatenate(items, axis=len(model_batch_shape))
+
+    def select_session(
+        self,
+        pooled: BatchableT,
+        session: int,
+        *,
+        model_batch_shape: tuple[int, ...] = (),
+    ) -> BatchableT:
+        """Slice one static session, preserving the model and sequence axes."""
+        expected = (*model_batch_shape, self.pooled_batch_size)
+        if pooled.batch_shape != expected:
+            raise ValueError(
+                f'pooled object must have batch shape {expected}; '
+                f'got {pooled.batch_shape}'
+            )
+        index = (slice(None),) * len(model_batch_shape) + (self.session_slice(session),)
+        return batch.select(pooled, index)

@@ -7,18 +7,21 @@ from xxm.core.inference import InferenceState
 from xxm.core.latents.discrete import homogeneous_chain
 
 from .core import Model, Posterior
-from .data import ARDataset
+from .data import ARDatasetCollection
 from .emissions import ConditionalDistT
 
 
 def _infer_prepared(
     model: Model[ConditionalDistT],
-    data: ARDataset,
+    data_col: ARDatasetCollection,
 ) -> InferenceState[
     Model[ConditionalDistT],
     Posterior,
 ]:
     """Infer compact AR states independently across all source sequences."""
+
+    data = data_col.single()
+
     model_batch_shape = model.batch_shape
     data_batch_shape = data.batch_shape
 
@@ -33,8 +36,9 @@ def _infer_prepared(
         working_data.lengths_spec,
     )
 
+    # TODO combine multiple potentials
     posterior_chain = chain.add_local_potential(
-        working_model.emissions.compute_potential(
+        working_model.emissions.single().compute_potential(
             working_data,
         )
     )
@@ -66,7 +70,7 @@ def _infer_prepared(
 
 def infer_exact(
     model: Model[ConditionalDistT],
-    data: ARDataset,
+    data: ARDatasetCollection,
 ) -> InferenceState[
     Model[ConditionalDistT],
     Posterior,

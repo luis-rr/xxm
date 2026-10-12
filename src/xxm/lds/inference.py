@@ -7,7 +7,7 @@ from xxm.core import batch
 from xxm.core.chains.gaussian import GaussianChain as Chain
 from xxm.core.chains.gaussian import GaussianChainMarginals as Posterior
 from xxm.core.chains.gaussian import GaussianPairPotential, GaussianPotential
-from xxm.core.data import Dataset
+from xxm.core.data import Dataset, DatasetCollection
 from xxm.core.emissions.continuous import (
     EmissionsT,
     LaplaceEmissionsT,
@@ -46,7 +46,7 @@ def to_chain(
     model: Model[EmissionsT],
     data: Dataset,
 ) -> Chain:
-    """Construct proper latent chains for numerical inference."""
+    """Construct proper latent chains for one selected, batch-aligned session."""
     initial_potential, pair_potential = _prior_potentials(
         model,
         data,
@@ -86,18 +86,19 @@ def to_chain(
 
 def infer_exact(
     model: Model[QuadraticEmissionsT],
-    data: Dataset,
+    data: DatasetCollection,
 ) -> InferenceState[
     Model[QuadraticEmissionsT],
     Posterior,
 ]:
     """Run exact Gaussian inference independently across all sequences."""
+    dataset = data.single()
     model_batch_shape = model.batch_shape
-    data_batch_shape = data.batch_shape
-    working_model, working_data = batch.cartesian_broadcast(model, data)
+    data_batch_shape = dataset.batch_shape
+    working_model, working_data = batch.cartesian_broadcast(model, dataset)
     latent_chain = to_chain(working_model, working_data)
 
-    observation_potential = working_model.emissions.compute_potential(
+    observation_potential = working_model.emissions.single().compute_potential(
         working_data.weighted_observations(),
     )
 
@@ -124,7 +125,7 @@ def infer_exact(
 
 def infer_laplace(
     model: Model[LaplaceEmissionsT],
-    data: Dataset,
+    data: DatasetCollection,
     initial_latents: jax.Array | None = None,
     params: OptimParams = DEFAULT_OPTIM_PARAMS,
 ) -> InferenceState[
@@ -137,9 +138,10 @@ def infer_laplace(
     The model × dataset Cartesian batch is constructed explicitly before the
     generic Laplace stack is called.
     """
+    dataset = data.single()
     model_batch_shape = model.batch_shape
-    data_batch_shape = data.batch_shape
-    working_model, working_data = batch.cartesian_broadcast(model, data)
+    data_batch_shape = dataset.batch_shape
+    working_model, working_data = batch.cartesian_broadcast(model, dataset)
     chain = to_chain(working_model, working_data)
 
     expected_latent_shape = (
@@ -165,7 +167,7 @@ def infer_laplace(
 
     posterior, log_normalizer = laplace_inference(
         chain=chain,
-        emissions=working_model.emissions,
+        emissions=working_model.emissions.single(),
         observations=working_data.weighted_observations(),
         initial_latents=latents,
         search_params=params,
@@ -188,7 +190,7 @@ def infer_laplace(
 
 def elbo_terms(
     model: Model[EmissionsT],
-    data: Dataset,
+    data: DatasetCollection,
     posterior: Posterior,
 ) -> tuple[
     jax.Array,
@@ -197,12 +199,13 @@ def elbo_terms(
     jax.Array,
 ]:
     """Compute per-dataset ELBO contributions."""
+    dataset = data.single()
     model_batch_shape = model.batch_shape
-    data_batch_shape = data.batch_shape
+    data_batch_shape = dataset.batch_shape
 
     working_model, working_data = batch.cartesian_broadcast(
         model,
-        data,
+        dataset,
     )
 
     expected_batch_shape = (
@@ -243,7 +246,7 @@ def elbo_terms(
         axis=-1,
     )
 
-    emissions = working_model.emissions.expected_log_likelihood(
+    emissions = working_model.emissions.single().expected_log_likelihood(
         working_data.weighted_observations(),
         posterior,
     )
@@ -260,7 +263,7 @@ def elbo_terms(
 
 def elbo(
     model: Model[EmissionsT],
-    data: Dataset,
+    data: DatasetCollection,
     posterior: Posterior,
 ) -> jax.Array:
     """Compute the dataset-summed ELBO, preserving model batch."""
@@ -272,7 +275,7 @@ def elbo(
     data_axes = tuple(
         range(
             len(model.batch_shape),
-            len(model.batch_shape) + len(data.batch_shape),
+            value.ndim,
         )
     )
 

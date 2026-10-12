@@ -15,7 +15,7 @@ def test_prepared_rows_preserve_lag_and_target_order(num_lags):
     data = ARDataset.from_dataset(Dataset.from_array(observations), num_lags)
     assert data.max_steps == 5 - num_lags
     assert data.num_lags == num_lags
-    assert data.output_dim == 2
+    assert data.observation_dim == 2
     assert data.predictors.shape == (5 - num_lags, num_lags, 2)
     np.testing.assert_array_equal(data.targets, observations[num_lags:])
     for row in range(data.max_steps):
@@ -30,7 +30,7 @@ def test_prepared_rows_preserve_structural_batch():
         Dataset.from_padded(observations, Lengths.full((2, 3), 6)), num_lags=2
     )
     assert data.predictors.shape == (2, 3, 4, 2, 2)
-    assert (data.max_steps, data.num_lags, data.output_dim) == (4, 2, 2)
+    assert (data.max_steps, data.num_lags, data.observation_dim) == (4, 2, 2)
     np.testing.assert_array_equal(data.targets, observations[..., 2:, :])
     for i, j in np.ndindex(2, 3):
         standalone = ARDataset.from_dataset(

@@ -7,7 +7,8 @@ import jax
 from jax import numpy as jnp
 
 from xxm.core.affine import Affine
-from xxm.core.data import Dataset, WeightedObservations
+from xxm.core.data import Dataset, DatasetCollection, WeightedObservations
+from xxm.core.emissions.collection import EmissionsCollection
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
 from xxm.core.optim import gaussian as gaussian_fit
@@ -241,43 +242,48 @@ def _init_poisson_emissions(
 
 
 def init_gaussian_via_pca(
-    data: Dataset,
+    data: DatasetCollection,
     latent_dim: int,
     *,
     ridge=gaussian_fit.DEFAULT_RIDGE,
     covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
 ) -> Model[GaussianEmissions]:
     """Initialize one shared Gaussian LDS from independent sequences."""
-    _validate_initialization(data, latent_dim)
+    dataset = data.single()
+    _validate_initialization(dataset, latent_dim)
 
     latents = _masked_pca_latents(
-        data.observations.values,
-        data,
+        dataset.observations.values,
+        dataset,
         latent_dim,
     )
 
     return Model(
         initial=_init_initial(
             latents,
-            data,
+            dataset,
             covariance_floor=covariance_floor,
         ),
         dynamics=_init_dynamics(
             latents,
-            data,
+            dataset,
             ridge=ridge,
             covariance_floor=covariance_floor,
         ),
-        emissions=_init_gaussian_emissions(
-            latents,
-            data,
-            covariance_floor=covariance_floor,
+        emissions=EmissionsCollection(
+            (
+                _init_gaussian_emissions(
+                    latents,
+                    dataset,
+                    covariance_floor=covariance_floor,
+                ),
+            )
         ),
     )
 
 
 def init_poisson_via_pca(
-    data: Dataset,
+    data: DatasetCollection,
     latent_dim: int,
     *,
     ridge=gaussian_fit.DEFAULT_RIDGE,
@@ -285,33 +291,38 @@ def init_poisson_via_pca(
     count_floor: float = poisson_fit.DEFAULT_COUNT_FLOOR,
 ) -> Model[PoissonEmissions]:
     """Initialize one shared Poisson LDS from independent sequences."""
-    _validate_initialization(data, latent_dim)
+    dataset = data.single()
+    _validate_initialization(dataset, latent_dim)
 
     transformed = poisson_fit.inverse_exp_link(
-        data.weighted_observations().safe_values(),
+        dataset.weighted_observations().safe_values(),
         count_floor=count_floor,
     )
 
     latents = _masked_pca_latents(
         transformed,
-        data,
+        dataset,
         latent_dim,
     )
 
     return Model(
         initial=_init_initial(
             latents,
-            data,
+            dataset,
             covariance_floor=covariance_floor,
         ),
         dynamics=_init_dynamics(
             latents,
-            data,
+            dataset,
             ridge=ridge,
             covariance_floor=covariance_floor,
         ),
-        emissions=_init_poisson_emissions(
-            latents,
-            data,
+        emissions=EmissionsCollection(
+            (
+                _init_poisson_emissions(
+                    latents,
+                    dataset,
+                ),
+            )
         ),
     )

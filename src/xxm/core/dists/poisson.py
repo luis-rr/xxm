@@ -43,7 +43,7 @@ class Poisson(typing.NamedTuple):
         )
 
     @property
-    def dtype(self) -> jax.typing.DTypeLike:
+    def dtype(self) -> jnp.dtype:
         """Data type."""
         return self.log_rates.dtype
 
@@ -147,7 +147,7 @@ class LinearPoisson(typing.NamedTuple):
         return self.affine.output_dim
 
     @property
-    def dtype(self) -> jax.typing.DTypeLike:
+    def dtype(self) -> jnp.dtype:
         """Data type."""
         return jnp.result_type(
             self.affine.dtype,

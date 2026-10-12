@@ -12,7 +12,8 @@ from xxm.core.chains.discrete import DiscreteChainMarginals
 from xxm.core.chains.gaussian import (
     GaussianChainMarginals,
 )
-from xxm.core.data import Dataset, Sequences
+from xxm.core.data import DatasetCollection, Sequences
+from xxm.core.emissions.collection import EmissionsCollection
 from xxm.core.emissions.continuous import EmissionsT
 from xxm.core.latents.discrete import CategoricalInitial, CategoricalTransitions
 from xxm.core.latents.gaussian import StateConditionedGaussian
@@ -91,7 +92,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     transitions: CategoricalTransitions
     latent_initial: StateConditionedGaussian
     dynamics: GaussianLinearSwitchingDynamics
-    emissions: EmissionsT
+    emissions: EmissionsCollection[EmissionsT]
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
@@ -109,6 +110,11 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
             raise ValueError('SLDS components must share their number of states')
         if self.latent_initial.dist.variable_dim != self.dynamics.latent_dim:
             raise ValueError('initial and dynamics latent dimensions must match')
+        if any(
+            emission.latent_dim != self.dynamics.latent_dim
+            for emission in self.emissions.emissions
+        ):
+            raise ValueError('emission and dynamics latent dimensions must match')
         return self.state_initial.batch_shape
 
     def select(self, index: batch.SelT) -> typing.Self:
@@ -133,18 +139,19 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
     def fit_params(
         self,
-        data: Dataset,
+        data: DatasetCollection,
         posterior: Posterior,
     ) -> typing.Self:
         """Pool sequence statistics while preserving the model batch prefix."""
-        expected_batch = (*self.batch_shape, *data.batch_shape)
+        dataset = data.single()
+        expected_batch = (*self.batch_shape, *dataset.batch_shape)
         if posterior.batch_shape != expected_batch:
             raise ValueError(f'posterior batch must be {expected_batch}')
-        if posterior.continuous.max_steps != data.max_steps:
+        if posterior.continuous.max_steps != dataset.max_steps:
             raise ValueError('posterior and dataset time dimensions must match')
-        if data.input_dim != self.dynamics.input_dim:
+        if dataset.input_dim != self.dynamics.input_dim:
             raise ValueError('dataset input dimension must match dynamics')
-        working_data = data.broadcast(self.batch_shape)
+        working_data = dataset.broadcast(self.batch_shape)
         return self.__class__(
             state_initial=self.state_initial.fit_params(
                 posterior.discrete,
@@ -163,9 +170,13 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
                     working_data.transition_inputs()
                 ),
             ),
-            emissions=self.emissions.fit_params(
-                working_data.weighted_observations(),
-                posterior.continuous,
+            emissions=EmissionsCollection(
+                (
+                    self.emissions.single().fit_params(
+                        working_data.weighted_observations(),
+                        posterior.continuous,
+                    ),
+                )
             ),
         )
 
@@ -174,6 +185,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         key: jax.Array,
         *,
         inputs: Sequences,
+        session: int | None = None,
     ) -> Sample:
         """Sample aligned switching states, latents, and observations."""
 
@@ -203,7 +215,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
             inputs=inputs,
         )
 
-        observations = model.emissions.sample(key_observations, latents)
+        observations = model.emissions.get(session).sample(key_observations, latents)
 
         return Sample(
             states=states,

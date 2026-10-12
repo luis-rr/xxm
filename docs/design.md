@@ -90,7 +90,7 @@ temporal values  (*B, T, ...)
 
 For unbatched objects, `*B=()`, so familiar shapes such as `(T, D)` remain unchanged.
 
-Generic `batch.concatenate` joins an existing batch axis; `batch.split` preserves that axis in each part.
+Generic `batch.concatenate` joins an existing batch axis.
 
 
 
@@ -335,7 +335,7 @@ For example:
 ```python
 import xxm
 
-data = xxm.Dataset.from_array(observations)
+data = xxm.DatasetCollection.from_datasets((xxm.Dataset.from_array(observations),))
 model = xxm.GaussianLDS.via_pca(data, latent_dim=3)
 
 fit = model.fit(data, num_iters=50)
@@ -350,11 +350,15 @@ Facade methods should remain thin wrappers around the existing model-family impl
 
 Low-level inference returns a numerical `InferenceState` containing the model, posterior, and objective. A core model with batch `*M` and a `Dataset` with batch `*D` produce a posterior with Cartesian batch `(*M, *D)`. Objectives and parameter fitting pool all dataset axes while preserving the model batch.
 
-The facades represent singular, unbatched models. Their `via_*`, `infer`, and `fit` methods accept a `Dataset`. Facade inference returns an immutable host-side `Inferred` owning the facade model, raw posterior, and exact source dataset. Fitting returns `Fit(inferred, objective_trace)`, including the initial objective in the trace.
+The facades represent singular, unbatched models. Their `via_*`, `infer`, and `fit` methods accept a `DatasetCollection`. Facade inference returns an immutable host-side `Inferred` owning the facade model, raw posterior, and normalized source collection. Fitting returns `Fit(inferred, objective_trace)`, including the initial objective in the trace. Model-family algorithms retain explicit `.single()` constraints until their multi-session implementations are provided.
 
 Temporal object store temporal values `(*B, T, *D)`, exposes the dense horizon as `max_steps`, and owns a `Lengths` object with `values` shaped `(*B,)`. Use `lengths.transitions()` for transition time and `lengths.clear(values)` to exclude padding.
 
-`Dataset` composes observations and inputs as matching `Sequences`, plus whole-timestep visibility `visible` with shape `(*B, T)`. Public posterior batches match the dataset batch exactly; a single unbatched trajectory has no artificial sequence axis. Temporal accessors return `Sequences`, whose `get(index)` retrieves one cropped array on the host. `unpack()` is a convenience for unbatched or flat collections, and `stack()` constructs rectangular batch hierarchies.
+`Dataset` composes observations and inputs as matching `Sequences`, plus whole-timestep visibility `visible` with shape `(*B, T)`. Standalone and working datasets retain arbitrary batch shapes. `DatasetCollection.from_datasets` promotes an unbatched trajectory to batch `(1,)`, rejects source batches of rank greater than one, and pads every session to a common dense horizon. Observation dimensions remain session-specific; input dimensions must agree. `Dataset.pad_time` appends zeros and false visibility without changing structural lengths or existing values.
+
+`DatasetCollection` geometry is derived from static array shapes. Shared-space objects pool in session order to batch `(*M, P)`, preserving model batch `*M`; session selection slices only the pooled sequence axis. `DatasetCollection.pool_batchables` joins session-aligned common-space objects; `select_session` selects one session while preserving the model batch prefix.
+
+Temporal accessors return `Sequences`, whose `get(index)` retrieves one cropped array on the host. A normalized single trajectory requires `get()`. `unpack()` is a convenience for unbatched or flat sequences, and `stack()` constructs rectangular batch hierarchies.
 
 
 ## JAX and model representation

@@ -10,7 +10,8 @@ from jax import numpy as jnp
 from xxm.core import batch
 from xxm.core.affine import Affine
 from xxm.core.chains.gaussian import GaussianChainMarginals as Posterior
-from xxm.core.data import Dataset, Sequences
+from xxm.core.data import DatasetCollection, Sequences
+from xxm.core.emissions.collection import EmissionsCollection
 from xxm.core.emissions.continuous import EmissionsT
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
 
@@ -34,7 +35,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
     initial: GaussianInitial
     dynamics: GaussianLinearDynamics
-    emissions: EmissionsT
+    emissions: EmissionsCollection[EmissionsT]
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
@@ -45,6 +46,11 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
             self.dynamics.batch_shape,
             self.emissions.batch_shape,
         )
+        if self.initial.dist.variable_dim != self.dynamics.latent_dim or any(
+            emission.latent_dim != self.dynamics.latent_dim
+            for emission in self.emissions.emissions
+        ):
+            raise ValueError('LDS components must share their latent dimension')
         return batch_shape
 
     def select(self, index: batch.SelT) -> typing.Self:
@@ -72,6 +78,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         key: jax.Array,
         *,
         inputs: Sequences,
+        session: int | None = None,
     ) -> Sample:
         """Sample latent and observation trajectories."""
 
@@ -92,7 +99,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
             inputs=inputs,
         )
 
-        observations = model.emissions.sample(
+        observations = model.emissions.get(session).sample(
             key_observations,
             latents,
         )
@@ -118,19 +125,24 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
     def log_joint(
         self,
-        data: Dataset,
+        data: DatasetCollection,
         latents: jax.Array,
+        *,
+        session: int | None = None,
     ) -> jax.Array:
         r"""
-        Compute the joint log density across independent sequences.
+        Compute the joint log density for one selected session.
 
-        Observation factors are included only where `data.visible` is true.
+        Select the dataset and emission with `session`; omission requires a
+        singleton collection. Observation factors use the selected dataset's
+        visibility mask.
         Latent initial and transition factors are included throughout each valid
         sequence prefix. Independent sequence log densities are summed.
         """
+        dataset = data.get(session)
         model_batch_shape = self.batch_shape
-        data_batch_shape = data.batch_shape
-        working_model, working_data = batch.cartesian_broadcast(self, data)
+        data_batch_shape = dataset.batch_shape
+        working_model, working_data = batch.cartesian_broadcast(self, dataset)
 
         expected_latent_shape = (
             *working_data.batch_shape,
@@ -158,7 +170,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
         dynamics_log_prob = jnp.sum(transition_log_probs, axis=-1)
 
-        emission_log_prob = working_model.emissions.log_likelihood(
+        emission_log_prob = working_model.emissions.get(session).log_likelihood(
             working_data.weighted_observations(),
             latents,
         )
@@ -179,21 +191,22 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
     def fit_params(
         self,
-        data: Dataset,
+        data: DatasetCollection,
         posterior: Posterior,
     ) -> typing.Self:
         """Pool dataset batch axes while preserving the model batch prefix."""
+        dataset = data.single()
         model_batch_shape = self.batch_shape
-        expected_batch = (*model_batch_shape, *data.batch_shape)
+        expected_batch = (*model_batch_shape, *dataset.batch_shape)
 
         if posterior.batch_shape != expected_batch:
             raise ValueError(
                 f'posterior batch must be {expected_batch}; got {posterior.batch_shape}'
             )
 
-        working_data = data
+        working_data = dataset
         if model_batch_shape:
-            working_data = data.broadcast(model_batch_shape, axis=0)
+            working_data = dataset.broadcast(model_batch_shape, axis=0)
 
         return self.__class__(
             initial=self.initial.fit_params(
@@ -205,9 +218,13 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
                     working_data.transition_inputs()
                 ),
             ),
-            emissions=self.emissions.fit_params(
-                working_data.weighted_observations(),
-                posterior,
+            emissions=EmissionsCollection(
+                (
+                    self.emissions.single().fit_params(
+                        working_data.weighted_observations(),
+                        posterior,
+                    ),
+                )
             ),
         )
 

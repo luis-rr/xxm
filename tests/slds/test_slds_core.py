@@ -4,6 +4,7 @@ import numpy as np
 from xxm.core.affine import Affine
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.emissions.collection import EmissionsCollection
 from xxm.core.emissions.continuous import GaussianEmissions
 from xxm.core.latents.discrete import (
     CategoricalInitial,
@@ -70,20 +71,24 @@ def _make_model() -> Model:
                 ),
             )
         ),
-        emissions=GaussianEmissions(
-            dist=LinearGaussian(
-                affine=Affine(
-                    coefficients=jnp.array(
-                        [
-                            [1.0, 0.2],
-                            [-0.3, 0.8],
-                            [0.5, -0.4],
-                        ]
-                    ),
-                    bias=jnp.array([0.1, -0.2, 0.3]),
+        emissions=EmissionsCollection(
+            (
+                GaussianEmissions(
+                    dist=LinearGaussian(
+                        affine=Affine(
+                            coefficients=jnp.array(
+                                [
+                                    [1.0, 0.2],
+                                    [-0.3, 0.8],
+                                    [0.5, -0.4],
+                                ]
+                            ),
+                            bias=jnp.array([0.1, -0.2, 0.3]),
+                        ),
+                        covariance=jnp.diag(jnp.array([0.2, 0.3, 0.4])),
+                    )
                 ),
-                covariance=jnp.diag(jnp.array([0.2, 0.3, 0.4])),
-            )
+            ),
         ),
     )
 
@@ -157,8 +162,8 @@ def test_align_preserves_the_model_in_aligned_latent_coordinates():
         expected_next.covariance,
     )
 
-    expected_observation = model.emissions.conditional(latent)
-    actual_observation = aligned.emissions.conditional(aligned_latent)
+    expected_observation = model.emissions.get().conditional(latent)
+    actual_observation = aligned.emissions.get().conditional(aligned_latent)
 
     np.testing.assert_allclose(
         actual_observation.mean,

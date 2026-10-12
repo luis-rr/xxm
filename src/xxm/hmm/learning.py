@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from xxm.core.data import Dataset
+from xxm.core.data import DatasetCollection
 from xxm.core.inference import InferenceState
 from xxm.core.optim.loop import Fit
 from xxm.core.optim.loop import fit_one as _fit_one
@@ -13,7 +13,7 @@ from .inference import infer_exact
 
 def em_step(
     inferred: InferenceState[Model, Posterior],
-    data: Dataset,
+    data: DatasetCollection,
 ) -> InferenceState[Model, Posterior]:
     """Perform one EM update from an existing posterior."""
 
@@ -30,7 +30,7 @@ def em_step(
 
 def fit_em(
     model: Model,
-    data: Dataset,
+    data: DatasetCollection,
     num_iters: int,
     progress: bool | str = 'EM',
 ) -> Fit[InferenceState[Model, Posterior]]:

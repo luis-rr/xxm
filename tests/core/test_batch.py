@@ -177,6 +177,34 @@ def test_shape_helpers_validate_prefix_and_rank():
         batch.require_same_shape((2,), (3,))
 
 
+def test_pool_samples_preserves_model_batch():
+    values = jnp.arange(2 * 3 * 4 * 5).reshape(2, 3, 4, 5)
+
+    pooled = batch.pool_samples(
+        values,
+        batch_shape=(2,),
+        sample_shape=(3, 4),
+    )
+
+    assert pooled.shape == (2, 12, 5)
+
+    np.testing.assert_array_equal(pooled, values.reshape(pooled.shape))
+
+
+def test_pool_samples_empty_sample_shape():
+    values = jnp.arange(10).reshape(2, 5)
+
+    pooled = batch.pool_samples(
+        values,
+        batch_shape=(2,),
+        sample_shape=(),
+    )
+
+    assert pooled.shape == (2, 1, 5)
+
+    np.testing.assert_array_equal(pooled, values.reshape(pooled.shape))
+
+
 def test_batch_helpers_reject_misaligned_leaves():
     with pytest.raises(ValueError, match='PyTree leaf shape must begin'):
         batch.flatten_batch(jnp.ones((3, 2)), (2,))
@@ -252,14 +280,17 @@ def test_mask_flatten_preserves_type_and_values(kind):
     )
 
 
-def test_concatenate_and_split_preserve_lengths_and_singleton_axes_under_jit():
+def test_concatenate_preserves_lengths_and_singleton_axes_under_jit():
     values = jnp.arange(36.0).reshape(2, 3, 3, 2)
 
     sequences = Sequences.from_padded(
         values, Lengths(jnp.array([[3, 2, 1], [1, 2, 3]]))
     )
 
-    parts = jax.jit(lambda item: batch.split(item, (1, 0, 2), axis=-1))(sequences)
+    parts = tuple(
+        sequences.select((slice(None), part))
+        for part in (slice(0, 1), slice(1, 1), slice(1, 3))
+    )
 
     assert tuple(part.batch_shape for part in parts) == ((2, 1), (2, 0), (2, 2))
 
@@ -291,13 +322,3 @@ def test_concatenate_rejects_batch_and_intrinsic_mismatches_without_padding():
         )
     with pytest.raises(ValueError):
         batch.concatenate([_gaussian(), _gaussian().select((slice(None), slice(1)))])
-
-
-@pytest.mark.parametrize('sizes', [(1,), (1, -1, 2), (0.5, 1.5)])
-def test_split_requires_static_nonnegative_sizes_covering_the_axis(sizes):
-    with pytest.raises((ValueError, TypeError)):
-        batch.split(_gaussian(), sizes)
-
-
-def test_split_empty_axis_accepts_empty_sizes():
-    assert batch.split(Lengths(jnp.zeros(0, dtype=int)), ()) == ()

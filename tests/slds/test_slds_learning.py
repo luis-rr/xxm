@@ -4,9 +4,10 @@ import numpy as np
 from xxm.core.affine import Affine
 from xxm.core.chains.discrete import DiscreteChainMarginals
 from xxm.core.chains.gaussian import GaussianChainMarginals
-from xxm.core.data import Dataset
+from xxm.core.data import Dataset, DatasetCollection
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.emissions.collection import EmissionsCollection
 from xxm.core.emissions.continuous import GaussianEmissions
 from xxm.core.inference import InferenceState
 from xxm.core.latents.discrete import (
@@ -101,14 +102,18 @@ def _model() -> Model:
             )
         ),
         dynamics=_dynamics(),
-        emissions=GaussianEmissions(
-            dist=LinearGaussian(
-                affine=Affine(
-                    coefficients=jnp.array([[1.0]]),
-                    bias=jnp.array([0.0]),
+        emissions=EmissionsCollection(
+            (
+                GaussianEmissions(
+                    dist=LinearGaussian(
+                        affine=Affine(
+                            coefficients=jnp.array([[1.0]]),
+                            bias=jnp.array([0.0]),
+                        ),
+                        covariance=jnp.array([[1.0]]),
+                    )
                 ),
-                covariance=jnp.array([[1.0]]),
-            )
+            ),
         ),
     )
 
@@ -144,16 +149,10 @@ def test_model_fit_params_updates_latent_initial_from_posterior():
     model = _model()
 
     fitted = model.fit_params(
-        data=Dataset.from_array(
-            jnp.array(
-                [
-                    [0.0],
-                    [1.0],
-                    [3.0],
-                ]
-            )
+        data=DatasetCollection.from_datasets(
+            (Dataset.from_array(jnp.array([[0.0], [1.0], [3.0]])),)
         ),
-        posterior=_posterior(),
+        posterior=_posterior().broadcast((1,)),
     )
 
     posterior = _posterior().continuous
@@ -174,10 +173,16 @@ def test_model_fit_params_updates_latent_initial_from_posterior():
 
 def test_variational_em_step_returns_finite_objective():
     model = _model()
-    data = Dataset.from_array(jnp.array([[0.0], [1.0], [3.0]]))
+    data = DatasetCollection.from_datasets(
+        (Dataset.from_array(jnp.array([[0.0], [1.0], [3.0]])),)
+    )
 
     inferred = variational_em_step(
-        InferenceState(model=model, posterior=_posterior(), objective=jnp.array(0.0)),
+        InferenceState(
+            model=model,
+            posterior=_posterior().broadcast((1,)),
+            objective=jnp.array(0.0),
+        ),
         data,
         num_inference_iters=1,
     )

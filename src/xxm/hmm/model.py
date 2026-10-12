@@ -8,10 +8,11 @@ import typing
 import jax
 import jax.numpy as jnp
 
-from xxm.core.data import Dataset, Sequences
+from xxm.core.data import DatasetCollection, Sequences
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
+from xxm.core.emissions.collection import EmissionsCollection
 from xxm.core.emissions.discrete import (
     GaussianEmissions,
     PoissonEmissions,
@@ -85,9 +86,8 @@ class GaussianHMM:
         """Underlying core model."""
         return self._model
 
-    @property
-    def observation_dim(self) -> int:
-        return self._model.emissions.observation_dim
+    def observation_dim(self, session: int | None = None) -> int:
+        return self._model.emissions.get(session).observation_dim
 
     @property
     def num_states(self) -> int:
@@ -100,10 +100,9 @@ class GaussianHMM:
             _model=self._model.permute_states(permutation),
         )
 
-    @property
-    def states(self) -> Gaussian:
+    def states(self, session: int | None = None) -> Gaussian:
         """State-conditional emission distributions."""
-        return self._model.emissions.dist
+        return self._model.emissions.get(session).dist
 
     def most_likely_states(self, posterior: Posterior) -> jax.Array:
         """Return the marginally most likely state at each time point."""
@@ -131,10 +130,14 @@ class GaussianHMM:
             _model=Model(
                 initial=initial,
                 transitions=transitions,
-                emissions=GaussianEmissions(
-                    dist=Gaussian(
-                        mean=emission_means,
-                        covariance=emission_covariances,
+                emissions=EmissionsCollection(
+                    (
+                        GaussianEmissions(
+                            dist=Gaussian(
+                                mean=emission_means,
+                                covariance=emission_covariances,
+                            )
+                        ),
                     )
                 ),
             ),
@@ -144,7 +147,7 @@ class GaussianHMM:
     def via_kmeans(
         cls,
         key: jax.Array,
-        data: Dataset,
+        data: DatasetCollection,
         num_states: int,
         *,
         self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
@@ -159,14 +162,20 @@ class GaussianHMM:
 
         return cls(model)
 
-    def sample(self, key: jax.Array, steps: LengthsLike) -> Sample:
+    def sample(
+        self,
+        key: jax.Array,
+        steps: LengthsLike,
+        *,
+        session: int | None = None,
+    ) -> Sample:
         r"""Sample state and observation sequences with requested lengths."""
         ls = LengthsSpec.from_params(steps, min_length=1)
-        return self._model.sample(key, ls=ls)
+        return self._model.sample(key, ls=ls, session=session)
 
     def infer(
         self,
-        data: Dataset,
+        data: DatasetCollection,
     ) -> Inferred[GaussianHMM]:
         """Infer states for all Dataset sequences and retain their source structure."""
         inferred = _infer_exact_jit(
@@ -182,7 +191,7 @@ class GaussianHMM:
 
     def fit(
         self,
-        data: Dataset,
+        data: DatasetCollection,
         *,
         num_iters: int,
         progress: bool | str = 'EM',
@@ -231,9 +240,8 @@ class PoissonHMM:
         """Underlying core model."""
         return self._model
 
-    @property
-    def observation_dim(self) -> int:
-        return self._model.emissions.observation_dim
+    def observation_dim(self, session: int | None = None) -> int:
+        return self._model.emissions.get(session).observation_dim
 
     @property
     def num_states(self) -> int:
@@ -246,10 +254,9 @@ class PoissonHMM:
             _model=self._model.permute_states(permutation),
         )
 
-    @property
-    def states(self) -> Poisson:
+    def states(self, session: int | None = None) -> Poisson:
         """State-conditional Poisson emission distributions."""
-        return self._model.emissions.dist
+        return self._model.emissions.get(session).dist
 
     @classmethod
     def from_params(
@@ -269,9 +276,13 @@ class PoissonHMM:
             _model=Model(
                 initial=initial,
                 transitions=transitions,
-                emissions=PoissonEmissions(
-                    dist=Poisson(
-                        log_rates=emission_log_rates,
+                emissions=EmissionsCollection(
+                    (
+                        PoissonEmissions(
+                            dist=Poisson(
+                                log_rates=emission_log_rates,
+                            )
+                        ),
                     )
                 ),
             ),
@@ -281,7 +292,7 @@ class PoissonHMM:
     def via_kmeans(
         cls,
         key: jax.Array,
-        data: Dataset,
+        data: DatasetCollection,
         num_states: int,
         *,
         self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
@@ -296,14 +307,20 @@ class PoissonHMM:
 
         return cls(model)
 
-    def sample(self, key: jax.Array, steps: LengthsLike) -> Sample:
+    def sample(
+        self,
+        key: jax.Array,
+        steps: LengthsLike,
+        *,
+        session: int | None = None,
+    ) -> Sample:
         r"""Sample state and observation sequences with requested lengths."""
         ls = LengthsSpec.from_params(steps, min_length=1)
-        return self._model.sample(key, ls=ls)
+        return self._model.sample(key, ls=ls, session=session)
 
     def infer(
         self,
-        data: Dataset,
+        data: DatasetCollection,
     ) -> Inferred[PoissonHMM]:
         """Infer states for all Dataset sequences and retain their source structure."""
         inferred = infer_exact(
@@ -319,7 +336,7 @@ class PoissonHMM:
 
     def fit(
         self,
-        data: Dataset,
+        data: DatasetCollection,
         *,
         num_iters: int,
         progress: bool | str = 'EM',
@@ -347,33 +364,38 @@ HMMFacadeT = typing.TypeVar('HMMFacadeT', GaussianHMM, PoissonHMM)
 
 @dataclasses.dataclass(frozen=True, eq=False)
 class Inferred(typing.Generic[HMMFacadeT]):
-    """Singular HMM, posterior, and exact source Dataset."""
+    """Singular HMM, posterior, and exact source DatasetCollection."""
 
     model: HMMFacadeT
     posterior: Posterior
-    data: Dataset
+    data: DatasetCollection
 
     def __post_init__(self) -> None:
-        if self.posterior.batch_shape != self.data.batch_shape:
+        dataset = self.data.single()
+        if self.posterior.batch_shape != dataset.batch_shape:
             raise ValueError('posterior batch must match the source dataset')
-        if self.posterior.max_steps != self.data.max_steps:
+        if self.posterior.max_steps != dataset.max_steps:
             raise ValueError('posterior must match the padded time dimension')
         if self.posterior.num_states != self.model.num_states:
             raise ValueError('posterior must match the model number of states')
 
-    def state_probs(self) -> Sequences:
+    def state_probs(self, session: int | None = None) -> Sequences:
         """State probabilities with the source batch shape and sequence lengths."""
-        return Sequences.from_padded(self.posterior.state_probs, self.data.lengths)
-
-    def observation_mean(self) -> Sequences:
-        """Return the posterior mean observation at each time point."""
-        means = self.model.model.emissions.broadcast(
-            self.posterior.batch_shape
-        ).observation_mean(
-            self.posterior,
+        return Sequences.from_padded(
+            self.posterior.state_probs, self.data.get(session).lengths
         )
 
-        return Sequences.from_padded(means, self.data.lengths)
+    def observation_mean(self, session: int | None = None) -> Sequences:
+        """Return the posterior mean observation at each time point."""
+        means = (
+            self.model.model.emissions.get(session)
+            .broadcast(self.posterior.batch_shape)
+            .observation_mean(
+                self.posterior,
+            )
+        )
+
+        return Sequences.from_padded(means, self.data.get(session).lengths)
 
     def permute_states(self, permutation: jax.Array) -> Inferred[HMMFacadeT]:
         """Relabel discrete states by permutation."""
@@ -383,14 +405,14 @@ class Inferred(typing.Generic[HMMFacadeT]):
             data=self.data,
         )
 
-    def most_likely_states(self) -> Sequences:
+    def most_likely_states(self, session: int | None = None) -> Sequences:
         """Return the marginally most likely state at each time point."""
         most_likely = jnp.argmax(
             self.posterior.state_probs,
             axis=-1,
         )
 
-        return Sequences.from_padded(most_likely, self.data.lengths)
+        return Sequences.from_padded(most_likely, self.data.get(session).lengths)
 
 
 class Fit(typing.NamedTuple, typing.Generic[HMMFacadeT]):
