@@ -4,227 +4,13 @@ import numpy as np
 
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
-from xxm.core.inference.chains.gaussian import GaussianChain
-from xxm.core.lengths import Lengths
 from xxm.core.potentials.gaussian import GaussianPairPotential, GaussianPotential
 
 jax.config.update('jax_enable_x64', True)
 
+
 RTOL = 1e-7
 ATOL = 1e-6
-
-
-def make_chain() -> GaussianChain:
-    diagonal_precision_blocks = jnp.array(
-        [
-            [[4.0, 0.5], [0.5, 3.0]],
-            [[5.0, 0.2], [0.2, 4.0]],
-            [[6.0, 0.4], [0.4, 5.0]],
-        ]
-    )
-    lower_precision_blocks = jnp.array(
-        [
-            [[0.2, -0.1], [-0.05, 0.1]],
-            [[0.15, 0.05], [0.02, 0.12]],
-        ]
-    )
-    information_vectors = jnp.array(
-        [
-            [0.3, -0.2],
-            [0.1, 0.4],
-            [-0.2, 0.5],
-        ]
-    )
-    return GaussianChain(
-        lengths=Lengths(jnp.array(3)),
-        diagonal_precision_blocks=diagonal_precision_blocks,
-        lower_precision_blocks=lower_precision_blocks,
-        information_vectors=information_vectors,
-        log_constant=jnp.array(0.0),  # Placeholder for log constant
-    )
-
-
-def test_dense_precision_matches_block_representation():
-    chain = make_chain()
-
-    result = chain.dense_precision()
-
-    expected = np.array(
-        [
-            [4.0, 0.5, 0.2, -0.05, 0.0, 0.0],
-            [0.5, 3.0, -0.1, 0.1, 0.0, 0.0],
-            [0.2, -0.1, 5.0, 0.2, 0.15, 0.02],
-            [-0.05, 0.1, 0.2, 4.0, 0.05, 0.12],
-            [0.0, 0.0, 0.15, 0.05, 6.0, 0.4],
-            [0.0, 0.0, 0.02, 0.12, 0.4, 5.0],
-        ]
-    )
-
-    np.testing.assert_allclose(result, expected)
-
-
-def test_gaussian_chain_mean_matches_dense_reference():
-    chain = make_chain()
-
-    marginals, _log_normalizer = chain.forward_backward()
-
-    result = marginals.means
-
-    dense_precision_matrix = np.asarray(chain.dense_precision())
-    dense_information_vectors = np.asarray(chain.information_vectors).reshape(-1)
-    expected = np.linalg.solve(dense_precision_matrix, dense_information_vectors)
-    expected = expected.reshape((3, 2))
-
-    np.testing.assert_allclose(result, expected, atol=ATOL, rtol=RTOL)
-
-
-def test_gaussian_chain_covariances_match_dense_inverse():
-    chain = make_chain()
-
-    marginals, _log_normalizer = chain.forward_backward()
-    result = marginals.covariances
-
-    dense_precision_matrix = np.asarray(chain.dense_precision())
-    dense_inverse = np.linalg.inv(dense_precision_matrix)
-    expected = []
-    for t in range(len(chain.diagonal_precision_blocks)):
-        start = t * 2
-        stop = start + 2
-        expected.append(dense_inverse[start:stop, start:stop])
-
-    np.testing.assert_allclose(result, expected, atol=ATOL, rtol=RTOL)
-
-
-def test_gaussian_chain_cross_covariances_match_dense_inverse():
-    chain = make_chain()
-
-    marginals, _log_normalizer = chain.forward_backward()
-    result = marginals.cross_covariances
-
-    dense_precision_matrix = np.asarray(chain.dense_precision())
-    dense_inverse = np.linalg.inv(dense_precision_matrix)
-    expected = []
-    for t in range(len(chain.lower_precision_blocks)):
-        start = t * 2
-        stop = start + 2
-        next_start = (t + 1) * 2
-        next_stop = next_start + 2
-        expected.append(dense_inverse[start:stop, next_start:next_stop])
-
-    np.testing.assert_allclose(result, expected, atol=ATOL, rtol=RTOL)
-
-
-def test_gaussian_chain_single_time_step():
-    chain = GaussianChain(
-        lengths=Lengths(jnp.array(1)),
-        diagonal_precision_blocks=jnp.array([[[3.0, 0.2], [0.2, 4.0]]]),
-        lower_precision_blocks=jnp.zeros((0, 2, 2)),
-        information_vectors=jnp.array([[0.5, -0.3]]),
-        log_constant=jnp.array(0.0),
-    )
-
-    marginals, _log_normalizer = chain.forward_backward()
-    posterior = marginals
-
-    dense_precision_matrix = np.asarray(chain.dense_precision())
-    dense_information_vectors = np.asarray(chain.information_vectors).reshape(-1)
-    expected_mean = np.linalg.solve(dense_precision_matrix, dense_information_vectors)
-
-    np.testing.assert_allclose(
-        posterior.means, expected_mean.reshape((1, 2)), atol=ATOL, rtol=RTOL
-    )
-    np.testing.assert_allclose(
-        posterior.covariances[0],
-        np.linalg.inv(dense_precision_matrix),
-        atol=ATOL,
-        rtol=RTOL,
-    )
-    assert posterior.cross_covariances.shape == (0, 2, 2)
-
-
-def test_gaussian_chain_scalar_latent():
-    chain = GaussianChain(
-        lengths=Lengths(jnp.array(3)),
-        diagonal_precision_blocks=jnp.array([[[4.0]], [[5.0]], [[6.0]]]),
-        lower_precision_blocks=jnp.array([[[0.3]], [[0.2]]]),
-        information_vectors=jnp.array([[1.0], [0.5], [-0.25]]),
-        log_constant=jnp.array(0.0),
-    )
-
-    marginals, _log_normalizer = chain.forward_backward()
-    posterior = marginals
-    dense_precision_matrix = np.asarray(chain.dense_precision())
-    dense_information_vectors = np.asarray(chain.information_vectors).reshape(-1)
-
-    expected_mean = np.linalg.solve(dense_precision_matrix, dense_information_vectors)
-
-    np.testing.assert_allclose(
-        posterior.means, expected_mean.reshape((3, 1)), atol=ATOL, rtol=RTOL
-    )
-    np.testing.assert_allclose(
-        posterior.covariances[:, 0, 0],
-        np.diag(np.linalg.inv(dense_precision_matrix)),
-        atol=ATOL,
-        rtol=RTOL,
-    )
-
-
-def test_gaussian_chain_covariances_are_symmetric_and_positive_definite():
-    chain = make_chain()
-
-    marginals, _log_normalizer = chain.forward_backward()
-    posterior = marginals
-
-    for covariance in posterior.covariances:
-        np.testing.assert_allclose(covariance, covariance.T)
-        eigenvalues = np.linalg.eigvalsh(np.asarray(covariance))
-        assert np.all(eigenvalues > 0.0)
-
-
-def test_gaussian_chain_log_normalizer_matches_dense_reference():
-    chain = make_chain()
-
-    _marginals, log_normalizer = chain.forward_backward()
-
-    dense_precision_matrix = np.asarray(chain.dense_precision())
-    h = np.asarray(chain.information_vectors).reshape(-1)
-
-    dense_log_det = np.linalg.slogdet(dense_precision_matrix)[1]
-    dense_quadratic = (
-        0.5
-        * h
-        @ np.linalg.solve(
-            dense_precision_matrix,
-            h,
-        )
-    )
-
-    expected = (
-        dense_quadratic - 0.5 * dense_log_det + 0.5 * h.size * np.log(2.0 * np.pi)
-    )
-
-    np.testing.assert_allclose(log_normalizer, expected, atol=ATOL, rtol=RTOL)
-
-
-def test_gaussian_chain_jit():
-    chain = make_chain()
-
-    eager, eager_log_normalizer = chain.forward_backward()
-    jitted, jitted_log_normalizer = jax.jit(lambda c: c.forward_backward())(chain)
-
-    np.testing.assert_allclose(
-        np.asarray(jitted.means), np.asarray(eager.means), atol=ATOL, rtol=RTOL
-    )
-    np.testing.assert_allclose(
-        np.asarray(jitted.covariances), np.asarray(eager.covariances)
-    )
-    np.testing.assert_allclose(
-        np.asarray(jitted.cross_covariances), np.asarray(eager.cross_covariances)
-    )
-    np.testing.assert_allclose(jitted_log_normalizer, eager_log_normalizer)
-
-
-# --- GaussianPotential ---
 
 
 def test_gaussian_potential_from_moments_fields():
@@ -289,9 +75,6 @@ def test_gaussian_potential_from_moments_is_normalized():
     )
 
     np.testing.assert_allclose(log_normalizer, 0.0, atol=ATOL)
-
-
-# --- GaussianPairPotential ---
 
 
 def test_gaussian_pair_potential_from_linear_conditional_fields():
@@ -380,9 +163,6 @@ def test_gaussian_pair_potential_log_density():
     np.testing.assert_allclose(log_f, expected, atol=ATOL, rtol=RTOL)
 
 
-# --- Batched GaussianPotential ---
-
-
 def test_gaussian_potential_from_moments_batched():
     means = jnp.array(
         [
@@ -462,9 +242,6 @@ def test_gaussian_potential_from_moments_batched_jit():
     np.testing.assert_allclose(jitted.precision_blocks, eager.precision_blocks)
     np.testing.assert_allclose(jitted.information_vectors, eager.information_vectors)
     np.testing.assert_allclose(jitted.log_constant, eager.log_constant)
-
-
-# --- Batched GaussianPairPotential ---
 
 
 def test_gaussian_pair_potential_from_linear_conditional_batched():
@@ -563,59 +340,3 @@ def test_gaussian_pair_potential_from_linear_conditional_batched_jit():
 
     for eager_field, jitted_field in zip(eager, jitted, strict=True):
         np.testing.assert_allclose(jitted_field, eager_field, atol=ATOL, rtol=RTOL)
-
-
-# --- GaussianChain + local potentials ---
-
-
-def test_gaussian_chain_add_time_indexed_local_potential():
-    chain = make_chain()
-
-    means = jnp.array(
-        [
-            [0.1, -0.2],
-            [0.3, 0.4],
-            [-0.1, 0.2],
-        ]
-    )
-    covariances = jnp.broadcast_to(jnp.eye(2), (3, 2, 2))
-
-    potential = GaussianPotential.from_moments(Gaussian(means, covariances))
-
-    result = chain.add_local_potential(potential)
-
-    np.testing.assert_allclose(
-        result.diagonal_precision_blocks,
-        chain.diagonal_precision_blocks + potential.precision_blocks,
-    )
-    np.testing.assert_allclose(
-        result.information_vectors,
-        chain.information_vectors + potential.information_vectors,
-    )
-    np.testing.assert_allclose(
-        result.log_constant,
-        chain.log_constant + jnp.sum(potential.log_constant),
-    )
-    np.testing.assert_allclose(
-        result.lower_precision_blocks,
-        chain.lower_precision_blocks,
-    )
-
-
-def test_gaussian_chain_add_local_potential_jit():
-    chain = make_chain()
-
-    potential = GaussianPotential.from_moments(
-        Gaussian(
-            mean=jnp.zeros((3, 2)), covariance=jnp.broadcast_to(jnp.eye(2), (3, 2, 2))
-        ),
-    )
-
-    eager = chain.add_local_potential(potential)
-    jitted = jax.jit(lambda chain, potential: chain.add_local_potential(potential))(
-        chain,
-        potential,
-    )
-
-    for eager_field, jitted_field in zip(eager, jitted, strict=True):
-        np.testing.assert_allclose(jitted_field, eager_field)
