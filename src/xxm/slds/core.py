@@ -9,11 +9,9 @@ import jax.numpy as jnp
 
 from xxm.core import batch
 from xxm.core.affine import Affine
-from xxm.core.chains.discrete import DiscreteChainMarginals
-from xxm.core.chains.gaussian import (
-    GaussianChainMarginals,
-)
 from xxm.core.data import DatasetCollection, Sequences
+from xxm.core.dists.discrete import DiscreteChainMarginals
+from xxm.core.dists.gaussian import GaussianChainMarginals
 from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import EmissionsT
 from xxm.core.latents.discrete import CategoricalInitial, CategoricalTransitions

@@ -8,17 +8,18 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core import batch
-from xxm.core.chains.discrete import DiscreteChainMarginals, DiscretePotential
-from xxm.core.chains.gaussian import (
-    GaussianChainMarginals,
+from xxm.core.dists.discrete import DiscreteMarginals
+from xxm.core.dists.gaussian import GaussianMarginals
+from xxm.core.lengths import Lengths, LengthsSpec
+from xxm.core.potentials.discrete import DiscretePotential
+from xxm.core.potentials.gaussian import (
     GaussianChainPotentials,
     GaussianPairPotential,
     GaussianPotential,
 )
-from xxm.core.lengths import Lengths, LengthsSpec
 
 
-class ConditionedGaussianChainPotentials(typing.NamedTuple):
+class SwitchingGaussianPotentials(typing.NamedTuple):
     """Gaussian factors conditioned on the incoming discrete state.
 
     Initial factors have batch (*W, K), pair factors (*W, T-1, K).
@@ -31,7 +32,7 @@ class ConditionedGaussianChainPotentials(typing.NamedTuple):
 
     def compute_continuous_potentials(
         self,
-        discrete: DiscreteChainMarginals,
+        discrete: DiscreteMarginals,
     ) -> GaussianChainPotentials:
         states = self.lengths.clear(discrete.state_probs)
 
@@ -53,7 +54,7 @@ class ConditionedGaussianChainPotentials(typing.NamedTuple):
 
     def compute_discrete_potential(
         self,
-        continuous: GaussianChainMarginals,
+        continuous: GaussianMarginals,
     ) -> DiscretePotential:
         """Expected state-specific Gaussian log factors."""
 
@@ -188,7 +189,7 @@ class GatedGaussianPotentials(typing.NamedTuple):
 
     def expected_gate_log_difference(
         self,
-        posterior: GaussianChainMarginals,
+        posterior: GaussianMarginals,
     ) -> jax.Array:
         """Expected log active minus log inactive transition factors.
 

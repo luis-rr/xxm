@@ -21,15 +21,15 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core import batch
-from xxm.core.chains.discrete import DiscretePotential
 from xxm.core.data import Sequences
+from xxm.core.dists.discrete import DiscreteMarginals
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
 from xxm.core.emissions.collection import EmissionsCollection
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import poisson as poisson_fit
 from xxm.core.optim.batch import filter_valid_batches
-from xxm.core.posteriors import DiscretePosterior
+from xxm.core.potentials.discrete import DiscretePotential
 
 from .data import ARWeightedObservations
 
@@ -211,7 +211,7 @@ class AREmissions(
 
     def fit_params(
         self,
-        posterior: DiscretePosterior,
+        posterior: DiscreteMarginals,
         data: ARWeightedObservations,
         ridge: float | None = None,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
@@ -407,7 +407,7 @@ class AREmissionsCollection(
     EmissionsCollection[
         AREmissions[ConditionalDistT],
         ARWeightedObservations,
-        DiscretePosterior,
+        DiscreteMarginals,
     ],
     typing.Generic[ConditionalDistT],
 ):
@@ -415,7 +415,7 @@ class AREmissionsCollection(
 
     def fit_params(
         self,
-        posterior: DiscretePosterior,
+        posterior: DiscreteMarginals,
         observations: ARWOCollection,
     ) -> typing.Self:
         return self._fit_params(

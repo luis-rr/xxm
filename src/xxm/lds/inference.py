@@ -6,21 +6,18 @@ import jax
 from jax import numpy as jnp
 
 from xxm.core import batch
-from xxm.core.chains.gaussian import GaussianChain as Chain
-from xxm.core.chains.gaussian import GaussianChainMarginals as Posterior
-from xxm.core.chains.gaussian import (
-    GaussianChainPotentials,
-    GaussianPotential,
-)
 from xxm.core.data import DatasetCollection, Sequences
+from xxm.core.dists.gaussian import GaussianChainMarginals as Posterior
 from xxm.core.emissions.continuous import (
     EmissionsT,
     LaplaceEmissionsT,
     QuadraticEmissionsT,
 )
 from xxm.core.inference import InferenceState
-from xxm.core.optim.laplace import laplace_inference
+from xxm.core.inference.gaussian import infer as gaussian_infer
+from xxm.core.inference.laplace import laplace_inference
 from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
+from xxm.core.potentials.gaussian import GaussianChainPotentials, GaussianPotential
 
 from .core import Model
 
@@ -77,9 +74,7 @@ def infer_exact(
 
     potentials = compute_potential(model, data)
 
-    latent_chain = Chain.from_potentials(potentials.latent)
-    latent_chain = latent_chain.add_local_potential(potentials.observation)
-    inferred = latent_chain.forward_backward()
+    inferred = gaussian_infer(potentials.latent, potentials.observation)
 
     return InferenceState(
         model=model,
@@ -108,14 +103,8 @@ def infer_laplace(
 
     observations = data.weighted_observations()
 
-    latent_chain = Chain.from_potentials(latent_potentials)
-
-    if initial_latents is None:
-        initial_latents = latent_chain.forward_backward().posterior.means
-    initial_latents = latent_chain.lengths.clear(initial_latents)
-
     inferred = laplace_inference(
-        chain=latent_chain,
+        potentials=latent_potentials,
         emissions=model.emissions,
         observations=observations,
         initial_latents=initial_latents,

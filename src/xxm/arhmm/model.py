@@ -10,7 +10,7 @@ import jax.numpy as jnp
 
 from xxm.core.affine import Affine
 from xxm.core.data import Dataset, DatasetCollection, Sequences
-from xxm.core.dists.categorical import Categorical
+from xxm.core.dists.discrete import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
 from xxm.core.latents.discrete import (

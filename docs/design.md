@@ -27,6 +27,7 @@ The codebase follows a few general rules:
 * Prefer immutable data and pure transformations.
 * Prefer composition and generic functions over inheritance.
 * Prefer symmetry where it reflects the mathematics, but do not force it where the mathematics differs.
+* Abstractions should reflect genuine mathematical structure, not impose uniform interfaces on fundamentally different objects.
 * Keep state inspectable and unsurprising.
 * Prefer clarity until measured performance justifies additional complexity.
 
@@ -38,44 +39,33 @@ Protocols are useful for small capability-oriented interfaces, such as posterior
 
 ### Mathematical and model organization
 
-At the lowest level are reusable mathematical components:
+`xxm` separates **mathematical representations, generative models, and inference algorithms** into:
 
-* probability distributions and conditional distributions;
-* discrete and Gaussian chain potentials and marginals;
-* reusable emission, initial-state, transition, and dynamics components;
-* generic optimization and fitting routines.
+- `core.dists` defines normalized probability distributions and their probabilistic operations.
+- `core.potentials` defines unnormalized factors, their algebra, and operations such as conditioning, weighting, and expectations.
+- `core.latents` defines parameterized generative components, including their distributions, sampling, and conversion to potentials.
+- `core.inference` provides reusable algorithms that operate on mathematical representations to compute posterior distributions, marginals, and related quantities.
+- `core.optim` provides reusable numerical optimization and parameter-fitting routines.
 
-Model families compose these pieces:
+Mathematical objects own operations intrinsic to their representation, while inference algorithms remain independent of the generative models that produced their inputs.
 
-* an HMM uses a discrete latent chain and discrete-state emissions;
-* an LDS uses a Gaussian latent chain and continuous-state emissions;
-* an SLDS combines discrete and Gaussian latent structure through switching dynamics.
+Model families compose these reusable components and organize their own responsibilities:
 
-Within each model family, responsibilities remain distinct:
+- `core` defines the generative model and its parameters.
+- `inference` constructs model-specific inference problems and coordinates posterior updates.
+- `learning` updates parameters and orchestrates repeated inference and fitting.
+- `init` constructs useful starting models.
+- `model` exposes the user-facing API.
 
-* `core` defines the generative model and its parameters;
-* `inference` computes posterior quantities for fixed model parameters;
-* `learning` updates model parameters and orchestrates repeated inference and fitting;
-* `init` constructs useful starting models from data or simple assumptions.
-* `model` exposes convenience API objects
+### Inference 
 
-Generative-model logic should live on the mathematical components where it is intrinsic. Examples include sampling, conditional distributions, conversion to chain potentials, and sufficient-statistic-based parameter updates.
+Inference is organized around **potentials** which are objects that represent factors of unnormalized probability densities. They are often represented in log space for mathematical convenience. Their fundamental mathematical operations, including addition of log potentials, weighting, and expected log evaluation, belong to the potential representations themselves. Generative components construct potentials from their parameters. Specialized algorithms then consume, evaluate or combine potentials for inference and learning.
 
-Inference should orchestrate those components rather than duplicate their generative mathematics. Reusable optimization belongs below model-family learning code so that learning modules remain close to the statistical algorithms they implement.
+For structured variational inference, the central operation is to **hold some posterior factors fixed, take expectations of the relevant log potentials, and update the remaining factors**. Repeating this operation produces model-specific coordinate-ascent procedures. Fixed model factors and reusable calculations may be retained in lightweight inference contexts, while the changing posterior factors remain explicit.
 
-The same model components should be used for simulation, inference, and learning whenever the mathematics permits it.
+This separation makes compositionality arise from **compatible mathematical representations and operations**, rather than universal inference interfaces or generic orchestration frameworks. Model families remain free to implement their own update schedules, approximations, and learning procedures while sharing the underlying mathematics.
 
-
-### Potential-based inference
-
-Inference in `xxm` is organized around **explicit potential construction**.
-
-
-A potential is a nonnegative function of one or more latent variables that assigns an unnormalized probability weight to their configurations, representing a factor of the model's joint distribution. Potential objects represent the underlying statistical factors independently of the inference algorithm, allowing the same factors to be used for posterior updates and expected-log-potential calculations in objectives such as the ELBO. 
-
-Reusable model components own the conversion of their distributions into potentials, including component-specific time alignment, validity masking, and expansion over replicated batch dimensions. Model-family inference code orchestrates these components: it establishes Cartesian model–data batches, collects latent and observation potentials, assembles the appropriate inference chains, and computes posterior quantities.
-
-Operations depending on a variational posterior, such as mixing state-conditioned or gated potentials, remain in inference rather than in the generative components. This separation keeps mathematical details local to the components that define them while making model-family inference code concise, inspectable, and consistent across families.
+The guiding principle is to **centralize reusable mathematics, keep algorithms independent of model composition, and leave model-specific orchestration explicit and lean**.
 
 ### Batch semantics
 
@@ -103,7 +93,6 @@ temporal values  (*B, T, ...)
 For unbatched objects, `*B=()`, so familiar shapes such as `(T, D)` remain unchanged.
 
 Generic `batch.concatenate` joins an existing batch axis.
-
 
 
 #### Batch API

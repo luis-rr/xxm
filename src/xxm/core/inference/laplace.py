@@ -5,13 +5,11 @@ import typing
 import jax
 from jax import numpy as jnp
 
-from xxm.core.chains.gaussian import (
-    GaussianChain,
-    GaussianChainMarginals,
-    GaussianPotential,
-    InferredPosterior,
-)
+from xxm.core.dists.gaussian import GaussianChainMarginals
+from xxm.core.inference.chains.gaussian import GaussianChain
+from xxm.core.inference.results import InferredPosterior
 from xxm.core.optim.newton import NewtonSearch, OptimParams
+from xxm.core.potentials.gaussian import GaussianChainPotentials, GaussianPotential
 
 ObservationsT = typing.TypeVar('ObservationsT')
 ObservationsT_contra = typing.TypeVar(
@@ -119,12 +117,30 @@ class _NewtonSearchModel(
 
 
 def local_gaussian_approximation(
-    chain: GaussianChain,
+    potentials: GaussianChainPotentials,
     emissions: LaplaceLikelihood[ObservationsT],
     observations: ObservationsT,
     latents: jax.Array,
 ) -> InferredPosterior[GaussianChainMarginals]:
     """Construct a local Gaussian posterior approximation around `latents`."""
+
+    chain = GaussianChain.from_potentials(potentials)
+
+    return _local_gaussian_approximation(
+        chain=chain,
+        emissions=emissions,
+        observations=observations,
+        latents=latents,
+    )
+
+
+def _local_gaussian_approximation(
+    chain: GaussianChain,
+    emissions: LaplaceLikelihood[ObservationsT],
+    observations: ObservationsT,
+    latents: jax.Array,
+) -> InferredPosterior[GaussianChainMarginals]:
+    latents = chain.lengths.clear(latents)
 
     observation_potential = emissions.compute_local_potential(
         observations,
@@ -132,16 +148,15 @@ def local_gaussian_approximation(
     )
 
     posterior_chain = chain.add_local_potential(observation_potential)
-
     return posterior_chain.forward_backward()
 
 
 def laplace_inference(
-    chain: GaussianChain,
+    potentials: GaussianChainPotentials,
     emissions: LaplaceLikelihood[ObservationsT],
     observations: ObservationsT,
-    initial_latents: jax.Array,
     search_params: OptimParams,
+    initial_latents: jax.Array | None = None,
 ) -> InferredPosterior[GaussianChainMarginals]:
     """
     Approximate normalized latent marginals and the log normalizer by Laplace inference.
@@ -159,14 +174,18 @@ def laplace_inference(
 
     search_params.validate()
 
+    # Assemble once. The Newton search retains this canonical system.
+    chain = GaussianChain.from_potentials(potentials)
+
+    if initial_latents is None:
+        initial_latents = chain.forward_backward().posterior.means
+
+    initial_latents = chain.lengths.clear(initial_latents)
+
     newton_model = _NewtonSearchModel(
         latent_chain=chain,
         emissions=emissions,
         observations=observations,
-    )
-
-    initial_params = _NewtonSearchParams(
-        latents=initial_latents,
     )
 
     search = NewtonSearch[_NewtonSearchParams](
@@ -174,11 +193,14 @@ def laplace_inference(
         optim_params=search_params,
     )
 
-    final = search.optimize(params=initial_params)
+    final = search.optimize(
+        params=_NewtonSearchParams(latents=initial_latents),
+    )
 
-    return local_gaussian_approximation(
-        chain=chain,
-        emissions=emissions,
-        observations=observations,
-        latents=final.params.latents,
+    # Reuse the same assembled chain for the final approximation.
+    return _local_gaussian_approximation(
+        chain,
+        emissions,
+        observations,
+        final.params.latents,
     )

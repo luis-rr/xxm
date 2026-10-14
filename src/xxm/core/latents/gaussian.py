@@ -7,12 +7,17 @@ from jax import numpy as jnp
 
 from xxm.core import batch
 from xxm.core.affine import Affine
-from xxm.core.chains.gaussian import GaussianPairPotential, GaussianPotential
 from xxm.core.data import Sequences
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian, PairedGaussian
+from xxm.core.dists.discrete import DiscreteMarginals
+from xxm.core.dists.gaussian import (
+    Gaussian,
+    GaussianMarginals,
+    LinearGaussian,
+    PairedGaussian,
+)
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim.batch import filter_valid_batches
-from xxm.core.posteriors import ContinuousPosterior, DiscretePosterior
+from xxm.core.potentials.gaussian import GaussianPairPotential, GaussianPotential
 
 
 class GaussianInitial(typing.NamedTuple):
@@ -45,7 +50,7 @@ class GaussianInitial(typing.NamedTuple):
 
     def fit_params(
         self,
-        posterior: ContinuousPosterior,
+        posterior: GaussianMarginals,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
     ) -> typing.Self:
         r"""
@@ -288,7 +293,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
 
     def fit_params(
         self,
-        posterior: ContinuousPosterior,
+        posterior: GaussianMarginals,
         inputs: Sequences,
         ridge=gaussian_fit.DEFAULT_RIDGE,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
@@ -661,8 +666,8 @@ class StateConditionedGaussian(typing.NamedTuple):
 
     def fit_params(
         self,
-        discrete: DiscretePosterior,
-        continuous: ContinuousPosterior,
+        discrete: DiscreteMarginals,
+        continuous: GaussianMarginals,
         *,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
     ) -> typing.Self:

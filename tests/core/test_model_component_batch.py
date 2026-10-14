@@ -11,13 +11,12 @@ from xxm.arhmm.data import ARDataset
 from xxm.arhmm.emissions import AREmissions
 from xxm.core import batch
 from xxm.core.affine import Affine
-from xxm.core.chains.discrete import DiscreteChain, DiscreteChainMarginals
-from xxm.core.chains.gaussian import GaussianChainMarginals
 from xxm.core.data import Dataset, Sequences, WeightedObservations
-from xxm.core.dists.categorical import Categorical
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.dists.discrete import Categorical, DiscreteChainMarginals
+from xxm.core.dists.gaussian import Gaussian, GaussianChainMarginals, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
 from xxm.core.emissions import continuous, discrete
+from xxm.core.inference.chains.discrete import DiscreteChain
 from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,

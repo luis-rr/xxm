@@ -4,7 +4,7 @@ import jax
 from jax import numpy as jnp
 
 from xxm.core.data import Dataset, DatasetCollection
-from xxm.core.dists.categorical import Categorical
+from xxm.core.dists.discrete import Categorical
 from xxm.core.emissions.collection import DiscreteEmissionsCollection
 from xxm.core.emissions.discrete import (
     Emissions,

@@ -9,6 +9,7 @@ import jax.scipy.linalg as jsp_linalg
 
 from xxm.core import batch
 from xxm.core.affine import Affine
+from xxm.core.lengths import Lengths
 
 
 class Gaussian(typing.NamedTuple):
@@ -746,3 +747,385 @@ class PairedGaussian(typing.NamedTuple):
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another position."""
         return batch.move_axis(self, source, destination)
+
+
+def _log_det(covariance: jax.Array) -> jax.Array:
+    """Compute a positive-definite covariance's log determinant via Cholesky."""
+    cholesky = jnp.linalg.cholesky(covariance)
+
+    return 2.0 * jnp.sum(
+        jnp.log(
+            jnp.diagonal(
+                cholesky,
+                axis1=-2,
+                axis2=-1,
+            )
+        ),
+        axis=-1,
+    )
+
+
+def _conditional_log_det(
+    covariance: jax.Array,
+    next_covariance: jax.Array,
+    cross_covariance: jax.Array,
+) -> jax.Array:
+    r"""Compute $\log\det\operatorname{Cov}(x_{t+1}\mid x_t)$ from pair moments.
+
+    `cross_covariance` stores $\operatorname{Cov}(x_t,x_{t+1})$.
+    """
+    cholesky = jnp.linalg.cholesky(
+        covariance,
+    )
+
+    solved = jsp_linalg.cho_solve(
+        (cholesky, True),
+        cross_covariance,
+    )
+
+    conditional_covariance = (
+        next_covariance - jnp.swapaxes(cross_covariance, -1, -2) @ solved
+    )
+
+    # Remove small numerical asymmetries before Cholesky.
+    conditional_covariance = 0.5 * (
+        conditional_covariance + jnp.swapaxes(conditional_covariance, -1, -2)
+    )
+
+    return _log_det(
+        conditional_covariance,
+    )
+
+
+class GaussianChainMarginals(typing.NamedTuple):
+    r"""
+    Marginal moments of the normalized Gaussian chain distribution.
+
+    Under the normalized chain distribution $q(x)$:
+
+    * `means[t]` stores $\mathbb{E}_q[x_t]$.
+    * `covariances[t]` stores $\operatorname{Cov}_q(x_t)$.
+    * `cross_covariances[t]` stores $\operatorname{Cov}_q(x_t,x_{t+1})$.
+    """
+
+    means: jax.Array  # (*B, T, D)
+    covariances: jax.Array  # (*B, T, D, D)
+    cross_covariances: jax.Array  # (*B, T - 1, D, D)
+    lengths: Lengths
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        """Leading independent-chain dimensions."""
+        return self.means.shape[:-2]
+
+    @property
+    def max_steps(self) -> int:
+        """Number of time steps."""
+        return self.means.shape[-2]
+
+    @property
+    def variable_dim(self) -> int:
+        """Dimension of each Gaussian variable."""
+        return self.means.shape[-1]
+
+    def entropy_terms(self) -> jax.Array:
+        r"""Return Markov entropy contributions for each time step.
+
+        The returned terms are
+
+        $$
+        H(x_0),\;
+        H(x_1 \mid x_0),\;
+        \ldots,\;
+        H(x_{T-1} \mid x_{T-2}),
+        $$
+
+        with shape `(*B, T)`.
+        """
+        if self.max_steps == 0:
+            return jnp.zeros(
+                (*self.batch_shape, 0),
+                dtype=self.means.dtype,
+            )
+
+        constant = self.variable_dim * (1.0 + jnp.log(2.0 * jnp.pi))
+
+        initial_log_det = _log_det(self.covariances[..., 0, :, :])
+
+        conditional_log_dets = _conditional_log_det(
+            self.covariances[..., :-1, :, :],
+            self.covariances[..., 1:, :, :],
+            self.cross_covariances,
+        )
+
+        initial = 0.5 * (constant + initial_log_det)
+
+        conditionals = 0.5 * (constant + conditional_log_dets)
+
+        return jnp.concatenate(
+            [
+                initial[..., None],
+                conditionals,
+            ],
+            axis=-1,
+        )
+
+    def entropy(
+        self,
+    ) -> jax.Array:
+        """Entropy per chain over its genuine temporal prefix."""
+        terms = self.entropy_terms()
+        terms = self.lengths.clear(terms)
+        return jnp.sum(terms, axis=-1)
+
+    def affine(self, affine: Affine) -> typing.Self:
+        """Push posterior marginals through a batch-aligned affine map."""
+        batch.require_same_shape(self.batch_shape, affine.batch_shape)
+
+        if affine.input_shape != (self.variable_dim,):
+            raise ValueError(
+                'affine input dimension must match the posterior variable dimension'
+            )
+
+        coefficients = affine.coefficients
+        means = (
+            jnp.einsum('...oi,...ti->...to', coefficients, self.means)
+            + affine.bias[..., None, :]
+        )
+        covariances = jnp.einsum(
+            '...oi,...tij,...pj->...top',
+            coefficients,
+            self.covariances,
+            coefficients,
+        )
+        cross_covariances = jnp.einsum(
+            '...oi,...tij,...pj->...top',
+            coefficients,
+            self.cross_covariances,
+            coefficients,
+        )
+
+        return self.__class__(
+            lengths=self.lengths,
+            means=means,
+            covariances=covariances,
+            cross_covariances=cross_covariances,
+        )
+
+    def select(self, index: batch.SelT) -> typing.Self:
+        """Index only batch dimensions, retaining this object type."""
+        return batch.select(self, index)
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        """Insert replicated batch dimensions at `axis`."""
+        return batch.broadcast(self, shape, axis=axis)
+
+    def squeeze(self, axis=None) -> typing.Self:
+        """Remove singleton batch dimensions."""
+        return batch.squeeze(self, axis=axis)
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        """Reorder entries along a batch axis."""
+        return batch.permute(self, permutation, axis=axis)
+
+    def move_axis(self, source: int, destination: int) -> typing.Self:
+        """Move one batch axis to another position."""
+        return batch.move_axis(self, source, destination)
+
+    def raw_second_moments(self) -> jax.Array:
+        r"""Return raw second moments $\mathbb{E}_q[x_t x_t^\top]$."""
+        extra = jnp.einsum(
+            '...ti,...tj->...tij',
+            self.means,
+            self.means,
+        )
+
+        return self.covariances + extra
+
+    def reorient_variables(
+        self,
+        signs: jax.Array,
+    ) -> typing.Self:
+        """Flip variable signs globally or independently by chain batch."""
+        signs = batch.broadcast_trailing(
+            signs,
+            self.batch_shape,
+            (self.variable_dim,),
+        )
+
+        return self._replace(
+            means=(self.means * signs[..., None, :]),
+            covariances=(
+                signs[..., None, :, None] * self.covariances * signs[..., None, None, :]
+            ),
+            cross_covariances=(
+                signs[..., None, :, None]
+                * self.cross_covariances
+                * signs[..., None, None, :]
+            ),
+        )
+
+    def permute_variables(
+        self,
+        permutation: jax.Array,
+    ) -> typing.Self:
+        """Relabel variable dimensions globally or independently by chain batch."""
+        permutation = batch.broadcast_trailing(
+            permutation,
+            self.batch_shape,
+            (self.variable_dim,),
+        )
+
+        mean_indices = jnp.broadcast_to(permutation[..., None, :], self.means.shape)
+
+        means = jnp.take_along_axis(self.means, mean_indices, axis=-1)
+
+        covariance_row_indices = jnp.broadcast_to(
+            permutation[..., None, :, None],
+            self.covariances.shape,
+        )
+
+        covariances = jnp.take_along_axis(
+            self.covariances,
+            covariance_row_indices,
+            axis=-2,
+        )
+
+        covariance_column_indices = jnp.broadcast_to(
+            permutation[..., None, None, :],
+            self.covariances.shape,
+        )
+
+        covariances = jnp.take_along_axis(
+            covariances,
+            covariance_column_indices,
+            axis=-1,
+        )
+
+        cross_row_indices = jnp.broadcast_to(
+            permutation[..., None, :, None],
+            self.cross_covariances.shape,
+        )
+
+        cross_covariances = jnp.take_along_axis(
+            self.cross_covariances,
+            cross_row_indices,
+            axis=-2,
+        )
+
+        cross_column_indices = jnp.broadcast_to(
+            permutation[..., None, None, :],
+            self.cross_covariances.shape,
+        )
+
+        cross_covariances = jnp.take_along_axis(
+            cross_covariances,
+            cross_column_indices,
+            axis=-1,
+        )
+
+        return self._replace(
+            means=means,
+            covariances=covariances,
+            cross_covariances=cross_covariances,
+        )
+
+    def shift_variables(
+        self,
+        offset: jax.Array,
+    ) -> typing.Self:
+        """Shift all chain-variable coordinates as x_t' = x_t - offset."""
+        offset = batch.broadcast_trailing(
+            offset,
+            self.batch_shape,
+            (self.variable_dim,),
+        )
+
+        return self._replace(
+            means=(self.means - offset[..., None, :]),
+        )
+
+    def raw_cross_moments(self) -> jax.Array:
+        r"""Return raw cross moments $\mathbb{E}_q[x_t x_{t+1}^\top]$ for $T-1$ pairs."""
+        extra = jnp.einsum(
+            '...ti,...tj->...tij',
+            self.means[..., :-1, :],
+            self.means[..., 1:, :],
+        )
+
+        return self.cross_covariances + extra
+
+    def paired_marginals(self) -> PairedGaussian:
+        """Return adjacent marginals $(x_t, x_{t+1})$."""
+        return PairedGaussian(
+            left=Gaussian(
+                mean=self.means[..., :-1, :],
+                covariance=self.covariances[..., :-1, :, :],
+            ),
+            right=Gaussian(
+                mean=self.means[..., 1:, :],
+                covariance=self.covariances[..., 1:, :, :],
+            ),
+            cross_covariance=jnp.swapaxes(
+                self.cross_covariances,
+                -2,
+                -1,
+            ),
+        )
+
+
+class GaussianMarginals(typing.Protocol):
+    r"""Protocol for continuous Gaussian marginals.
+
+    Represents marginal means, covariances, and raw moments across time under
+    a Gaussian distribution $q(x)$.
+
+    It may hold, for instance, the posterior distribution after inference.
+
+    Independent batch dimensions precede the time and variable dimensions.
+    """
+
+    @property
+    def lengths(self) -> Lengths: ...
+
+    @property
+    def max_steps(self) -> int:
+        r"""Number of time steps $T$."""
+        ...
+
+    @property
+    def variable_dim(self) -> int:
+        r"""Dimension of the variables $D$."""
+        ...
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        r"""Shape of independent batch dimensions (*B)."""
+        ...
+
+    @property
+    def means(self) -> jax.Array:  # (*B, T, D)
+        r"""Marginal means $\mathbb{E}_q[x_t]$."""
+        ...
+
+    @property
+    def covariances(self) -> jax.Array:  # (*B, T, D, D)
+        r"""Marginal covariances $\operatorname{Cov}_q(x_t)$."""
+        ...
+
+    @property
+    def cross_covariances(self) -> jax.Array:  # (*B, T-1, D, D)
+        r"""Cross-covariances $\operatorname{Cov}_q(x_t,x_{t+1})$."""
+        ...
+
+    def raw_second_moments(self) -> jax.Array:  # (*B, T, D, D)
+        r"""Raw second moments $\mathbb{E}_q[x_t x_t^\top]$."""
+        ...
+
+    def raw_cross_moments(self) -> jax.Array:  # (*B, T-1, D, D)
+        r"""Raw cross-moments $\mathbb{E}_q[x_t x_{t+1}^\top]$."""
+        ...
+
+    def paired_marginals(self) -> PairedGaussian:
+        r"""Return adjacent Gaussian marginals $q(x_t, x_{t+1})$."""
+        ...

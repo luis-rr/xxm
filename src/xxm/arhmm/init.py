@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core.data import DatasetCollection
-from xxm.core.dists.categorical import Categorical
+from xxm.core.dists.discrete import Categorical
 from xxm.core.dists.gaussian import LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.latents.discrete import CategoricalInitial, CategoricalTransitions

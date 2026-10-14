@@ -7,15 +7,15 @@ import jax.numpy as jnp
 
 from xxm.core import batch
 from xxm.core.affine import Affine
-from xxm.core.chains.gaussian import (
+from xxm.core.data import Sequences
+from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.lengths import LengthsSpec
+from xxm.core.potentials.gaussian import (
     GaussianChainPotentials,
     GaussianPairPotential,
     GaussianPotential,
 )
-from xxm.core.chains.switching import GatedGaussianPotentials
-from xxm.core.data import Sequences
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian
-from xxm.core.lengths import LengthsSpec
+from xxm.core.potentials.switching import GatedGaussianPotentials
 
 
 def _zero_mean_from_covariance(

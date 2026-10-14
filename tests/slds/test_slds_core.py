@@ -2,7 +2,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from xxm.core.affine import Affine
-from xxm.core.dists.categorical import Categorical
+from xxm.core.dists.discrete import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import GaussianEmissions

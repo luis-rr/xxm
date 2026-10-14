@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from xxm.core.chains.gaussian import GaussianChainMarginals as Posterior
 from xxm.core.data import DatasetCollection
+from xxm.core.dists.gaussian import GaussianChainMarginals as Posterior
 from xxm.core.emissions.continuous import LaplaceEmissionsT, QuadraticEmissionsT
 from xxm.core.inference import InferenceState
 from xxm.core.optim.loop import Fit

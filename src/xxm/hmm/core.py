@@ -7,8 +7,8 @@ import typing
 import jax
 
 from xxm.core import batch
-from xxm.core.chains.discrete import DiscreteChainMarginals as Posterior
 from xxm.core.data import DatasetCollection, Sequences
+from xxm.core.dists.discrete import DiscreteChainMarginals as Posterior
 from xxm.core.emissions.collection import DiscreteEmissionsCollection
 from xxm.core.emissions.discrete import Emissions
 from xxm.core.latents.discrete import CategoricalInitial, CategoricalTransitions

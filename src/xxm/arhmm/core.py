@@ -7,10 +7,10 @@ import typing
 import jax
 
 from xxm.core import batch
-from xxm.core.chains.discrete import (
+from xxm.core.data import Sequences
+from xxm.core.dists.discrete import (
     DiscreteChainMarginals as Posterior,
 )
-from xxm.core.data import Sequences
 from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,

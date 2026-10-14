@@ -7,15 +7,15 @@ import jax.numpy as jnp
 
 from xxm.core import batch
 from xxm.core.affine import Affine
-from xxm.core.chains.gaussian import (
-    GaussianPairPotential,
-)
 from xxm.core.data import Sequences
-from xxm.core.dists.gaussian import LinearGaussian
+from xxm.core.dists.discrete import DiscreteMarginals
+from xxm.core.dists.gaussian import GaussianMarginals, LinearGaussian
 from xxm.core.latents.gaussian import GaussianLinearDynamics
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim.batch import filter_valid_batches
-from xxm.core.posteriors import ContinuousPosterior, DiscretePosterior
+from xxm.core.potentials.gaussian import (
+    GaussianPairPotential,
+)
 
 
 class GaussianLinearSwitchingDynamics(typing.NamedTuple):
@@ -118,8 +118,8 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
 
     def fit_params(
         self,
-        discrete: DiscretePosterior,
-        continuous: ContinuousPosterior,
+        discrete: DiscreteMarginals,
+        continuous: GaussianMarginals,
         *,
         inputs: Sequences,
         ridge=gaussian_fit.DEFAULT_RIDGE,

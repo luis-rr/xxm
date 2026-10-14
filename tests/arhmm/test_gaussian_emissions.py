@@ -5,8 +5,8 @@ import numpy as np
 from xxm.arhmm.data import ARDataset, lagged_observations
 from xxm.arhmm.emissions import AREmissions
 from xxm.core.affine import Affine
-from xxm.core.chains.discrete import DiscreteChainMarginals
 from xxm.core.data import Sequences
+from xxm.core.dists.discrete import DiscreteChainMarginals
 from xxm.core.dists.gaussian import LinearGaussian
 from xxm.core.lengths import Lengths
 

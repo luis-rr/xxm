@@ -10,11 +10,11 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core import batch
-from xxm.core.chains.gaussian import GaussianPotential
 from xxm.core.data import Sequences
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.latents.hermite_core import HermiteBasis
 from xxm.core.lengths import LengthsSpec
+from xxm.core.potentials.gaussian import GaussianPotential
 
 
 @functools.partial(

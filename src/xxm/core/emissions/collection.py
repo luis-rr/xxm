@@ -9,13 +9,14 @@ import jax.numpy as jnp
 
 from xxm.core import batch
 from xxm.core.affine import Affine
-from xxm.core.chains.discrete import DiscretePotential
-from xxm.core.chains.gaussian import GaussianPotential
 from xxm.core.data import WeightedObservations
+from xxm.core.dists.discrete import DiscreteMarginals
+from xxm.core.dists.gaussian import GaussianMarginals
 from xxm.core.emissions.continuous import Emissions as ContinuousEmission
 from xxm.core.emissions.continuous import LaplaceEmissionsT, QuadraticEmissionsT
 from xxm.core.emissions.discrete import Emissions as DiscreteEmissions
-from xxm.core.posteriors import ContinuousPosterior, DiscretePosterior
+from xxm.core.potentials.discrete import DiscretePotential
+from xxm.core.potentials.gaussian import GaussianPotential
 
 EmissionT = typing.TypeVar('EmissionT', bound=batch.Batchable)
 DataT = typing.TypeVar('DataT', bound=batch.Batchable)
@@ -158,7 +159,7 @@ class ContinuousEmissionsCollection(
     EmissionsCollection[
         ContinuousEmissionT,
         WeightedObservations,
-        ContinuousPosterior,
+        GaussianMarginals,
     ],
     typing.Generic[ContinuousEmissionT],
 ):
@@ -166,7 +167,7 @@ class ContinuousEmissionsCollection(
 
     def fit_params(
         self,
-        posterior: ContinuousPosterior,
+        posterior: GaussianMarginals,
         observations: WOCollection,
     ) -> typing.Self:
         return self._fit_params(
@@ -229,7 +230,7 @@ class ContinuousEmissionsCollection(
     def expected_log_likelihood(
         self,
         observations: WOCollection,
-        posterior: ContinuousPosterior,
+        posterior: GaussianMarginals,
     ) -> jax.Array:
         posterior_split = _partition(observations).split(
             posterior,
@@ -257,7 +258,7 @@ class DiscreteEmissionsCollection(
     EmissionsCollection[
         DiscreteEmissionT,
         WeightedObservations,
-        DiscretePosterior,
+        DiscreteMarginals,
     ],
     typing.Generic[DiscreteEmissionT],
 ):
@@ -265,7 +266,7 @@ class DiscreteEmissionsCollection(
 
     def fit_params(
         self,
-        posterior: DiscretePosterior,
+        posterior: DiscreteMarginals,
         observations: WOCollection,
     ) -> typing.Self:
         return self._fit_params(

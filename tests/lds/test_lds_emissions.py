@@ -3,9 +3,8 @@ import numpy as np
 from jax import numpy as jnp
 
 from xxm.core.affine import Affine
-from xxm.core.chains.gaussian import GaussianChainMarginals
 from xxm.core.data import Sequences, WeightedObservations
-from xxm.core.dists.gaussian import LinearGaussian
+from xxm.core.dists.gaussian import GaussianChainMarginals, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
 from xxm.core.lengths import Lengths

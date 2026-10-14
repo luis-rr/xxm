@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from xxm.core.data import Sequences
-from xxm.core.dists.categorical import Categorical
+from xxm.core.dists.discrete import Categorical
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
 from xxm.core.latents.hermite import HermiteGaussian

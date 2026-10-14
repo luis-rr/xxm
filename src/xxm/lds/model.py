@@ -9,9 +9,9 @@ import jax
 from jax import numpy as jnp
 
 from xxm.core.affine import Affine
-from xxm.core.chains.gaussian import GaussianChainMarginals as Posterior
 from xxm.core.data import DatasetCollection, Sequences
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.dists.gaussian import GaussianChainMarginals as Posterior
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions

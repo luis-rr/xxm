@@ -9,7 +9,7 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core.data import Dataset, DatasetCollection, Sequences
-from xxm.core.dists.categorical import Categorical
+from xxm.core.dists.discrete import Categorical
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
 from xxm.core.emissions.collection import DiscreteEmissionsCollection

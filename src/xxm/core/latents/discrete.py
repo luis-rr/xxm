@@ -6,13 +6,12 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core import batch
-from xxm.core.chains.discrete import DiscreteChainPotentials
 from xxm.core.data import Sequences
-from xxm.core.dists.categorical import Categorical
+from xxm.core.dists.discrete import Categorical, DiscreteMarginals
 from xxm.core.lengths import LengthsSpec
 from xxm.core.optim import categorical as categorical_fit
 from xxm.core.optim.batch import filter_valid_batches
-from xxm.core.posteriors import DiscretePosterior
+from xxm.core.potentials.discrete import DiscreteChainPotentials
 
 
 class CategoricalInitial(typing.NamedTuple):
@@ -56,7 +55,7 @@ class CategoricalInitial(typing.NamedTuple):
 
     def fit_params(
         self,
-        posterior: DiscretePosterior,
+        posterior: DiscreteMarginals,
         pseudocount=categorical_fit.DEFAULT_PSEUDOCOUNT,
     ) -> typing.Self:
         r"""Fit initial distribution from posterior marginals $\gamma_0(k)$."""
@@ -188,7 +187,7 @@ class CategoricalTransitions(typing.NamedTuple):
 
     def fit_params(
         self,
-        posterior: DiscretePosterior,
+        posterior: DiscreteMarginals,
         pseudocount=categorical_fit.DEFAULT_PSEUDOCOUNT,
     ) -> typing.Self:
         r"""Fit transition probabilities from posterior pair marginals $\xi_t(i,j)$."""

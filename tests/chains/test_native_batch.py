@@ -8,19 +8,13 @@ import numpy as np
 import pytest
 
 from xxm.core.affine import Affine
-from xxm.core.chains.discrete import (
-    DiscreteChain,
-    DiscreteChainMarginals,
-    DiscretePotential,
-)
-from xxm.core.chains.gaussian import (
-    GaussianChain,
-    GaussianChainMarginals,
-    GaussianPairPotential,
-    GaussianPotential,
-)
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.dists.discrete import DiscreteChainMarginals
+from xxm.core.dists.gaussian import Gaussian, GaussianChainMarginals, LinearGaussian
+from xxm.core.inference.chains.discrete import DiscreteChain
+from xxm.core.inference.chains.gaussian import GaussianChain
 from xxm.core.lengths import Lengths
+from xxm.core.potentials.discrete import DiscretePotential
+from xxm.core.potentials.gaussian import GaussianPairPotential, GaussianPotential
 
 
 def gaussian_chain(batch, steps):

@@ -9,16 +9,15 @@ from jax import numpy as jnp
 
 from xxm.core import batch
 from xxm.core.affine import Affine
-from xxm.core.chains.gaussian import (
-    GaussianPotential,
-)
 from xxm.core.data import Sequences, WeightedObservations
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.dists.gaussian import Gaussian, GaussianMarginals, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import poisson as poisson_fit
 from xxm.core.optim.batch import filter_valid_batches
-from xxm.core.posteriors import ContinuousPosterior
+from xxm.core.potentials.gaussian import (
+    GaussianPotential,
+)
 
 
 class Emissions(typing.Protocol):
@@ -49,7 +48,7 @@ class Emissions(typing.Protocol):
 
     def fit_params(
         self,
-        posterior: ContinuousPosterior,
+        posterior: GaussianMarginals,
         observations: WeightedObservations,
     ) -> typing.Self:
         """Fit shared emission parameters across independent sequences."""
@@ -66,7 +65,7 @@ class Emissions(typing.Protocol):
     def expected_log_likelihood(
         self,
         observations: WeightedObservations,
-        posterior: ContinuousPosterior,
+        posterior: GaussianMarginals,
     ) -> jax.Array:
         r"""Evaluate E_q[log p(y|x)] under Gaussian marginals."""
         ...
@@ -130,7 +129,7 @@ LaplaceEmissionsT = typing.TypeVar(
 
 def _flatten_fit_data(
     observations: WeightedObservations,
-    posterior: ContinuousPosterior,
+    posterior: GaussianMarginals,
     batch_shape: tuple[int, ...],
 ) -> tuple[
     jax.Array,
@@ -236,7 +235,7 @@ class GaussianEmissions(typing.NamedTuple):
     def expected_log_likelihood(
         self,
         observations: WeightedObservations,
-        posterior: ContinuousPosterior,
+        posterior: GaussianMarginals,
     ) -> jax.Array:
         """Compute the weighted expected conditional log likelihood."""
         batch.require_same_shape(
@@ -297,7 +296,7 @@ class GaussianEmissions(typing.NamedTuple):
 
     def fit_params(
         self,
-        posterior: ContinuousPosterior,
+        posterior: GaussianMarginals,
         observations: WeightedObservations,
         ridge=gaussian_fit.DEFAULT_RIDGE,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
@@ -349,7 +348,7 @@ class GaussianEmissions(typing.NamedTuple):
 
         return self._replace(dist=fitted)
 
-    def observation_mean(self, posterior: ContinuousPosterior) -> jax.Array:
+    def observation_mean(self, posterior: GaussianMarginals) -> jax.Array:
         """Expected observations under posterior marginals."""
         batch.require_same_shape(self.batch_shape, posterior.batch_shape)
 
@@ -484,7 +483,7 @@ class PoissonEmissions(typing.NamedTuple):
     def expected_log_likelihood(
         self,
         observations: WeightedObservations,
-        posterior: ContinuousPosterior,
+        posterior: GaussianMarginals,
     ) -> jax.Array:
         """Compute the weighted expected conditional log likelihood."""
         batch.require_same_shape(
@@ -567,7 +566,7 @@ class PoissonEmissions(typing.NamedTuple):
 
     def fit_params(
         self,
-        posterior: ContinuousPosterior,
+        posterior: GaussianMarginals,
         observations: WeightedObservations,
         ridge=poisson_fit.DEFAULT_RIDGE,
     ) -> typing.Self:
@@ -620,7 +619,7 @@ class PoissonEmissions(typing.NamedTuple):
 
         return self._replace(dist=fitted)
 
-    def observation_mean(self, posterior: ContinuousPosterior) -> jax.Array:
+    def observation_mean(self, posterior: GaussianMarginals) -> jax.Array:
         """Compute expected observations under posterior latent marginals."""
         batch.require_same_shape(
             self.batch_shape,

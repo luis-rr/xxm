@@ -6,19 +6,19 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core import batch
-from xxm.core.chains.discrete import DiscretePotential
 from xxm.core.data import Sequences, WeightedObservations
+from xxm.core.dists.discrete import DiscreteMarginals
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import poisson as poisson_fit
 from xxm.core.optim.batch import filter_valid_batches
-from xxm.core.posteriors import DiscretePosterior
+from xxm.core.potentials.discrete import DiscretePotential
 
 
 def _validate_weighted_samples(
     observations: WeightedObservations,
-    posterior: DiscretePosterior,
+    posterior: DiscreteMarginals,
     model_batch_shape: tuple[int, ...],
     num_states: int,
     observation_dim: int,
@@ -41,7 +41,7 @@ def _validate_weighted_samples(
 
 def _prepare_weighted_samples(
     observations: WeightedObservations,
-    posterior: DiscretePosterior,
+    posterior: DiscreteMarginals,
     model_batch_shape: tuple[int, ...],
 ) -> tuple[jax.Array, jax.Array]:
     """Prepare validated observations and effective state weights for pooling.
@@ -103,13 +103,13 @@ class Emissions(typing.Protocol):
 
     def fit_params(
         self,
-        posterior: DiscretePosterior,
+        posterior: DiscreteMarginals,
         observations: WeightedObservations,
     ) -> typing.Self:
         """Fit emission parameters from observations and posterior state weights."""
         ...
 
-    def observation_mean(self, posterior: DiscretePosterior) -> jax.Array:
+    def observation_mean(self, posterior: DiscreteMarginals) -> jax.Array:
         """Compute posterior mean observations with aligned structural batches."""
         ...
 
@@ -191,7 +191,7 @@ class GaussianEmissions(typing.NamedTuple):
 
     def fit_params(
         self,
-        posterior: DiscretePosterior,
+        posterior: DiscreteMarginals,
         observations: WeightedObservations,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
     ) -> typing.Self:
@@ -232,7 +232,7 @@ class GaussianEmissions(typing.NamedTuple):
             dist=fitted,
         )
 
-    def observation_mean(self, posterior: DiscretePosterior) -> jax.Array:
+    def observation_mean(self, posterior: DiscreteMarginals) -> jax.Array:
         """Average state means under the posterior at every timestep."""
         batch.require_same_shape(self.batch_shape, posterior.batch_shape)
         states = self.dist.broadcast(posterior.max_steps, axis=len(self.batch_shape))
@@ -315,7 +315,7 @@ class PoissonEmissions(typing.NamedTuple):
 
     def fit_params(
         self,
-        posterior: DiscretePosterior,
+        posterior: DiscreteMarginals,
         observations: WeightedObservations,
     ) -> typing.Self:
         """Fit state-specific Poisson log rates from posterior state weights."""
@@ -348,7 +348,7 @@ class PoissonEmissions(typing.NamedTuple):
             dist=fitted,
         )
 
-    def observation_mean(self, posterior: DiscretePosterior) -> jax.Array:
+    def observation_mean(self, posterior: DiscreteMarginals) -> jax.Array:
         """Average state rates under the posterior at every timestep."""
         batch.require_same_shape(self.batch_shape, posterior.batch_shape)
         states = self.dist.broadcast(posterior.max_steps, axis=len(self.batch_shape))

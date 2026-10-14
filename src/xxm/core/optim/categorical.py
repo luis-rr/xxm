@@ -3,7 +3,7 @@
 import jax
 import jax.numpy as jnp
 
-from xxm.core.dists.categorical import Categorical
+from xxm.core.dists.discrete import Categorical
 
 DEFAULT_PSEUDOCOUNT = 1e-8
 

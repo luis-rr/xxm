@@ -8,19 +8,9 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core import batch
-from xxm.core.chains.discrete import (
-    DiscreteChain,
-    DiscreteChainPotentials,
-    DiscretePotential,
-)
-from xxm.core.chains.discrete import DiscreteChainMarginals as DiscretePosterior
-from xxm.core.chains.gaussian import (
-    GaussianChain,
-    GaussianPotential,
-)
-from xxm.core.chains.gaussian import GaussianChainMarginals as ContinuousPosterior
-from xxm.core.chains.switching import ConditionedGaussianChainPotentials
 from xxm.core.data import DatasetCollection, WeightedObservations
+from xxm.core.dists.discrete import DiscreteChainMarginals
+from xxm.core.dists.gaussian import GaussianChainMarginals
 from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import (
     EmissionsT,
@@ -28,10 +18,15 @@ from xxm.core.emissions.continuous import (
     QuadraticEmissionsT,
 )
 from xxm.core.inference import InferenceState
+from xxm.core.inference.discrete import infer as discrete_infer
+from xxm.core.inference.gaussian import infer as gaussian_infer
+from xxm.core.inference.laplace import laplace_inference, local_gaussian_approximation
 from xxm.core.latents.discrete import compute_chain_potentials
 from xxm.core.lengths import Lengths
-from xxm.core.optim.laplace import laplace_inference, local_gaussian_approximation
 from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
+from xxm.core.potentials.discrete import DiscreteChainPotentials, DiscretePotential
+from xxm.core.potentials.gaussian import GaussianPotential
+from xxm.core.potentials.switching import SwitchingGaussianPotentials
 
 from .core import Model, Posterior
 
@@ -41,7 +36,7 @@ class LatentPotentials(typing.NamedTuple):
     Latent potentials for structured mean-field inference.
     """
 
-    cond: ConditionedGaussianChainPotentials
+    cond: SwitchingGaussianPotentials
     prior: DiscreteChainPotentials
 
     @classmethod
@@ -55,7 +50,7 @@ class LatentPotentials(typing.NamedTuple):
             data.pool_inputs(),
         )
 
-        conditioned = ConditionedGaussianChainPotentials(
+        conditioned = SwitchingGaussianPotentials(
             initial=initial.compute_potential(),
             pairs=model.dynamics.compute_pair_potentials(inputs),
             lengths=inputs.lengths,
@@ -77,15 +72,15 @@ class LatentPotentials(typing.NamedTuple):
     def _discrete_posterior(
         self,
         local: DiscretePotential,
-    ) -> DiscretePosterior:
+    ) -> DiscreteChainMarginals:
         """Compute the discrete posterior given a local potential."""
-        chain = DiscreteChain.from_local_potentials(self.prior, local)
-        return chain.forward_backward().posterior
+        inferred = discrete_infer(self.prior, local)
+        return inferred.posterior
 
     def discrete_posterior(
         self,
-        continuous: ContinuousPosterior,
-    ) -> DiscretePosterior:
+        continuous: GaussianChainMarginals,
+    ) -> DiscreteChainMarginals:
         """Compute the discrete posterior given a continuous posterior."""
         local = self.cond.compute_discrete_potential(continuous)
         return self._discrete_posterior(local)
@@ -93,39 +88,33 @@ class LatentPotentials(typing.NamedTuple):
     def discrete_posterior_at(
         self,
         latents: jax.Array,
-    ) -> DiscretePosterior:
+    ) -> DiscreteChainMarginals:
         """Compute the discrete posterior given a deterministic latent trajectory."""
         local = self.cond.compute_discrete_potential_at(latents)
         return self._discrete_posterior(local)
 
-    def _continuous_chain(self, discrete: DiscretePosterior) -> GaussianChain:
-        """Construct a Gaussian chain conditioned on discrete states."""
-        potentials = self.cond.compute_continuous_potentials(discrete)
-        return GaussianChain.from_potentials(potentials)
-
     def continuous_posterior_quadratic(
         self,
         observation: GaussianPotential,
-        discrete: DiscretePosterior,
-    ) -> ContinuousPosterior:
+        discrete: DiscreteChainMarginals,
+    ) -> GaussianChainMarginals:
         """Compute the continuous posterior given a discrete posterior and quadratic observation potential."""
 
-        continuous_chain = self._continuous_chain(discrete)
-        continuous_chain = continuous_chain.add_local_potential(observation)
-        continuous_posterior = continuous_chain.forward_backward().posterior
-        return continuous_posterior
+        potentials = self.cond.compute_continuous_potentials(discrete)
+        inferred = gaussian_infer(potentials, observation)
+        return inferred.posterior
 
     def continuous_posterior_local(
         self,
-        discrete: DiscretePosterior,
+        discrete: DiscreteChainMarginals,
         emissions: ContinuousEmissionsCollection[LaplaceEmissionsT],
         observations: tuple[WeightedObservations, ...],
         latents: jax.Array,
-    ) -> ContinuousPosterior:
+    ) -> GaussianChainMarginals:
         """Compute the continuous posterior given a discrete posterior and local Laplace observation potentials."""
 
         inferred = local_gaussian_approximation(
-            chain=self._continuous_chain(discrete),
+            potentials=self.cond.compute_continuous_potentials(discrete),
             emissions=emissions,
             observations=observations,
             latents=latents,
@@ -135,16 +124,16 @@ class LatentPotentials(typing.NamedTuple):
 
     def continuous_posterior_laplace(
         self,
-        discrete: DiscretePosterior,
+        discrete: DiscreteChainMarginals,
         emissions: ContinuousEmissionsCollection[LaplaceEmissionsT],
         observations: tuple[WeightedObservations, ...],
         latents: jax.Array,
         params: OptimParams,
-    ) -> ContinuousPosterior:
+    ) -> GaussianChainMarginals:
         """Compute the continuous posterior given a discrete posterior and Laplace observation potentials."""
 
         inferred = laplace_inference(
-            chain=self._continuous_chain(discrete),
+            potentials=self.cond.compute_continuous_potentials(discrete),
             emissions=emissions,
             observations=observations,
             initial_latents=latents,
@@ -169,7 +158,7 @@ def infer_variational(
 
     discrete = potentials.discrete_posterior_at(initial_latents)
 
-    def step(_, discrete: DiscretePosterior) -> DiscretePosterior:
+    def step(_, discrete: DiscreteChainMarginals) -> DiscreteChainMarginals:
         continuous = potentials.continuous_posterior_quadratic(observation, discrete)
         discrete = potentials.discrete_posterior(continuous)
         return discrete

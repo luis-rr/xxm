@@ -4,18 +4,18 @@ import pytest
 from jax import numpy as jnp
 
 from xxm.core.affine import Affine
-from xxm.core.chains.gaussian import GaussianChain
 from xxm.core.data import Dataset, DatasetCollection
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
-from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
-from xxm.core.lengths import Lengths
-from xxm.core.optim.laplace import (
+from xxm.core.inference.chains.gaussian import GaussianChain
+from xxm.core.inference.laplace import (
     _NewtonSearchModel,
     _NewtonSearchParams,
 )
+from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
+from xxm.core.lengths import Lengths
 from xxm.core.optim.newton import NewtonSearch, OptimParams
 from xxm.lds.core import Model
 from xxm.lds.inference import (

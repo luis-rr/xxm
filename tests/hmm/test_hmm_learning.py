@@ -2,9 +2,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from xxm.core.chains.discrete import DiscreteChainMarginals
 from xxm.core.data import Dataset, DatasetCollection, WeightedObservations
-from xxm.core.dists.categorical import Categorical
+from xxm.core.dists.discrete import Categorical, DiscreteChainMarginals
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
 from xxm.core.emissions.collection import DiscreteEmissionsCollection

@@ -8,16 +8,12 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core import batch
-from xxm.core.chains.gaussian import (
-    GaussianChain,
-    GaussianChainMarginals,
-    GaussianChainPotentials,
-    GaussianPotential,
-)
-from xxm.core.dists.gaussian import Gaussian
+from xxm.core.dists.gaussian import Gaussian, GaussianChainMarginals
+from xxm.core.inference.gaussian import infer as gaussian_infer
 from xxm.core.latents.hermite import HermiteGaussian
 from xxm.core.latents.random_walk import GaussianRandomWalk
 from xxm.core.lengths import Lengths, LengthsSpec
+from xxm.core.potentials.gaussian import GaussianChainPotentials, GaussianPotential
 
 
 class HermiteGaussianInference(typing.NamedTuple):
@@ -155,8 +151,7 @@ class GaussianChainInference(typing.NamedTuple):
                 lengths=self.prior.lengths,
             )
 
-        chain = GaussianChain.from_potentials(self.prior)
-        return chain.add_local_potential(local).forward_backward().posterior
+        return gaussian_infer(self.prior, local).posterior
 
     def marginals(
         self,

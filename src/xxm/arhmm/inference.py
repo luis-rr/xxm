@@ -5,13 +5,13 @@ import typing
 import jax
 import jax.numpy as jnp
 
-from xxm.core.chains.discrete import (
-    DiscreteChain,
+from xxm.core.inference import InferenceState
+from xxm.core.inference.discrete import infer as discrete_infer
+from xxm.core.latents.discrete import compute_chain_potentials
+from xxm.core.potentials.discrete import (
     DiscreteChainPotentials,
     DiscretePotential,
 )
-from xxm.core.inference import InferenceState
-from xxm.core.latents.discrete import compute_chain_potentials
 
 from .core import Model, Posterior
 from .data import ARDatasetCollection
@@ -60,10 +60,10 @@ def infer_exact(
 
     potentials = Potentials.from_data(model, data)
 
-    chain = DiscreteChain.from_potentials(potentials.latent)
-    chain = chain.add_local_potential(potentials.observation)
-
-    inferred = chain.forward_backward()
+    inferred = discrete_infer(
+        potentials.latent,
+        potentials.observation,
+    )
 
     return InferenceState(
         model=model,
