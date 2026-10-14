@@ -59,10 +59,14 @@ def test_exact_posterior_matches_enumerated_paths(family, num_targets):
 
     data = ARDataset.from_dataset(Dataset.from_array(observations), num_lags=2)
     np.testing.assert_allclose(
-        model._model.emissions.get().log_likelihoods(data), log_likelihoods, atol=1e-6
+        model._model.emissions.get().log_likelihoods(data.weighted_observations()),
+        log_likelihoods,
+        atol=1e-6,
     )
     np.testing.assert_allclose(
-        model._model.emissions.get().compute_potential(data).log_values,
+        model._model.emissions.get()
+        .compute_potential(data.weighted_observations())
+        .log_values,
         log_likelihoods,
         atol=1e-6,
     )

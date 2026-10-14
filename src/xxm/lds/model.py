@@ -13,7 +13,7 @@ from xxm.core.chains.gaussian import GaussianChainMarginals as Posterior
 from xxm.core.data import DatasetCollection, Sequences
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
-from xxm.core.emissions.collection import EmissionsCollection
+from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
 from xxm.core.lengths import LengthsLike, LengthsSpec
@@ -165,7 +165,7 @@ class GaussianLDS:
             _model=Model(
                 initial=initial,
                 dynamics=dynamics,
-                emissions=EmissionsCollection(
+                emissions=ContinuousEmissionsCollection(
                     (
                         GaussianEmissions(
                             dist=LinearGaussian(
@@ -337,7 +337,7 @@ class PoissonLDS:
             _model=Model(
                 initial=initial,
                 dynamics=dynamics,
-                emissions=EmissionsCollection(
+                emissions=ContinuousEmissionsCollection(
                     (
                         PoissonEmissions(
                             dist=LinearPoisson(

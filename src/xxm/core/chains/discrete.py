@@ -9,7 +9,9 @@ import jax.numpy as jnp
 import jax.scipy as jsp
 
 from xxm.core import batch
+from xxm.core.inference import InferredPosterior
 from xxm.core.lengths import Lengths
+from xxm.core.posteriors import DiscretePosterior
 
 
 class DiscretePotential(typing.NamedTuple):
@@ -52,6 +54,73 @@ class DiscretePotential(typing.NamedTuple):
         """Move one batch axis to another position."""
         return batch.move_axis(self, source, destination)
 
+    def expected_log_potential(
+        self,
+        posterior: DiscretePosterior,
+    ) -> jax.Array:
+        """Expected unary log potentials."""
+
+        states = posterior.lengths.clear(posterior.state_probs)
+
+        log_values = jnp.where(
+            states != 0,
+            posterior.lengths.clear(self.log_values),
+            0,
+        )
+
+        return jnp.sum(states * log_values, axis=(-2, -1))
+
+
+class DiscreteChainPotentials(typing.NamedTuple):
+    """Initial and pairwise factors of a discrete Markov chain."""
+
+    initial: jax.Array  # (*B, K)
+    pairs: jax.Array  # (*B, T-1, K, K)
+    lengths: Lengths
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        return self.initial.shape[:-1]
+
+    def broadcast(
+        self,
+        shape,
+        axis: int = 0,
+    ) -> typing.Self:
+        return batch.broadcast(self, shape, axis=axis)
+
+    def select(self, index: batch.SelT) -> typing.Self:
+        return batch.select(self, index)
+
+    def expected_log_potential(
+        self,
+        posterior: DiscretePosterior,
+    ) -> jax.Array:
+        """Expected initial and transition log potentials."""
+
+        states = posterior.lengths.clear(posterior.state_probs)
+
+        initial_probs = posterior.lengths.clear(
+            self.initial[..., None, :],
+            fill=1,
+        )[..., 0, :]
+
+        initial = jnp.sum(
+            jsp.special.xlogy(states[..., 0, :], initial_probs),
+            axis=-1,
+        )
+
+        transitions = posterior.lengths.transitions()
+        pairs = transitions.clear(posterior.pair_probs)
+        transition_probs = transitions.clear(self.pairs, fill=1)
+
+        dynamics = jnp.sum(
+            jsp.special.xlogy(pairs, transition_probs),
+            axis=(-3, -2, -1),
+        )
+
+        return initial + dynamics
+
 
 class DiscreteChain(typing.NamedTuple):
     r"""Finite-state chain with local state potentials.
@@ -73,6 +142,44 @@ class DiscreteChain(typing.NamedTuple):
     transition_probs: jax.Array  # (*B, T - 1, K, K)
     state_log_potentials: jax.Array  # (*B, T, K)
     lengths: Lengths
+
+    @classmethod
+    def from_potentials(
+        cls,
+        potentials: DiscreteChainPotentials,
+    ) -> typing.Self:
+        """Construct a discrete chain from initial, pair and local factors."""
+
+        initial = potentials.initial
+        pairs = potentials.pairs
+
+        max_steps = pairs.shape[-3] + 1
+        log_values = jnp.zeros(
+            (*initial.shape[:-1], max_steps, initial.shape[-1]),
+            dtype=initial.dtype,
+        )
+
+        return cls(
+            initial_probs=initial,
+            transition_probs=pairs,
+            state_log_potentials=log_values,
+            lengths=potentials.lengths,
+        )
+
+    @classmethod
+    def from_local_potentials(
+        cls,
+        potentials: DiscreteChainPotentials,
+        local: DiscretePotential,
+    ) -> typing.Self:
+        """Construct a discrete chain with explicitly supplied local factors."""
+
+        return cls(
+            initial_probs=potentials.initial,
+            transition_probs=potentials.pairs,
+            state_log_potentials=local.log_values,
+            lengths=potentials.lengths,
+        )
 
     @property
     def num_states(self) -> int:
@@ -126,7 +233,7 @@ class DiscreteChain(typing.NamedTuple):
 
     def forward_backward(
         self,
-    ) -> tuple[DiscreteChainMarginals, jax.Array]:
+    ) -> InferredPosterior[DiscreteChainMarginals]:
         """Infer chains with neutral padded factors and exclude invalid suffixes.
 
         Owned lengths denote sequence prefixes, never observation visibility.
@@ -390,7 +497,7 @@ class _DiscreteChainMessages(typing.NamedTuple):
     def compute_marginals(
         self,
         chain: DiscreteChain,
-    ) -> tuple[DiscreteChainMarginals, jax.Array]:
+    ) -> InferredPosterior[DiscreteChainMarginals]:
         """Compute normalized chain marginals and the log normalizer."""
 
         posterior = DiscreteChainMarginals(
@@ -401,7 +508,7 @@ class _DiscreteChainMessages(typing.NamedTuple):
 
         log_normalizer = self.compute_log_normalizer(chain.lengths)
 
-        return posterior, log_normalizer
+        return InferredPosterior(posterior=posterior, log_normalizer=log_normalizer)
 
     def compute_state_marginals(self) -> jax.Array:
         r"""

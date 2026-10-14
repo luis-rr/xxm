@@ -98,10 +98,22 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         conditional = GaussianLinearDynamics(self.dist).conditional(state_inputs)
         return conditional.move_axis(len(self.batch_shape), -1)
 
-    def compute_pair_potentials(self, inputs: jax.Array) -> GaussianPairPotential:
-        """Return transition potentials with batch `(*B, *Q, K)`."""
-        return GaussianPairPotential.from_linear_conditional(
-            self.conditional(inputs),
+    def compute_pair_potentials(self, inputs: Sequences) -> GaussianPairPotential:
+        """Construct state-conditioned potentials for valid transitions."""
+
+        transitions = inputs.select_time(start=1)
+
+        potential = GaussianPairPotential.from_linear_conditional(
+            self.conditional(transitions.values)
+        )
+
+        valid = transitions.lengths.to_mask(transitions.max_steps).values
+
+        return potential.scale(
+            jnp.broadcast_to(
+                valid[..., None],
+                potential.batch_shape,
+            )
         )
 
     def fit_params(
@@ -109,7 +121,7 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         discrete: DiscretePosterior,
         continuous: ContinuousPosterior,
         *,
-        inputs: jax.Array,
+        inputs: Sequences,
         ridge=gaussian_fit.DEFAULT_RIDGE,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
     ) -> typing.Self:
@@ -132,11 +144,6 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
             raise ValueError(
                 'posterior state and latent dimensions must match dynamics'
             )
-        transition_shape = (*continuous.batch_shape, continuous.max_steps - 1)
-        if inputs.shape != (*transition_shape, self.input_dim):
-            raise ValueError(
-                'inputs must match posterior transitions and input dimension'
-            )
 
         replicate_shape = batch.split_prefix(
             continuous.batch_shape, self.batch_shape, name='posterior batch shape'
@@ -145,16 +152,31 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         if 0 in sample_shape:
             return self
 
+        if inputs.max_steps != continuous.max_steps:
+            raise ValueError('inputs and posterior must share their time dimension')
+
+        if inputs.event_shape != (self.input_dim,):
+            raise ValueError('inputs must match the dynamics input dimension')
+
+        # Existing replicate_shape and sample_shape calculations stay.
+
+        transition_inputs = inputs.broadcast(
+            self.batch_shape,
+            axis=0,
+        ).select_time(start=1)
+
         lengths = continuous.lengths.transitions()
         state_weights = lengths.clear(discrete.state_probs[..., 1:, :])
-        safe_inputs = lengths.clear(inputs)
+        safe_inputs = lengths.clear(transition_inputs.values)
+
         paired = jax.tree.map(lengths.clear, continuous.paired_marginals())
         paired, safe_inputs, state_weights = batch.pool_samples(
             (paired, safe_inputs, state_weights),
             self.batch_shape,
             sample_shape,
         )
-        state_weights = jnp.moveaxis(state_weights, -1, -2)  # (*B_model, K, S)
+        # Fitting and occupancy filtering expect weights (*B, K, S).
+        state_weights = jnp.moveaxis(state_weights, -1, -2)
 
         def fit_one(paired_i, inputs_i, weights_i):
             return gaussian_fit.linear_from_paired_covariates(

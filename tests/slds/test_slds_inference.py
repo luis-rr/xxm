@@ -3,11 +3,12 @@ import jax.numpy as jnp
 import numpy as np
 
 from xxm.core.affine import Affine
+from xxm.core.chains.discrete import DiscreteChain
 from xxm.core.chains.gaussian import GaussianChain
 from xxm.core.data import Dataset, DatasetCollection, WeightedObservations
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
-from xxm.core.emissions.collection import EmissionsCollection
+from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import GaussianEmissions
 from xxm.core.latents.discrete import (
     CategoricalInitial,
@@ -16,7 +17,10 @@ from xxm.core.latents.discrete import (
 from xxm.core.latents.gaussian import StateConditionedGaussian
 from xxm.core.lengths import Lengths
 from xxm.slds.core import GaussianLinearSwitchingDynamics, Model
-from xxm.slds.inference import DiscreteFactors, SwitchingFactors, infer_variational
+from xxm.slds.inference import (
+    LatentPotentials,
+    infer_variational,
+)
 
 ATOL = 1e-5
 
@@ -62,7 +66,7 @@ def _single_state_model() -> Model:
                 covariance=jnp.array([[[0.5]]]),
             ),
         ),
-        emissions=EmissionsCollection(
+        emissions=ContinuousEmissionsCollection(
             (_mock_gaussian_emissions(noise_covariance=jnp.array([[0.25]])),),
         ),
     )
@@ -125,7 +129,7 @@ def _two_state_model() -> Model:
                 ),
             ),
         ),
-        emissions=EmissionsCollection(
+        emissions=ContinuousEmissionsCollection(
             (_mock_gaussian_emissions(noise_covariance=jnp.array([[0.25]])),),
         ),
     )
@@ -145,12 +149,12 @@ def test_single_state_slds_matches_gaussian_chain():
 
     state_probs = jnp.ones((observations.shape[0], 1))
 
-    initial_potential = model.latent_initial.compute_potentials().weighted_sum(
+    initial_potential = model.latent_initial.compute_potential().weighted_sum(
         state_probs[0], axis=0
     )
-    pair_potentials = model.dynamics.compute_pair_potentials(
-        jnp.empty((observations.shape[0] - 1, 0))
-    ).weighted_sum(state_probs[1:], axis=1)
+    pair_potentials = model.dynamics.compute_pair_potentials(data.inputs).weighted_sum(
+        state_probs[1:], axis=1
+    )
     observation_potential = model.emissions.get().compute_potential(
         WeightedObservations.from_array(observations)
     )
@@ -200,21 +204,26 @@ def test_zero_iterations_uses_initial_latents():
         num_iters=0,
     ).posterior
 
-    switching = SwitchingFactors.from_model(model, data)
-    discrete = DiscreteFactors.from_model(model, data)
+    potentials = LatentPotentials.from_data(
+        model, DatasetCollection.from_datasets((data,))
+    )
 
-    expected_potential = switching.discrete_potential_from_latents(initial_latents[0])
-    expected_posterior = discrete.infer(expected_potential)
+    expected_potential = potentials.cond.compute_discrete_potential_at(initial_latents)
+    expected_posterior = (
+        DiscreteChain.from_local_potentials(potentials.prior, expected_potential)
+        .forward_backward()
+        .posterior
+    )
 
     np.testing.assert_allclose(
         posterior.discrete.state_probs,
-        expected_posterior.state_probs[None],
+        expected_posterior.state_probs,
         atol=ATOL,
     )
 
     np.testing.assert_allclose(
         posterior.discrete.pair_probs,
-        expected_posterior.pair_probs[None],
+        expected_posterior.pair_probs,
         atol=ATOL,
     )
 

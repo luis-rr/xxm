@@ -7,6 +7,12 @@ import jax.numpy as jnp
 
 from xxm.core import batch
 from xxm.core.affine import Affine
+from xxm.core.chains.gaussian import (
+    GaussianChainPotentials,
+    GaussianPairPotential,
+    GaussianPotential,
+)
+from xxm.core.chains.switching import GatedGaussianPotentials
 from xxm.core.data import Sequences
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.lengths import LengthsSpec
@@ -229,6 +235,31 @@ class GaussianRandomWalk(typing.NamedTuple):
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another position."""
         return batch.move_axis(self, source, destination)
+
+    def compute_potential(
+        self,
+        ls: LengthsSpec,
+    ) -> GaussianChainPotentials:
+        """Construct valid initial and pair factors for a Gaussian random walk."""
+
+        batch.require_same_shape(self.batch_shape, ls.batch_shape)
+
+        initial = GaussianPotential.from_moments(self.initial)
+        initial = initial.scale(ls.lengths.values > 0)
+
+        pairs = GaussianPairPotential.from_linear_conditional(self.transition_dist())
+
+        pairs = pairs.broadcast((max(ls.max_steps - 1, 0),), axis=len(self.batch_shape))
+
+        pairs = pairs.scale(
+            ls.lengths.transitions().to_mask(max(ls.max_steps - 1, 0)).values
+        )
+
+        return GaussianChainPotentials(
+            initial=initial,
+            pairs=pairs,
+            lengths=ls.lengths,
+        )
 
 
 class GatedGaussianRandomWalk(typing.NamedTuple):
@@ -523,5 +554,20 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
                     permutation,
                     axis=gate_axis,
                 )
+            ),
+        )
+
+    def compute_potential(self) -> GatedGaussianPotentials:
+        """Construct gate-specific Gaussian factors without mixing."""
+
+        return GatedGaussianPotentials(
+            initial=GaussianPotential.from_moments(
+                self.initial,
+            ),
+            active=GaussianPairPotential.from_linear_conditional(
+                self.active_transition_dist(),
+            ),
+            inactive=GaussianPairPotential.from_linear_conditional(
+                self.inactive_transition_dist(),
             ),
         )

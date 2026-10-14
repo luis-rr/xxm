@@ -7,7 +7,6 @@ from xxm.core.data import DatasetCollection
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
-from xxm.core.emissions.collection import EmissionsCollection
 from xxm.core.latents.discrete import CategoricalInitial, CategoricalTransitions
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import poisson as poisson_fit
@@ -15,7 +14,7 @@ from xxm.core.optim.kmeans import kmeans_assignments
 
 from .core import Model
 from .data import ARDatasetCollection
-from .emissions import AREmissions, ConditionalDistT
+from .emissions import AREmissions, AREmissionsCollection, ConditionalDistT
 
 DEFAULT_SELF_TRANSITION_PROB = 0.9
 
@@ -27,7 +26,7 @@ def _visible_rows(
 
     data = data_col.single()
 
-    observations = data.weighted_observations()
+    observations = data.weighted_targets()
 
     active = observations.weights.reshape(-1)
 
@@ -53,7 +52,7 @@ def _visible_rows(
 
 
 def _init(
-    emissions: EmissionsCollection[AREmissions[ConditionalDistT]],
+    emissions: AREmissionsCollection[ConditionalDistT],
     num_states: int,
     dtype: jnp.dtype,
     self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
@@ -123,7 +122,7 @@ def _init_gaussian_emissions(
     num_states: int,
     ridge=gaussian_fit.DEFAULT_RIDGE,
     covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
-) -> EmissionsCollection[AREmissions[LinearGaussian]]:
+) -> AREmissionsCollection[LinearGaussian]:
     predictors, current = _visible_rows(data)
 
     if predictors.shape[0] < num_states:
@@ -148,7 +147,7 @@ def _init_gaussian_emissions(
         covariance_floor=covariance_floor,
     )
 
-    return EmissionsCollection((AREmissions(model),))
+    return AREmissionsCollection((AREmissions(model),))
 
 
 def init_gaussian_via_kmeans(
@@ -181,7 +180,7 @@ def _init_poisson_emissions(
     data: ARDatasetCollection,
     num_states: int,
     ridge=poisson_fit.DEFAULT_RIDGE,
-) -> EmissionsCollection[AREmissions[LinearPoisson]]:
+) -> AREmissionsCollection[LinearPoisson]:
     predictors, current = _visible_rows(data)
 
     if predictors.shape[0] < num_states:
@@ -205,7 +204,7 @@ def _init_poisson_emissions(
         ridge=ridge,
     )
 
-    return EmissionsCollection((AREmissions(model),))
+    return AREmissionsCollection((AREmissions(model),))
 
 
 def init_poisson_via_kmeans(

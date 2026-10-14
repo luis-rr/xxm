@@ -5,18 +5,21 @@ import numpy as np
 import pytest
 from jax import numpy as jnp
 
+from xxm.arhmm.emissions import AREmissionsCollection
 from xxm.arhmm.model import GaussianARHMM
 from xxm.core.affine import Affine
 from xxm.core.data import Dataset, DatasetCollection
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
-from xxm.core.emissions.collection import EmissionsCollection
+from xxm.core.emissions.collection import (
+    ContinuousEmissionsCollection,
+    DiscreteEmissionsCollection,
+)
 from xxm.core.emissions.continuous import GaussianEmissions
 from xxm.hmm.model import GaussianHMM
 from xxm.lds.model import GaussianLDS
-from xxm.ltr_lds.model import GaussianHermiteLTRLDS
 
 
-@pytest.mark.parametrize('family', ['lds', 'ltr_lds'])
+@pytest.mark.parametrize('family', ['lds'])
 def test_selected_session_density_preserves_sequence_sum_and_model_batch(family):
     emission_params = {
         'emission_coefficients': jnp.ones((1, 1)),
@@ -27,25 +30,14 @@ def test_selected_session_density_preserves_sequence_sum_and_model_batch(family)
         'initial_mean': jnp.zeros(1),
         'initial_covariance': jnp.eye(1),
     }
-    if family == 'lds':
-        model = GaussianLDS.from_params(
-            **initial_params,
-            **emission_params,
-            dynamics_coefficients=jnp.eye(1),
-            dynamics_bias=jnp.zeros(1),
-            dynamics_covariance=jnp.eye(1),
-        )._model
-    else:
-        model = GaussianHermiteLTRLDS.from_params(
-            **initial_params,
-            **emission_params,
-            baseline_coefficients=jnp.eye(1),
-            baseline_bias=jnp.zeros(1),
-            motif_left=jnp.ones((1, 1, 1)),
-            motif_right=jnp.ones((1, 1, 1)),
-            coefficient_prior_mean=jnp.zeros(1),
-            coefficient_prior_covariance=jnp.eye(1),
-        ).model
+
+    model = GaussianLDS.from_params(
+        **initial_params,
+        **emission_params,
+        dynamics_coefficients=jnp.eye(1),
+        dynamics_bias=jnp.zeros(1),
+        dynamics_covariance=jnp.eye(1),
+    )._model
 
     # Different observation dimensions and sequence shapes expose mismatched
     # session selection. The second emission mean is 2 at zero latents.
@@ -56,7 +48,9 @@ def test_selected_session_density_preserves_sequence_sum_and_model_batch(family)
         )
     )
     model = model._replace(
-        emissions=EmissionsCollection((model.emissions.single(), selected_emission))
+        emissions=ContinuousEmissionsCollection(
+            (model.emissions.single(), selected_emission)
+        )
     ).broadcast((2,))
     data = DatasetCollection.from_datasets(
         (
@@ -84,7 +78,7 @@ def test_selected_session_density_preserves_sequence_sum_and_model_batch(family)
     )
     singleton_data = DatasetCollection.from_datasets((data.get(1),))
     singleton_model = model._replace(
-        emissions=EmissionsCollection((model.emissions.get(1),))
+        emissions=ContinuousEmissionsCollection((model.emissions.get(1),))
     )
     np.testing.assert_allclose(
         density(singleton_model, singleton_data, latents), expected, rtol=1e-6
@@ -107,7 +101,7 @@ def test_hmm_observation_mean_selects_matching_data_and_emission():
     emissions = model.model.emissions
     multi_model = GaussianHMM(
         model.model._replace(
-            emissions=EmissionsCollection((emissions.get(), emissions.get()))
+            emissions=DiscreteEmissionsCollection((emissions.get(), emissions.get()))
         )
     )
     inferred = dataclasses.replace(inferred, model=multi_model)
@@ -135,7 +129,7 @@ def test_arhmm_inferred_conditionals_forward_session():
     emissions = model.model.emissions
     multi_model = GaussianARHMM(
         model.model._replace(
-            emissions=EmissionsCollection((emissions.get(), emissions.get()))
+            emissions=AREmissionsCollection((emissions.get(), emissions.get()))
         )
     )
     inferred = dataclasses.replace(inferred, model=multi_model)
@@ -145,38 +139,3 @@ def test_arhmm_inferred_conditionals_forward_session():
     np.testing.assert_allclose(conditional.mean, [[[[3.0]], [[4.0]]]])
     with pytest.raises(ValueError):
         inferred.states_conditional()
-
-
-def test_ltr_lds_dynamics_accessors_accept_session():
-    model = GaussianHermiteLTRLDS.from_params(
-        initial_mean=jnp.zeros(1),
-        initial_covariance=jnp.eye(1),
-        baseline_coefficients=jnp.eye(1),
-        baseline_bias=jnp.zeros(1),
-        motif_left=jnp.ones((1, 1, 1)),
-        motif_right=jnp.ones((1, 1, 1)),
-        coefficient_prior_mean=jnp.zeros(1),
-        coefficient_prior_covariance=jnp.eye(1),
-        emission_coefficients=jnp.ones((1, 1)),
-        emission_bias=jnp.zeros(1),
-        emission_covariance=jnp.eye(1),
-    )
-    inferred = model.infer(
-        DatasetCollection.from_datasets((Dataset.from_array(jnp.zeros((3, 1))),)),
-        num_iters=0,
-    )
-    inferred = dataclasses.replace(
-        inferred,
-        posterior=inferred.posterior._replace(
-            drift_marginals=inferred.posterior.drift_marginals._replace(
-                mean=jnp.full((1, 2, 1), 2.0)
-            )
-        ),
-    )
-
-    np.testing.assert_allclose(inferred.dynamics_matrices(session=0), 3.0)
-    np.testing.assert_allclose(
-        inferred.posterior_dynamics(session=0).affine.coefficients, 3.0
-    )
-    with pytest.raises(IndexError):
-        inferred.dynamics_matrices(session=1)

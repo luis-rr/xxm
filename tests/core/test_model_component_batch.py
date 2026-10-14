@@ -11,7 +11,7 @@ from xxm.arhmm.data import ARDataset
 from xxm.arhmm.emissions import AREmissions
 from xxm.core import batch
 from xxm.core.affine import Affine
-from xxm.core.chains.discrete import DiscreteChainMarginals
+from xxm.core.chains.discrete import DiscreteChain, DiscreteChainMarginals
 from xxm.core.chains.gaussian import GaussianChainMarginals
 from xxm.core.data import Dataset, Sequences, WeightedObservations
 from xxm.core.dists.categorical import Categorical
@@ -21,7 +21,7 @@ from xxm.core.emissions import continuous, discrete
 from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
-    homogeneous_chain,
+    compute_chain_potentials,
 )
 from xxm.core.latents.gaussian import (
     GaussianInitial,
@@ -209,7 +209,7 @@ def test_aligned_state_selection_matches_manual_rows(query_shape):
             selected_gaussian.covariance[i, j],
             gaussian.dist.covariance[i, j, states[i, j]],
         )
-    assert gaussian.compute_potentials().batch_shape == B + (K,)
+    assert gaussian.compute_potential().batch_shape == B + (K,)
     assert gaussian.sample(jax.random.key(0), states).shape == B + query_shape + (D,)
     _assert_tree_close(
         jax.jit(lambda model, z: model.conditional(z))(gaussian, states),
@@ -246,8 +246,10 @@ def test_discrete_latent_fit_and_sampling():
     np.testing.assert_array_equal(
         short_trajectory.lengths.values, one_step.lengths.values
     )
-    chain = homogeneous_chain(
-        initial, transitions, LengthsSpec(Lengths(jnp.full(FIT_B, T)), T)
+    chain = DiscreteChain.from_potentials(
+        compute_chain_potentials(
+            initial, transitions, LengthsSpec(Lengths.full((), T), T)
+        )
     )
     assert chain.transition_probs.shape == FIT_B + (T - 1, K, K)
     assert chain.state_log_potentials.shape == FIT_B + (T, K)
@@ -304,7 +306,10 @@ def test_gaussian_latent_sampling_and_potentials(kind, component):
         np.testing.assert_array_equal(sampled.values[..., 0, :], initial)
     if kind == 'switching':
         assert component.compute_pair_potentials(
-            jnp.empty(FIT_B + (T - 1, 0), dtype=posterior.means.dtype)
+            Sequences.from_padded(
+                jnp.empty(FIT_B + (T, 0), dtype=posterior.means.dtype),
+                posterior.lengths,
+            )
         ).batch_shape == FIT_B + (T - 1, K)
 
 
@@ -317,14 +322,18 @@ def test_gaussian_latent_fit_requires_receiver_batch_prefix():
     with pytest.raises(ValueError, match='posterior batch shape must begin with'):
         GaussianLinearDynamics(_linear(B)).fit_params(
             posterior,
-            inputs=jnp.empty((4, 1, 0), dtype=posterior.means.dtype),
+            inputs=Sequences.from_padded(
+                jnp.empty((4, 2, 0), dtype=posterior.means.dtype), posterior.lengths
+            ),
         )
 
     matched = _continuous_posterior(batch=B, num_steps=2)
     fitted_initial = GaussianInitial(_gaussian(B)).fit_params(matched)
     fitted_dynamics = GaussianLinearDynamics(_linear(B)).fit_params(
         matched,
-        inputs=jnp.empty(B + (1, 0), dtype=matched.means.dtype),
+        inputs=Sequences.from_padded(
+            jnp.empty((2, 0), dtype=matched.means.dtype), Lengths.full((), 2)
+        ),
     )
     assert fitted_initial.batch_shape == B
     assert fitted_dynamics.batch_shape == B
@@ -354,7 +363,9 @@ def test_state_emission_likelihood_and_sampling(kind, component):
             Lengths(jnp.full(FIT_B, T)),
         )
     )
-    likelihood = component.log_likelihoods(data)
+    likelihood = component.log_likelihoods(
+        data.weighted_observations() if isinstance(data, ARDataset) else data
+    )
     assert likelihood.shape == FIT_B + (T - L if is_ar else T, K)
     for index in FIT_INDICES:
         standalone = component.select(index)
@@ -364,7 +375,13 @@ def test_state_emission_likelihood_and_sampling(kind, component):
             else WeightedObservations.from_array(observations[index])
         )
         np.testing.assert_allclose(
-            likelihood[index], standalone.log_likelihoods(data_i), atol=2e-5
+            likelihood[index],
+            standalone.log_likelihoods(
+                data_i.weighted_observations()
+                if isinstance(data_i, ARDataset)
+                else data_i
+            ),
+            atol=2e-5,
         )
     states = Sequences.from_padded(
         jnp.zeros(FIT_B + (T,), dtype=jnp.int32), Lengths.full(FIT_B, T)
@@ -578,7 +595,7 @@ def test_unoccupied_states_retain_each_batchs_parameters(kind, component):
         fitted = component.fit_params(
             posterior,
             _continuous_posterior(),
-            inputs=jnp.empty(B + (T - 1, 0)),
+            inputs=Sequences.from_padded(jnp.empty((T, 0)), Lengths.full((), T)),
         )
     else:
         observations = 2.0 + _values(B + (T, O))
@@ -591,7 +608,10 @@ def test_unoccupied_states_retain_each_batchs_parameters(kind, component):
                 observations, jnp.ones(B + (T,), dtype=bool), Lengths(jnp.full(B, T))
             )
         )
-        fitted = component.fit_params(data, posterior)
+        fitted = component.fit_params(
+            posterior,
+            data.weighted_observations() if isinstance(data, ARDataset) else data,
+        )
     unused = np.asarray(jnp.arange(K) != active[..., None])
     for actual, current in zip(
         jax.tree.leaves(fitted), jax.tree.leaves(component), strict=True
@@ -613,7 +633,9 @@ def test_singleton_state_axis_is_not_squeezed():
 def test_representative_batched_fits_are_jittable():
     posterior = _continuous_posterior()
     dynamics = GaussianLinearDynamics(_linear(B))
-    inputs = jnp.empty(B + (T - 1, 0), dtype=posterior.means.dtype)
+    inputs = Sequences.from_padded(
+        jnp.empty((T, 0), dtype=posterior.means.dtype), Lengths.full((), T)
+    )
     _assert_tree_close(
         jax.jit(lambda model, q, u: model.fit_params(q, inputs=u))(
             dynamics, posterior, inputs
@@ -627,8 +649,8 @@ def test_representative_batched_fits_are_jittable():
     )
     states = _discrete_posterior()
     _assert_tree_close(
-        jax.jit(lambda model, y, q: model.fit_params(y, q))(emissions, data, states),
-        emissions.fit_params(data, states),
+        jax.jit(lambda model, y, q: model.fit_params(q, y))(emissions, data, states),
+        emissions.fit_params(states, data),
     )
 
 
@@ -658,7 +680,9 @@ def test_gaussian_dynamics_ignore_padded_transition_moments_and_inputs():
         bias=jnp.zeros(1),
         covariance=jnp.eye(1),
     )
-    inputs = jnp.array([[0.0], [1.0], [jnp.nan]])
+    inputs = Sequences.from_padded(
+        jnp.array([[0.0], [0.0], [1.0], [jnp.nan]]), posterior.lengths
+    )
     actual = jax.jit(lambda p, u: dynamics.fit_params(p, inputs=u))(posterior, inputs)
     cropped = GaussianChainMarginals(
         posterior.means[:3],
@@ -666,5 +690,5 @@ def test_gaussian_dynamics_ignore_padded_transition_moments_and_inputs():
         posterior.cross_covariances[:2],
         posterior.lengths,
     )
-    expected = dynamics.fit_params(cropped, inputs=inputs[:2])
+    expected = dynamics.fit_params(cropped, inputs=inputs.select_time(start=0, stop=3))
     _assert_tree_close(actual, expected)

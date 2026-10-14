@@ -103,8 +103,8 @@ class Emissions(typing.Protocol):
 
     def fit_params(
         self,
-        observations: WeightedObservations,
         posterior: DiscretePosterior,
+        observations: WeightedObservations,
     ) -> typing.Self:
         """Fit emission parameters from observations and posterior state weights."""
         ...
@@ -191,8 +191,8 @@ class GaussianEmissions(typing.NamedTuple):
 
     def fit_params(
         self,
-        observations: WeightedObservations,
         posterior: DiscretePosterior,
+        observations: WeightedObservations,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
     ) -> typing.Self:
         """Fit Gaussian parameters from posterior state weights."""
@@ -315,8 +315,8 @@ class PoissonEmissions(typing.NamedTuple):
 
     def fit_params(
         self,
-        observations: WeightedObservations,
         posterior: DiscretePosterior,
+        observations: WeightedObservations,
     ) -> typing.Self:
         """Fit state-specific Poisson log rates from posterior state weights."""
 

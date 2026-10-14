@@ -5,6 +5,7 @@ from jax import numpy as jnp
 
 from xxm.core.data import Sequences
 from xxm.core.latents.gaussian import GaussianLinearDynamics
+from xxm.core.lengths import Lengths
 from xxm.lds.model import GaussianLDS, PoissonLDS
 
 from .lds_helpers import make_model
@@ -59,7 +60,13 @@ def test_dynamics_from_params_and_potentials_with_batch_and_query_axes(controlle
     np.testing.assert_allclose(conditioned.affine.bias, 3.0 if controlled else 1.0)
     assert dynamics.input_coefficients.shape == (2, 1, int(controlled))
     assert dynamics.input_coefficients.dtype == a.dtype
-    pair = jax.jit(lambda d, u: d.compute_pair_potentials(u))(dynamics, inputs)
+    trajectory_inputs = Sequences.from_padded(
+        jnp.concatenate((jnp.zeros((2, 1, int(controlled))), inputs), axis=-2),
+        Lengths.full((2,), 4),
+    )
+    pair = jax.jit(lambda d, u: d.compute_pair_potentials(u))(
+        dynamics, trajectory_inputs
+    )
     assert pair.batch_shape == (2, 3)
     np.testing.assert_allclose(pair.left_precision, 0.125)
     np.testing.assert_allclose(pair.right_precision, 0.5)

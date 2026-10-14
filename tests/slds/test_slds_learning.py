@@ -4,10 +4,10 @@ import numpy as np
 from xxm.core.affine import Affine
 from xxm.core.chains.discrete import DiscreteChainMarginals
 from xxm.core.chains.gaussian import GaussianChainMarginals
-from xxm.core.data import Dataset, DatasetCollection
+from xxm.core.data import Dataset, DatasetCollection, Sequences
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
-from xxm.core.emissions.collection import EmissionsCollection
+from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import GaussianEmissions
 from xxm.core.inference import InferenceState
 from xxm.core.latents.discrete import (
@@ -102,7 +102,7 @@ def _model() -> Model:
             )
         ),
         dynamics=_dynamics(),
-        emissions=EmissionsCollection(
+        emissions=ContinuousEmissionsCollection(
             (
                 GaussianEmissions(
                     dist=LinearGaussian(
@@ -123,7 +123,7 @@ def test_switching_dynamics_fit_recovers_known_linear_gaussian_model():
     fitted = _dynamics().fit_params(
         discrete=post.discrete,
         continuous=post.continuous,
-        inputs=jnp.empty((2, 0)),
+        inputs=Sequences.from_padded(jnp.empty((3, 0)), post.continuous.lengths),
         covariance_floor=0.0,
     )
 
@@ -149,10 +149,10 @@ def test_model_fit_params_updates_latent_initial_from_posterior():
     model = _model()
 
     fitted = model.fit_params(
+        posterior=_posterior().broadcast((1,)),
         data=DatasetCollection.from_datasets(
             (Dataset.from_array(jnp.array([[0.0], [1.0], [3.0]])),)
         ),
-        posterior=_posterior().broadcast((1,)),
     )
 
     posterior = _posterior().continuous

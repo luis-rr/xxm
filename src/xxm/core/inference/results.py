@@ -20,6 +20,19 @@ class InferenceState(
     objective: jax.Array
 
 
+class InferredPosterior(
+    typing.NamedTuple,
+    typing.Generic[PosteriorT],
+):
+    """Posterior, and log normalizer. batch shapes must match."""
+
+    posterior: PosteriorT
+    log_normalizer: jax.Array
+
+    def log_normalizer_total(self, axis=-1) -> jax.Array:
+        return jnp.sum(self.log_normalizer, axis=axis)
+
+
 class Fitted(
     typing.NamedTuple,
     typing.Generic[ModelT, PosteriorT],

@@ -11,7 +11,7 @@ from xxm.core import batch
 from xxm.core.affine import Affine
 from xxm.core.chains.gaussian import GaussianChainMarginals as Posterior
 from xxm.core.data import DatasetCollection, Sequences
-from xxm.core.emissions.collection import EmissionsCollection
+from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import EmissionsT
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
 
@@ -35,7 +35,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
     initial: GaussianInitial
     dynamics: GaussianLinearDynamics
-    emissions: EmissionsCollection[EmissionsT]
+    emissions: ContinuousEmissionsCollection[EmissionsT]
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
@@ -191,41 +191,18 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
     def fit_params(
         self,
-        data: DatasetCollection,
         posterior: Posterior,
+        data: DatasetCollection,
     ) -> typing.Self:
-        """Pool dataset batch axes while preserving the model batch prefix."""
-        dataset = data.single()
-        model_batch_shape = self.batch_shape
-        expected_batch = (*model_batch_shape, *dataset.batch_shape)
+        """Fit shared latent parameters and session-specific emissions."""
 
-        if posterior.batch_shape != expected_batch:
-            raise ValueError(
-                f'posterior batch must be {expected_batch}; got {posterior.batch_shape}'
-            )
-
-        working_data = dataset
-        if model_batch_shape:
-            working_data = dataset.broadcast(model_batch_shape, axis=0)
+        inputs = data.pool_inputs()
+        observations = data.weighted_observations()
 
         return self.__class__(
-            initial=self.initial.fit_params(
-                posterior,
-            ),
-            dynamics=self.dynamics.fit_params(
-                posterior,
-                inputs=working_data.lengths.transitions().clear(
-                    working_data.transition_inputs()
-                ),
-            ),
-            emissions=EmissionsCollection(
-                (
-                    self.emissions.single().fit_params(
-                        working_data.weighted_observations(),
-                        posterior,
-                    ),
-                )
-            ),
+            initial=self.initial.fit_params(posterior),
+            dynamics=self.dynamics.fit_params(posterior, inputs),
+            emissions=self.emissions.fit_params(posterior, observations),
         )
 
     def align(self, alignment: Affine) -> typing.Self:

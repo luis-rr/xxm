@@ -29,6 +29,27 @@ def lagged_observations(
     )
 
 
+class ARWeightedObservations(typing.NamedTuple):
+    """Weighted targets and lagged predictors on the compact AR timeline."""
+
+    observations: WeightedObservations
+    predictors: jax.Array
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        return self.observations.batch_shape
+
+    @property
+    def max_steps(self) -> int:
+        return self.observations.max_steps
+
+    def safe_predictors(self) -> jax.Array:
+        return self.observations.safe_aligned(self.predictors)
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        return batch.broadcast(self, shape, axis=axis)
+
+
 class ARDataset(typing.NamedTuple):
     """
     Prepared autoregressive view of a common Dataset.
@@ -249,11 +270,17 @@ class ARDataset(typing.NamedTuple):
             self.visible.values,
         )
 
-    def weighted_observations(self) -> WeightedObservations:
+    def weighted_targets(self) -> WeightedObservations:
         return WeightedObservations(
             values=self.observations.values,
             weights=self.observation_weights(),
             lengths=self.lengths,
+        )
+
+    def weighted_observations(self) -> ARWeightedObservations:
+        return ARWeightedObservations(
+            observations=self.weighted_targets(),
+            predictors=self.predictors,
         )
 
     def safe_predictors(self) -> jax.Array:
@@ -262,11 +289,28 @@ class ARDataset(typing.NamedTuple):
 
         This avoids evaluating nonlinear conditionals on inaccessible history.
         """
-        return self.weighted_observations().safe_aligned(self.predictors)
+        return self.weighted_observations().safe_predictors()
 
 
 class ARDatasetCollection(typing.NamedTuple):
     datasets: tuple[ARDataset, ...]
+
+    @property
+    def partition(self) -> batch.Partition:
+        """Numbers of independent AR sequences in each session."""
+        return batch.Partition(tuple(data.batch_shape[0] for data in self.datasets))
+
+    @property
+    def max_steps(self) -> int:
+        """Common compact AR horizon, R = T - L."""
+        return self.datasets[0].max_steps
+
+    def pool_lengths_spec(self) -> LengthsSpec:
+        """Pool compact AR lengths across sessions."""
+        return LengthsSpec(
+            lengths=batch.concatenate(tuple(data.lengths for data in self.datasets)),
+            max_steps=self.max_steps,
+        )
 
     @property
     def dtype(self) -> jnp.dtype:
@@ -333,3 +377,6 @@ class ARDatasetCollection(typing.NamedTuple):
             raise ValueError(f'all AR datasets must share input_dim; got {values}')
 
         return first
+
+    def weighted_observations(self) -> tuple[ARWeightedObservations, ...]:
+        return tuple(dataset.weighted_observations() for dataset in self.datasets)

@@ -7,7 +7,7 @@ from xxm.core.data import Dataset, DatasetCollection, WeightedObservations
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
-from xxm.core.emissions.collection import EmissionsCollection
+from xxm.core.emissions.collection import DiscreteEmissionsCollection
 from xxm.core.emissions.discrete import GaussianEmissions, PoissonEmissions
 from xxm.core.latents.discrete import CategoricalInitial, CategoricalTransitions
 from xxm.core.lengths import Lengths
@@ -194,7 +194,8 @@ def test_poisson_m_step():
     )
 
     result = emissions.fit_params(
-        WeightedObservations.from_array(observations), posterior
+        posterior,
+        WeightedObservations.from_array(observations),
     )
 
     expected = np.array(
@@ -271,7 +272,8 @@ def test_gaussian_m_step():
     )
 
     result = emissions.fit_params(
-        WeightedObservations.from_array(observations), posterior
+        posterior,
+        WeightedObservations.from_array(observations),
     )
 
     expected_means = np.array(
@@ -317,7 +319,7 @@ def test_em_step_is_jit_compatible():
                 )
             )
         ),
-        emissions=EmissionsCollection(
+        emissions=DiscreteEmissionsCollection(
             (
                 PoissonEmissions(
                     dist=Poisson(

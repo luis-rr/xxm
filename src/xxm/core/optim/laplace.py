@@ -8,13 +8,30 @@ from jax import numpy as jnp
 from xxm.core.chains.gaussian import (
     GaussianChain,
     GaussianChainMarginals,
-)
-from xxm.core.data import WeightedObservations
-from xxm.core.emissions.continuous import (
-    LaplaceEmissions,
-    LaplaceEmissionsT,
+    GaussianPotential,
+    InferredPosterior,
 )
 from xxm.core.optim.newton import NewtonSearch, OptimParams
+
+ObservationsT = typing.TypeVar('ObservationsT')
+ObservationsT_contra = typing.TypeVar(
+    'ObservationsT_contra',
+    contravariant=True,
+)
+
+
+class LaplaceLikelihood(typing.Protocol[ObservationsT_contra]):
+    def log_likelihood(
+        self,
+        observations: ObservationsT_contra,
+        latents: jax.Array,
+    ) -> jax.Array: ...
+
+    def compute_local_potential(
+        self,
+        observations: ObservationsT_contra,
+        latents: jax.Array,
+    ) -> GaussianPotential: ...
 
 
 class _NewtonSearchParams(typing.NamedTuple):
@@ -52,13 +69,13 @@ class _NewtonSearchParams(typing.NamedTuple):
 
 class _NewtonSearchModel(
     typing.NamedTuple,
-    typing.Generic[LaplaceEmissionsT],
+    typing.Generic[ObservationsT],
 ):
     """Log-potential objective for finding a latent mode by Newton search."""
 
     latent_chain: GaussianChain
-    emissions: LaplaceEmissionsT
-    observations: WeightedObservations
+    emissions: LaplaceLikelihood[ObservationsT]
+    observations: ObservationsT
 
     def _safe_latents(
         self,
@@ -103,10 +120,10 @@ class _NewtonSearchModel(
 
 def local_gaussian_approximation(
     chain: GaussianChain,
-    emissions: LaplaceEmissions,
-    observations: WeightedObservations,
+    emissions: LaplaceLikelihood[ObservationsT],
+    observations: ObservationsT,
     latents: jax.Array,
-) -> tuple[GaussianChainMarginals, jax.Array]:
+) -> InferredPosterior[GaussianChainMarginals]:
     """Construct a local Gaussian posterior approximation around `latents`."""
 
     observation_potential = emissions.compute_local_potential(
@@ -121,11 +138,11 @@ def local_gaussian_approximation(
 
 def laplace_inference(
     chain: GaussianChain,
-    emissions: LaplaceEmissions,
-    observations: WeightedObservations,
+    emissions: LaplaceLikelihood[ObservationsT],
+    observations: ObservationsT,
     initial_latents: jax.Array,
     search_params: OptimParams,
-) -> tuple[GaussianChainMarginals, jax.Array]:
+) -> InferredPosterior[GaussianChainMarginals]:
     """
     Approximate normalized latent marginals and the log normalizer by Laplace inference.
 

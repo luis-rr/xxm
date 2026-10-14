@@ -9,7 +9,7 @@ import jax
 from xxm.core import batch
 from xxm.core.chains.discrete import DiscreteChainMarginals as Posterior
 from xxm.core.data import DatasetCollection, Sequences
-from xxm.core.emissions.collection import EmissionsCollection
+from xxm.core.emissions.collection import DiscreteEmissionsCollection
 from xxm.core.emissions.discrete import Emissions
 from xxm.core.latents.discrete import CategoricalInitial, CategoricalTransitions
 from xxm.core.lengths import LengthsSpec
@@ -37,7 +37,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
     initial: CategoricalInitial
     transitions: CategoricalTransitions
-    emissions: EmissionsCollection[EmissionsT]
+    emissions: DiscreteEmissionsCollection[EmissionsT]
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
@@ -136,40 +136,31 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
     def fit_params(
         self,
-        data: DatasetCollection,
         posterior: Posterior,
-    ) -> Model[EmissionsT]:
-        """Pool independent sequences, preserving the model batch prefix."""
-        dataset = data.single()
-        if dataset.input_dim != 0:
+        data: DatasetCollection,
+    ) -> typing.Self:
+        """Fit shared latent parameters and session-specific emissions."""
+
+        if data.input_dim != 0:
             raise ValueError('stationary HMMs require dataset.input_dim == 0')
 
-        model_batch_shape = self.batch_shape
-        expected_batch = (*model_batch_shape, *dataset.batch_shape)
+        expected_batch = (*self.batch_shape, data.partition.total)
         if posterior.batch_shape != expected_batch:
             raise ValueError(
                 f'posterior batch must be {expected_batch}; got {posterior.batch_shape}'
             )
 
-        if posterior.max_steps != dataset.max_steps:
-            raise ValueError('posterior and dataset must share their time dimension')
+        if posterior.max_steps != data.max_steps:
+            raise ValueError('posterior and data must share their time dimension')
 
         if posterior.num_states != self.num_states:
             raise ValueError('posterior and model must share their number of states')
 
-        working_data = dataset.broadcast(model_batch_shape, axis=0)
-
-        return Model(
+        return type(self)(
             initial=self.initial.fit_params(posterior),
-            transitions=self.transitions.fit_params(
+            transitions=self.transitions.fit_params(posterior),
+            emissions=self.emissions.fit_params(
                 posterior,
-            ),
-            emissions=EmissionsCollection(
-                (
-                    self.emissions.single().fit_params(
-                        working_data.weighted_observations(),
-                        posterior,
-                    ),
-                )
+                data.weighted_observations(),
             ),
         )

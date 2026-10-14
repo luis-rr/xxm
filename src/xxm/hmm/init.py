@@ -5,7 +5,7 @@ from jax import numpy as jnp
 
 from xxm.core.data import Dataset, DatasetCollection
 from xxm.core.dists.categorical import Categorical
-from xxm.core.emissions.collection import EmissionsCollection
+from xxm.core.emissions.collection import DiscreteEmissionsCollection
 from xxm.core.emissions.discrete import (
     Emissions,
     GaussianEmissions,
@@ -75,7 +75,7 @@ def _init(
     return Model(
         initial=CategoricalInitial(Categorical(probs=initial_probs)),
         transitions=CategoricalTransitions(Categorical(probs=transition_probs)),
-        emissions=EmissionsCollection((emissions,)),
+        emissions=DiscreteEmissionsCollection((emissions,)),
     )
 
 

@@ -6,35 +6,13 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core import batch
-from xxm.core.chains.discrete import DiscreteChain
+from xxm.core.chains.discrete import DiscreteChainPotentials
 from xxm.core.data import Sequences
 from xxm.core.dists.categorical import Categorical
 from xxm.core.lengths import LengthsSpec
 from xxm.core.optim import categorical as categorical_fit
 from xxm.core.optim.batch import filter_valid_batches
 from xxm.core.posteriors import DiscretePosterior
-
-
-def homogeneous_chain(
-    initial: 'CategoricalInitial',
-    transitions: 'CategoricalTransitions',
-    ls: LengthsSpec,
-) -> DiscreteChain:
-    """Construct a padded homogeneous Markov-chain prior."""
-    num_states = initial.num_states
-    return DiscreteChain(
-        lengths=ls.lengths,
-        initial_probs=initial.dist.probs,
-        transition_probs=batch.broadcast_array(
-            transitions.dist.probs,
-            (ls.max_steps - 1,),
-            axis=len(transitions.batch_shape),
-        ),
-        state_log_potentials=jnp.zeros(
-            initial.batch_shape + (ls.max_steps, num_states),
-            dtype=initial.dist.probs.dtype,
-        ),
-    )
 
 
 class CategoricalInitial(typing.NamedTuple):
@@ -103,6 +81,10 @@ class CategoricalInitial(typing.NamedTuple):
         fitted = categorical_fit.from_counts(counts, pseudocount=pseudocount)
 
         return self._replace(dist=filter_valid_batches(fitted, self.dist, counts))
+
+    def compute_potential(self) -> jax.Array:
+        """Initial-state probabilities as a discrete potential."""
+        return self.dist.probs
 
 
 class CategoricalTransitions(typing.NamedTuple):
@@ -245,3 +227,34 @@ class CategoricalTransitions(typing.NamedTuple):
                 expected_transitions,
             )
         )
+
+    def compute_pair_potentials(self, ls: LengthsSpec) -> jax.Array:
+        """Construct homogeneous transition factors over the sequence batch."""
+
+        replicate_shape = batch.split_prefix(
+            ls.batch_shape,
+            self.batch_shape,
+            name='lengths batch shape',
+        )
+
+        return batch.broadcast_array(
+            self.dist.probs,
+            (*replicate_shape, ls.max_steps - 1),
+            axis=len(self.batch_shape),
+        )
+
+
+def compute_chain_potentials(
+    initial: CategoricalInitial,
+    transitions: CategoricalTransitions,
+    ls: LengthsSpec,
+) -> DiscreteChainPotentials:
+    """Construct categorical initial and homogeneous transition factors."""
+
+    initial, ls = batch.cartesian_broadcast(initial, ls)
+
+    return DiscreteChainPotentials(
+        initial=initial.compute_potential(),
+        pairs=transitions.compute_pair_potentials(ls),
+        lengths=ls.lengths,
+    )

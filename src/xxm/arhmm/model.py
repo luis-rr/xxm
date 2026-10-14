@@ -9,11 +9,10 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core.affine import Affine
-from xxm.core.data import DatasetCollection, Sequences
+from xxm.core.data import Dataset, DatasetCollection, Sequences
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
-from xxm.core.emissions.collection import EmissionsCollection
 from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
@@ -22,7 +21,7 @@ from xxm.core.lengths import Lengths, LengthsLike, LengthsSpec
 
 from .core import Model, Posterior, Sample
 from .data import ARDataset, ARDatasetCollection
-from .emissions import AREmissions
+from .emissions import AREmissions, AREmissionsCollection
 from .inference import infer_exact
 from .init import (
     DEFAULT_SELF_TRANSITION_PROB,
@@ -209,7 +208,7 @@ class GaussianARHMM:
             _model=Model(
                 initial=initial,
                 transitions=transitions,
-                emissions=EmissionsCollection(
+                emissions=AREmissionsCollection(
                     (
                         AREmissions(
                             dist=LinearGaussian(
@@ -463,7 +462,7 @@ class PoissonARHMM:
             _model=Model(
                 initial=initial,
                 transitions=transitions,
-                emissions=EmissionsCollection(
+                emissions=AREmissionsCollection(
                     (
                         AREmissions(
                             dist=LinearPoisson(
@@ -585,79 +584,89 @@ ARHMMFacadeT = typing.TypeVar('ARHMMFacadeT', GaussianARHMM, PoissonARHMM)
 
 @dataclasses.dataclass(frozen=True, eq=False)
 class Inferred(typing.Generic[ARHMMFacadeT]):
-    """AR-HMM, posterior, and exact source data."""
+    """AR-HMM, pooled posterior, and source session collection."""
 
     model: ARHMMFacadeT
     posterior: Posterior
     data: DatasetCollection
 
     def __post_init__(self) -> None:
-        dataset = self.data.single()
+        expected_batch = (self.data.partition.total,)
 
-        if self.posterior.batch_shape != dataset.batch_shape:
-            raise ValueError('posterior batch must match the source dataset')
+        if self.posterior.batch_shape != expected_batch:
+            raise ValueError(
+                f'posterior batch must be {expected_batch}; '
+                f'got {self.posterior.batch_shape}'
+            )
 
-        expected_max_steps = dataset.max_steps - self.model.num_lags
-        if self.posterior.max_steps != expected_max_steps:
-            raise ValueError('posterior must match the modeled AR time dimension')
+        expected_steps = self.data.max_steps - self.model.num_lags
+        if self.posterior.max_steps != expected_steps:
+            raise ValueError('posterior must match the compact AR time dimension')
 
         if self.posterior.num_states != self.model.num_states:
             raise ValueError('posterior must match the model number of states')
 
+    def _session(self, session: int | None) -> tuple[Posterior, Dataset]:
+        """Select one session from the pooled posterior."""
+
+        dataset = self.data.get(session)
+        index = 0 if session is None else session
+
+        posterior = self.posterior.select(self.data.partition.get_slice(index))
+
+        return posterior, dataset
+
     def state_probs(self, session: int | None = None) -> Sequences:
-        """State probabilities on the compact AR timeline."""
+        posterior, dataset = self._session(session)
+
         return Sequences.from_padded(
-            self.posterior.state_probs,
-            self.data.get(session).lengths.shift(-self.model.num_lags),
+            posterior.state_probs,
+            dataset.lengths.shift(-self.model.num_lags),
         )
 
     def observation_mean(self, session: int | None = None) -> Sequences:
-        """Return posterior conditional means on the compact AR timeline."""
-        ar_data_col = ARDatasetCollection.from_datasets(
-            self.data,
+        posterior, dataset = self._session(session)
+
+        ar_data = ARDataset.from_dataset(
+            dataset,
             self.model.num_lags,
         )
 
-        ar_data = ar_data_col.get(session)
+        emissions = self.model.model.emissions.get(session)
+        emissions = emissions.broadcast(posterior.batch_shape)
 
-        conditional = (
-            self.model.model.emissions.get(session)
-            .broadcast(self.posterior.batch_shape)
-            .conditional(
-                ar_data.safe_predictors(),
-            )
-        )
+        conditional = emissions.conditional(ar_data.safe_predictors())
 
         means = conditional.mixture_mean(
-            self.posterior.state_probs,
+            posterior.state_probs,
             axis=-1,
         )
 
-        return Sequences.from_padded(means, ar_data.lengths)
+        return Sequences.from_padded(
+            means,
+            ar_data.lengths,
+        )
 
-    def permute_states(self, permutation: jax.Array) -> Inferred[ARHMMFacadeT]:
-        """Relabel discrete states by permutation."""
-        return Inferred(
+    def most_likely_states(self, session: int | None = None) -> Sequences:
+        posterior, dataset = self._session(session)
+
+        return Sequences.from_padded(
+            jnp.argmax(posterior.state_probs, axis=-1),
+            dataset.lengths.shift(-self.model.num_lags),
+        )
+
+    def permute_states(self, permutation: jax.Array) -> typing.Self:
+        return type(self)(
             model=self.model.permute_states(permutation),
             posterior=self.posterior.permute_states(permutation),
             data=self.data,
         )
 
-    def most_likely_states(self, session: int | None = None) -> Sequences:
-        """Return the marginally most likely state on the compact AR timeline."""
-        most_likely = jnp.argmax(
-            self.posterior.state_probs,
-            axis=-1,
-        )
-
-        return Sequences.from_padded(
-            most_likely,
-            self.data.get(session).lengths.shift(-self.model.num_lags),
-        )
-
     def states_conditional(self, session: int | None = None) -> Poisson | Gaussian:
-        """Return state-conditional observations for the selected session."""
-        return self.model.states_conditional(self.data, session=session)
+        return self.model.states_conditional(
+            self.data,
+            session=session,
+        )
 
 
 class Fit(typing.NamedTuple, typing.Generic[ARHMMFacadeT]):

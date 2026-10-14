@@ -194,9 +194,16 @@ class GaussianLinearDynamics(typing.NamedTuple):
             )
         )
 
-    def compute_pair_potentials(self, inputs: jax.Array) -> GaussianPairPotential:
-        """Return pair potentials after conditioning on known inputs."""
-        return GaussianPairPotential.from_linear_conditional(self.conditional(inputs))
+    def compute_pair_potentials(self, inputs: Sequences) -> GaussianPairPotential:
+        """Construct valid pair potentials after conditioning on known inputs."""
+        transitions = inputs.select_time(start=1)
+
+        potential = GaussianPairPotential.from_linear_conditional(
+            self.conditional(transitions.values)
+        )
+
+        valid = transitions.lengths.to_mask(transitions.max_steps).values
+        return potential.scale(valid)
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
@@ -282,63 +289,40 @@ class GaussianLinearDynamics(typing.NamedTuple):
     def fit_params(
         self,
         posterior: ContinuousPosterior,
-        inputs: jax.Array,
+        inputs: Sequences,
         ridge=gaussian_fit.DEFAULT_RIDGE,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
     ) -> typing.Self:
-        """
-        Fit dynamics while preserving the receiver batch prefix.
+        """Fit dynamics, pooling posterior sequences over the model batch prefix."""
 
-        ``self.batch_shape`` is preserved. Any additional posterior batch axes
-        are pooled together with the transition axis. ``inputs`` contains one
-        entry per transition; structural weights come from posterior lengths.
-        """
-        posterior_batch = posterior.batch_shape
         replicate_shape = batch.split_prefix(
-            posterior_batch, self.batch_shape, name='posterior batch shape'
+            posterior.batch_shape,
+            self.batch_shape,
+            name='posterior batch shape',
         )
 
-        num_transitions = posterior.max_steps - 1
+        # Align inputs with the model batches and select valid transitions.
+        inputs = inputs.broadcast(self.batch_shape, axis=0)
+        transition_inputs = inputs.select_time(start=1)
+
         transition_lengths = posterior.lengths.transitions()
+        num_transitions = posterior.max_steps - 1
+
         weights = transition_lengths.to_mask(num_transitions).values
-        inputs = transition_lengths.clear(inputs)
-        expected_inputs_shape = (
-            *posterior_batch,
-            num_transitions,
-            self.input_dim,
-        )
-        expected_weights_shape = (
-            *posterior_batch,
-            num_transitions,
-        )
-
-        if inputs.shape != expected_inputs_shape:
-            raise ValueError(
-                f'inputs must have shape {expected_inputs_shape}; got {inputs.shape}'
-            )
-
-        if weights.shape != expected_weights_shape:
-            raise ValueError(
-                f'weights must have shape {expected_weights_shape}; got {weights.shape}'
-            )
-
-        inputs = jnp.where(
-            weights[..., None] != 0,
-            inputs,
-            jnp.zeros(
-                (),
-                dtype=inputs.dtype,
-            ),
-        )
+        values = transition_lengths.clear(transition_inputs.values)
 
         sample_shape = (*replicate_shape, num_transitions)
+
         if 0 in sample_shape:
             return self
 
-        paired, inputs, weights = batch.pool_samples(
+        paired, values, weights = batch.pool_samples(
             (
-                jax.tree.map(transition_lengths.clear, posterior.paired_marginals()),
-                inputs,
+                jax.tree.map(
+                    transition_lengths.clear,
+                    posterior.paired_marginals(),
+                ),
+                values,
                 weights,
             ),
             self.batch_shape,
@@ -361,7 +345,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
         fitted = batch.vmap_batch(
             fit_one,
             paired,
-            inputs,
+            values,
             weights,
             batch_shape=self.batch_shape,
         )
@@ -669,7 +653,7 @@ class StateConditionedGaussian(typing.NamedTuple):
         """Gaussian distribution conditional on the given state."""
         return batch.take_along_last_batch(self.dist, self.dist.batch_shape, state)
 
-    def compute_potentials(self) -> GaussianPotential:
+    def compute_potential(self) -> GaussianPotential:
         """Return one Gaussian potential per discrete state."""
         return GaussianPotential.from_moments(
             self.dist,

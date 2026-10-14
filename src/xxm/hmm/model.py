@@ -8,11 +8,11 @@ import typing
 import jax
 import jax.numpy as jnp
 
-from xxm.core.data import DatasetCollection, Sequences
+from xxm.core.data import Dataset, DatasetCollection, Sequences
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
-from xxm.core.emissions.collection import EmissionsCollection
+from xxm.core.emissions.collection import DiscreteEmissionsCollection
 from xxm.core.emissions.discrete import (
     GaussianEmissions,
     PoissonEmissions,
@@ -130,7 +130,7 @@ class GaussianHMM:
             _model=Model(
                 initial=initial,
                 transitions=transitions,
-                emissions=EmissionsCollection(
+                emissions=DiscreteEmissionsCollection(
                     (
                         GaussianEmissions(
                             dist=Gaussian(
@@ -276,7 +276,7 @@ class PoissonHMM:
             _model=Model(
                 initial=initial,
                 transitions=transitions,
-                emissions=EmissionsCollection(
+                emissions=DiscreteEmissionsCollection(
                     (
                         PoissonEmissions(
                             dist=Poisson(
@@ -364,55 +364,80 @@ HMMFacadeT = typing.TypeVar('HMMFacadeT', GaussianHMM, PoissonHMM)
 
 @dataclasses.dataclass(frozen=True, eq=False)
 class Inferred(typing.Generic[HMMFacadeT]):
-    """Singular HMM, posterior, and exact source DatasetCollection."""
+    """HMM, pooled posterior, and source session collection."""
 
     model: HMMFacadeT
     posterior: Posterior
     data: DatasetCollection
 
     def __post_init__(self) -> None:
-        dataset = self.data.single()
-        if self.posterior.batch_shape != dataset.batch_shape:
-            raise ValueError('posterior batch must match the source dataset')
-        if self.posterior.max_steps != dataset.max_steps:
+        expected_batch = (self.data.partition.total,)
+
+        if self.posterior.batch_shape != expected_batch:
+            raise ValueError(
+                f'posterior batch must be {expected_batch}; '
+                f'got {self.posterior.batch_shape}'
+            )
+
+        if self.posterior.max_steps != self.data.max_steps:
             raise ValueError('posterior must match the padded time dimension')
+
         if self.posterior.num_states != self.model.num_states:
             raise ValueError('posterior must match the model number of states')
 
+    def _session(self, session: int | None) -> tuple[Posterior, Dataset]:
+        """Select one session from the pooled posterior."""
+
+        dataset = self.data.get(session)
+        index = 0 if session is None else session
+
+        posterior = self.posterior.select(self.data.partition.get_slice(index))
+
+        return posterior, dataset
+
     def state_probs(self, session: int | None = None) -> Sequences:
-        """State probabilities with the source batch shape and sequence lengths."""
+        """Return state probabilities for one session."""
+
+        posterior, dataset = self._session(session)
+
         return Sequences.from_padded(
-            self.posterior.state_probs, self.data.get(session).lengths
+            posterior.state_probs,
+            dataset.lengths,
         )
 
     def observation_mean(self, session: int | None = None) -> Sequences:
-        """Return the posterior mean observation at each time point."""
-        means = (
-            self.model.model.emissions.get(session)
-            .broadcast(self.posterior.batch_shape)
-            .observation_mean(
-                self.posterior,
-            )
+        """Return posterior mean observations for one session."""
+
+        posterior, dataset = self._session(session)
+
+        emissions = self.model.model.emissions.get(session)
+        emissions = emissions.broadcast(posterior.batch_shape)
+
+        means = emissions.observation_mean(posterior)
+
+        return Sequences.from_padded(
+            means,
+            dataset.lengths,
         )
 
-        return Sequences.from_padded(means, self.data.get(session).lengths)
-
-    def permute_states(self, permutation: jax.Array) -> Inferred[HMMFacadeT]:
+    def permute_states(self, permutation: jax.Array) -> typing.Self:
         """Relabel discrete states by permutation."""
-        return Inferred(
+
+        return type(self)(
             model=self.model.permute_states(permutation),
             posterior=self.posterior.permute_states(permutation),
             data=self.data,
         )
 
     def most_likely_states(self, session: int | None = None) -> Sequences:
-        """Return the marginally most likely state at each time point."""
-        most_likely = jnp.argmax(
-            self.posterior.state_probs,
-            axis=-1,
-        )
+        """Return marginally most likely states for one session."""
 
-        return Sequences.from_padded(most_likely, self.data.get(session).lengths)
+        posterior, dataset = self._session(session)
+
+        return Sequences.from_padded(
+            jnp.argmax(posterior.state_probs, axis=-1),
+            dataset.lengths,
+        )
 
 
 class Fit(typing.NamedTuple, typing.Generic[HMMFacadeT]):

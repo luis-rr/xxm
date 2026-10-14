@@ -26,8 +26,8 @@ def em_step(
 ]:
     """Perform one pooled exact EM update across independent sequences."""
     model = inferred.model.fit_params(
-        data,
         inferred.posterior,
+        data,
     )
 
     return infer_exact(
@@ -49,8 +49,8 @@ def laplace_em_step(
 ]:
     """Perform one warm-started pooled Laplace EM update."""
     model = inferred.model.fit_params(
-        data,
         inferred.posterior,
+        data,
     )
 
     return infer_laplace(

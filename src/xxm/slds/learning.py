@@ -26,7 +26,7 @@ def variational_em_step(
 ) -> InferenceState[Model[QuadraticEmissionsT], Posterior]:
     """Perform one structured variational EM update."""
 
-    model = inferred.model.fit_params(data, inferred.posterior)
+    model = inferred.model.fit_params(inferred.posterior, data)
 
     return infer_variational(
         model,
@@ -81,8 +81,8 @@ def laplace_em_step(
     """Perform one structured Laplace EM update."""
 
     model = inferred.model.fit_params(
-        data,
         inferred.posterior,
+        data,
     )
 
     return infer_laplace(

@@ -19,6 +19,7 @@ import jax.scipy.linalg as jsp_linalg
 from xxm.core import batch
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian, PairedGaussian
+from xxm.core.inference import InferredPosterior
 from xxm.core.lengths import Lengths
 
 
@@ -292,6 +293,29 @@ class GaussianPotential(typing.NamedTuple):
             ),
         )
 
+    def log_potential(self, values: jax.Array) -> jax.Array:
+        r"""Evaluate the log potential at aligned deterministic values."""
+
+        expected = (*self.batch_shape, self.variable_dim)
+        if values.shape != expected:
+            raise ValueError(f'values must have shape {expected}; got {values.shape}')
+
+        return (
+            -0.5
+            * jnp.einsum(
+                '...i,...ij,...j->...',
+                values,
+                self.precision_blocks,
+                values,
+            )
+            + jnp.einsum(
+                '...i,...i->...',
+                self.information_vectors,
+                values,
+            )
+            + self.log_constant
+        )
+
     def expected_log_potential(
         self,
         mean: jax.Array,
@@ -390,6 +414,16 @@ class GaussianPotential(typing.NamedTuple):
             information_vectors=(self.information_vectors * weights[..., None]),
             log_constant=self.log_constant * weights,
         )
+
+    def add(self, other: typing.Self) -> typing.Self:
+        """Add aligned log potentials."""
+        batch.require_same_shape(self.batch_shape, other.batch_shape)
+        return jax.tree.map(jnp.add, self, other)
+
+    def sub(self, other: typing.Self) -> typing.Self:
+        """Subtract aligned log potentials."""
+        batch.require_same_shape(self.batch_shape, other.batch_shape)
+        return jax.tree.map(jnp.subtract, self, other)
 
 
 class GaussianPairPotential(typing.NamedTuple):
@@ -537,6 +571,55 @@ class GaussianPairPotential(typing.NamedTuple):
             ),
         )
 
+    def log_potential(
+        self,
+        left: jax.Array,
+        right: jax.Array,
+    ) -> jax.Array:
+        r"""Evaluate the pair log potential at aligned deterministic values."""
+
+        expected = (*self.batch_shape, self.variable_dim)
+
+        if left.shape != expected or right.shape != expected:
+            raise ValueError(
+                f'left and right must have shape {expected}; '
+                f'got {left.shape} and {right.shape}'
+            )
+
+        return (
+            -0.5
+            * jnp.einsum(
+                '...i,...ij,...j->...',
+                left,
+                self.left_precision,
+                left,
+            )
+            - jnp.einsum(
+                '...i,...ij,...j->...',
+                right,
+                self.lower_precision,
+                left,
+            )
+            - 0.5
+            * jnp.einsum(
+                '...i,...ij,...j->...',
+                right,
+                self.right_precision,
+                right,
+            )
+            + jnp.einsum(
+                '...i,...i->...',
+                self.left_information,
+                left,
+            )
+            + jnp.einsum(
+                '...i,...i->...',
+                self.right_information,
+                right,
+            )
+            + self.log_constant
+        )
+
     def expected_log_potential(
         self,
         posterior: PairedGaussian,
@@ -667,6 +750,45 @@ class GaussianPairPotential(typing.NamedTuple):
             log_constant=self.log_constant * weights,
         )
 
+    def add(self, other: typing.Self) -> typing.Self:
+        """Add aligned Gaussian pair log potentials."""
+        batch.require_same_shape(self.batch_shape, other.batch_shape)
+        return jax.tree.map(jnp.add, self, other)
+
+    def sub(self, other: typing.Self) -> typing.Self:
+        """Subtract aligned Gaussian pair log potentials."""
+        batch.require_same_shape(self.batch_shape, other.batch_shape)
+        return jax.tree.map(jnp.subtract, self, other)
+
+
+class GaussianChainPotentials(typing.NamedTuple):
+    initial: GaussianPotential
+    pairs: GaussianPairPotential
+    lengths: Lengths
+
+    def expected_log_potential(
+        self,
+        posterior: GaussianChainMarginals,
+    ) -> jax.Array:
+        """Expected sum of initial and pair log potentials."""
+
+        if posterior.max_steps == 0:
+            return jnp.zeros_like(self.initial.log_constant)
+
+        mean = posterior.means[..., 0, :]
+        second = (
+            posterior.covariances[..., 0, :, :]
+            + mean[..., :, None] * mean[..., None, :]
+        )
+
+        initial = self.initial.expected_log_potential(mean, second)
+        initial = jnp.where(self.lengths.values > 0, initial, 0)
+
+        pairs = self.pairs.expected_log_potential(posterior.paired_marginals())
+        pairs = self.lengths.transitions().clear(pairs)
+
+        return initial + jnp.sum(pairs, axis=-1)
+
 
 class GaussianChain(typing.NamedTuple):
     r"""Represents a Gaussian chain with block-tridiagonal structure in canonical form.
@@ -708,7 +830,7 @@ class GaussianChain(typing.NamedTuple):
 
     def forward_backward(
         self,
-    ) -> tuple[GaussianChainMarginals, jax.Array]:
+    ) -> InferredPosterior[GaussianChainMarginals]:
         """Infer each chain, excluding padded suffixes from its log normalizer."""
         if self.max_steps < 1:
             raise ValueError('Gaussian chain inference requires at least one time step')
@@ -763,6 +885,18 @@ class GaussianChain(typing.NamedTuple):
         return batch.move_axis(self, source, destination)
 
     @classmethod
+    def from_potentials(
+        cls,
+        potentials: GaussianChainPotentials,
+    ) -> GaussianChain:
+        """Construct chains from potential batches `*B` and `(*B, T - 1)`."""
+        return cls.from_pair_potentials(
+            initial_potential=potentials.initial,
+            pair_potentials=potentials.pairs,
+            lengths=potentials.lengths,
+        )
+
+    @classmethod
     def from_pair_potentials(
         cls,
         initial_potential: GaussianPotential,  # batch *B
@@ -797,6 +931,13 @@ class GaussianChain(typing.NamedTuple):
         diagonal = diagonal.at[..., 0, :, :].add(initial_potential.precision_blocks)
         diagonal = diagonal.at[..., :-1, :, :].add(pair_potentials.left_precision)
         diagonal = diagonal.at[..., 1:, :, :].add(pair_potentials.right_precision)
+
+        # Make padded variables independent, with unit precision.
+        padding = ~lengths.to_mask(max_steps).values
+
+        diagonal = diagonal + (
+            padding[..., None, None] * jnp.eye(latent_dim, dtype=dtype)
+        )
 
         information_vectors = jnp.zeros(
             batch_shape + (max_steps, latent_dim),
@@ -992,7 +1133,7 @@ class GaussianChain(typing.NamedTuple):
 
     def _forward_backward_single(
         self,
-    ) -> tuple[GaussianChainMarginals, jax.Array]:
+    ) -> InferredPosterior[GaussianChainMarginals]:
         """Compute moments and a validity-aware log normalizer."""
 
         factorization = self._forward_elimination()
@@ -1039,7 +1180,10 @@ class GaussianChain(typing.NamedTuple):
             cross_covariances=cross_covariances,
         )
 
-        return posterior, log_normalizer
+        return InferredPosterior(
+            posterior=posterior,
+            log_normalizer=log_normalizer,
+        )
 
 
 class _ForwardEliminationCarry(typing.NamedTuple):

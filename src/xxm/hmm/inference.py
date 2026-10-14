@@ -1,53 +1,78 @@
-"""
-Exact inference for Hidden Markov Models.
-"""
+"""Exact inference for Hidden Markov Models."""
 
+import typing
+
+import jax
 import jax.numpy as jnp
 
-from xxm.core import batch
+from xxm.core.chains.discrete import (
+    DiscreteChain,
+    DiscreteChainPotentials,
+    DiscretePotential,
+)
 from xxm.core.data import DatasetCollection
 from xxm.core.inference import InferenceState
-from xxm.core.latents.discrete import homogeneous_chain
+from xxm.core.latents.discrete import compute_chain_potentials
 
-from .core import Model, Posterior
+from .core import EmissionsT, Model, Posterior
+
+
+class Potentials(typing.NamedTuple):
+    latent: DiscreteChainPotentials
+    observation: DiscretePotential
+
+    @classmethod
+    def from_data(
+        cls,
+        model: Model[EmissionsT],
+        data: DatasetCollection,
+    ) -> typing.Self:
+
+        return cls(
+            latent=compute_chain_potentials(
+                model.initial,
+                model.transitions,
+                data.pool_lengths_spec(),
+            ),
+            observation=model.emissions.compute_potential(
+                data.weighted_observations(),
+            ),
+        )
 
 
 def infer_exact(
-    model: Model,
+    model: Model[EmissionsT],
     data: DatasetCollection,
-) -> InferenceState[Model, Posterior]:
-    """Infer the model x data Cartesian batch and sum only data objectives."""
-    dataset = data.single()
-    if dataset.input_dim != 0:
-        raise ValueError('stationary HMMs require dataset.input_dim == 0')
+) -> InferenceState[
+    Model[EmissionsT],
+    Posterior,
+]:
+    """Run exact inference across all sessions."""
 
-    working_model, working_data = batch.cartesian_broadcast(model, dataset)
+    potentials = Potentials.from_data(model, data)
 
-    observation_potential = working_model.emissions.single().compute_potential(
-        working_data.weighted_observations(),
-    )
-
-    latent_chain = homogeneous_chain(
-        working_model.initial,
-        working_model.transitions,
-        ls=working_data.lengths_spec,
-    )
-
-    posterior_chain = latent_chain.add_local_potential(
-        observation_potential,
-    )
-
-    posterior, log_normalizer = posterior_chain.forward_backward()
-    data_axes = tuple(
-        range(
-            len(model.batch_shape),
-            len(model.batch_shape) + len(dataset.batch_shape),
-        )
-    )
-    objective = jnp.sum(log_normalizer, axis=data_axes) if data_axes else log_normalizer
+    chain = DiscreteChain.from_potentials(potentials.latent)
+    chain = chain.add_local_potential(potentials.observation)
+    inferred = chain.forward_backward()
 
     return InferenceState(
         model=model,
-        posterior=posterior,
-        objective=objective,
+        posterior=inferred.posterior,
+        objective=inferred.log_normalizer_total(),
     )
+
+
+def elbo(
+    model: Model[EmissionsT],
+    data: DatasetCollection,
+    posterior: Posterior,
+) -> jax.Array:
+    potentials = Potentials.from_data(model, data)
+
+    terms = (
+        potentials.latent.expected_log_potential(posterior),
+        potentials.observation.expected_log_potential(posterior),
+        posterior.entropy(),
+    )
+
+    return jnp.sum(sum(terms), axis=-1)

@@ -1,88 +1,90 @@
 """Exact inference conditional on fixed autoregressive history."""
 
+import typing
+
+import jax
 import jax.numpy as jnp
 
-from xxm.core import batch
+from xxm.core.chains.discrete import (
+    DiscreteChain,
+    DiscreteChainPotentials,
+    DiscretePotential,
+)
 from xxm.core.inference import InferenceState
-from xxm.core.latents.discrete import homogeneous_chain
+from xxm.core.latents.discrete import compute_chain_potentials
 
 from .core import Model, Posterior
 from .data import ARDatasetCollection
 from .emissions import ConditionalDistT
 
 
-def _infer_prepared(
-    model: Model[ConditionalDistT],
-    data_col: ARDatasetCollection,
-) -> InferenceState[
-    Model[ConditionalDistT],
-    Posterior,
-]:
-    """Infer compact AR states independently across all source sequences."""
+class Potentials(typing.NamedTuple):
+    latent: DiscreteChainPotentials
+    observation: DiscretePotential
 
-    data = data_col.single()
+    @classmethod
+    def from_data(
+        cls,
+        model: Model[ConditionalDistT],
+        data: ARDatasetCollection,
+    ) -> typing.Self:
+        """Construct latent and observation factors on the compact AR timeline."""
 
-    model_batch_shape = model.batch_shape
-    data_batch_shape = data.batch_shape
+        if data.input_dim != 0:
+            raise ValueError('AR-HMM does not currently support known external inputs')
 
-    working_model, working_data = batch.cartesian_broadcast(
-        model,
-        data,
-    )
+        if data.num_lags != model.num_lags:
+            raise ValueError('Mismatch between data.num_lags and model.num_lags')
 
-    chain = homogeneous_chain(
-        working_model.initial,
-        working_model.transitions,
-        working_data.lengths_spec,
-    )
-
-    # TODO combine multiple potentials
-    posterior_chain = chain.add_local_potential(
-        working_model.emissions.single().compute_potential(
-            working_data,
+        latent = compute_chain_potentials(
+            model.initial,
+            model.transitions,
+            data.pool_lengths_spec(),
         )
-    )
 
-    posterior, log_normalizer = posterior_chain.forward_backward()
-
-    data_axes = tuple(
-        range(
-            len(model_batch_shape),
-            len(model_batch_shape) + len(data_batch_shape),
+        observation = model.emissions.compute_potential(
+            data.weighted_observations(),
         )
-    )
 
-    objective = (
-        jnp.sum(
-            log_normalizer,
-            axis=data_axes,
+        return cls(
+            latent=latent,
+            observation=observation,
         )
-        if data_axes
-        else log_normalizer
-    )
-
-    return InferenceState(
-        model=model,
-        posterior=posterior,
-        objective=objective,
-    )
 
 
 def infer_exact(
     model: Model[ConditionalDistT],
     data: ARDatasetCollection,
-) -> InferenceState[
-    Model[ConditionalDistT],
-    Posterior,
-]:
-    """Prepare AR rows and infer on the compact post-history timeline."""
-    if data.input_dim != 0:
-        raise ValueError('AR-HMM does not currently support known external inputs')
+) -> InferenceState[Model[ConditionalDistT], Posterior]:
+    """Infer all independent AR sequences on their compact timeline."""
 
-    if data.num_lags != model.num_lags:
-        raise ValueError('Mismatch between data.num_lags and model.num_lags')
+    potentials = Potentials.from_data(model, data)
 
-    return _infer_prepared(
-        model,
-        data,
+    chain = DiscreteChain.from_potentials(potentials.latent)
+    chain = chain.add_local_potential(potentials.observation)
+
+    inferred = chain.forward_backward()
+
+    return InferenceState(
+        model=model,
+        posterior=inferred.posterior,
+        objective=inferred.log_normalizer_total(),
     )
+
+
+def elbo(
+    model: Model[ConditionalDistT],
+    data: ARDatasetCollection,
+    posterior: Posterior,
+) -> jax.Array:
+    """Evaluate the conditional AR-HMM ELBO."""
+
+    potentials = Potentials.from_data(model, data)
+
+    terms = (
+        potentials.latent.expected_log_potential(posterior),
+        potentials.observation.expected_log_potential(posterior),
+        posterior.entropy(),
+    )
+
+    return jnp.sum(sum(terms), axis=-1)

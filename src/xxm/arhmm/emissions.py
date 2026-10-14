@@ -25,12 +25,13 @@ from xxm.core.chains.discrete import DiscretePotential
 from xxm.core.data import Sequences
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
+from xxm.core.emissions.collection import EmissionsCollection
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import poisson as poisson_fit
 from xxm.core.optim.batch import filter_valid_batches
 from xxm.core.posteriors import DiscretePosterior
 
-from .data import ARDataset
+from .data import ARWeightedObservations
 
 ConditionalDistT = typing.TypeVar(
     'ConditionalDistT',
@@ -180,10 +181,11 @@ class AREmissions(
 
     def log_likelihoods(
         self,
-        data: ARDataset,
+        data: ARWeightedObservations,
     ) -> jax.Array:
         """Evaluate complete-window AR likelihoods for every state."""
-        observations = data.weighted_observations()
+
+        observations = data.observations
 
         conditional = self.conditional(
             data.safe_predictors(),
@@ -200,7 +202,7 @@ class AREmissions(
 
     def compute_potential(
         self,
-        data: ARDataset,
+        data: ARWeightedObservations,
     ) -> DiscretePotential:
         """Construct neutral factors where an AR row is not observable."""
         return DiscretePotential(
@@ -209,20 +211,17 @@ class AREmissions(
 
     def fit_params(
         self,
-        data: ARDataset,
         posterior: DiscretePosterior,
+        data: ARWeightedObservations,
         ridge: float | None = None,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
     ) -> typing.Self:
-        """
-        Fit AR emissions while preserving the receiver model batch.
+        """Fit AR emissions while preserving the receiver model batch."""
 
-        Dataset replicate axes and compact AR time are pooled into samples.
-        """
         replicate_shape = batch.split_prefix(
             data.batch_shape,
             self.batch_shape,
-            name='AR dataset batch shape',
+            name='AR observation batch shape',
         )
 
         batch.require_same_shape(
@@ -232,11 +231,10 @@ class AREmissions(
 
         if data.max_steps != posterior.max_steps:
             raise ValueError(
-                'posterior and AR dataset must have the same number of steps'
+                'posterior and AR observations must have the same number of steps'
             )
 
-        observations = data.weighted_observations()
-
+        observations = data.observations
         predictors = data.safe_predictors()
         targets = observations.safe_values()
 
@@ -400,3 +398,57 @@ class AREmissions(
             states,
             initial_history,
         )
+
+
+ARWOCollection = tuple[ARWeightedObservations, ...]
+
+
+class AREmissionsCollection(
+    EmissionsCollection[
+        AREmissions[ConditionalDistT],
+        ARWeightedObservations,
+        DiscretePosterior,
+    ],
+    typing.Generic[ConditionalDistT],
+):
+    """Session-specific autoregressive emissions."""
+
+    def fit_params(
+        self,
+        posterior: DiscretePosterior,
+        observations: ARWOCollection,
+    ) -> typing.Self:
+        return self._fit_params(
+            posterior,
+            observations,
+            lambda emission, q, obs: emission.fit_params(q, obs),
+        )
+
+    def compute_potential(
+        self,
+        observations: ARWOCollection,
+    ) -> DiscretePotential:
+        return self._compute_potential(
+            observations,
+            lambda emission, obs: emission.compute_potential(obs),
+        )
+
+    def log_likelihoods(
+        self,
+        observations: ARWOCollection,
+    ) -> jax.Array:
+        values = self._dispatch(
+            observations,
+            lambda emission, obs, _: emission.log_likelihoods(obs),
+        )
+
+        return jnp.concatenate(
+            values,
+            axis=len(self.batch_shape),
+        )
+
+    def permute_states(
+        self,
+        permutation: jax.Array,
+    ) -> typing.Self:
+        return self.map(lambda emission: emission.permute_states(permutation))

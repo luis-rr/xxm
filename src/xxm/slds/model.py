@@ -9,11 +9,11 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core.affine import Affine
-from xxm.core.data import DatasetCollection, Sequences
+from xxm.core.data import Dataset, DatasetCollection, Sequences
 from xxm.core.dists.categorical import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
-from xxm.core.emissions.collection import EmissionsCollection
+from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
 from xxm.core.emissions.initialization import initial_latent_trajectory
 from xxm.core.latents.discrete import (
@@ -75,24 +75,34 @@ _fit_laplace_em_jit = jax.jit(
 
 
 def _initial_latents(
-    emissions: EmissionsCollection[GaussianEmissions]
-    | EmissionsCollection[PoissonEmissions],
+    emissions: ContinuousEmissionsCollection[GaussianEmissions]
+    | ContinuousEmissionsCollection[PoissonEmissions],
     data: DatasetCollection,
     initial_latents: jax.Array | None,
 ) -> jax.Array:
-    """Use an explicit trajectory or initialize without consulting withheld values."""
+    """Initialize one trajectory per session, then pool sequences."""
+
     if initial_latents is not None:
         return initial_latents
-    dataset = data.single()
-    emission = emissions.single()
-    emission = emission.broadcast(dataset.batch_shape)
-    return dataset.lengths.clear(
-        initial_latent_trajectory(
-            emission,
+
+    trajectories = []
+
+    for emission, dataset in zip(
+        emissions.emissions,
+        data.datasets,
+        strict=True,
+    ):
+        working_emission = emission.broadcast(dataset.batch_shape)
+
+        trajectory = initial_latent_trajectory(
+            working_emission,
             dataset.observations.values,
             dataset.observation_weights()[..., None],
         )
-    )
+
+        trajectories.append(dataset.lengths.clear(trajectory))
+
+    return jnp.concatenate(trajectories, axis=0)
 
 
 def _sampling_inputs(
@@ -248,7 +258,7 @@ class GaussianSLDS:
                     bias=dynamics_bias,
                     covariance=dynamics_covariances,
                 ),
-                emissions=EmissionsCollection(
+                emissions=ContinuousEmissionsCollection(
                     (
                         GaussianEmissions(
                             dist=LinearGaussian(
@@ -507,7 +517,7 @@ class PoissonSLDS:
                     bias=dynamics_bias,
                     covariance=dynamics_covariances,
                 ),
-                emissions=EmissionsCollection(
+                emissions=ContinuousEmissionsCollection(
                     (
                         PoissonEmissions(
                             dist=LinearPoisson(
@@ -661,57 +671,75 @@ class Inferred(typing.Generic[SLDSFacadeT]):
     data: DatasetCollection
 
     def __post_init__(self) -> None:
-        dataset = self.data.single()
-        if self.posterior.batch_shape != dataset.batch_shape:
-            raise ValueError('posterior batch must match the source dataset')
-        if self.posterior.continuous.max_steps != dataset.max_steps:
+        expected_batch = (self.data.partition.total,)
+
+        if self.posterior.batch_shape != expected_batch:
+            raise ValueError(
+                f'posterior batch must be {expected_batch}; '
+                f'got {self.posterior.batch_shape}'
+            )
+
+        if self.posterior.max_steps != self.data.max_steps:
             raise ValueError('posterior must match the padded time dimension')
+
         if self.posterior.continuous.variable_dim != self.model.latent_dim:
             raise ValueError('posterior must match the model latent dimension')
+
         if self.posterior.discrete.num_states != self.model.num_states:
             raise ValueError('posterior must match the model number of states')
 
+    def _session(self, session: int | None) -> tuple[Posterior, Dataset]:
+        """Select a session's posterior and source dataset."""
+
+        dataset = self.data.get(session)
+        index = 0 if session is None else session
+
+        posterior = self.posterior.select(self.data.partition.get_slice(index))
+
+        return posterior, dataset
+
     def latent_mean(self, session: int | None = None) -> Sequences:
         """Return posterior continuous latent means."""
+        posterior, dataset = self._session(session)
+
         return Sequences.from_padded(
-            self.posterior.continuous.means,
-            self.data.get(session).lengths,
+            posterior.continuous.means,
+            dataset.lengths,
         )
 
     def state_probs(self, session: int | None = None) -> Sequences:
         """Return posterior discrete-state probabilities."""
+        posterior, dataset = self._session(session)
+
         return Sequences.from_padded(
-            self.posterior.discrete.state_probs,
-            self.data.get(session).lengths,
+            posterior.discrete.state_probs,
+            dataset.lengths,
         )
 
     def observation_mean(self, session: int | None = None) -> Sequences:
         """Return posterior mean observations."""
-        traces = (
-            self.model.model.emissions.get(session)
-            .broadcast(
-                self.posterior.batch_shape,
-            )
-            .observation_mean(
-                self.posterior.continuous,
-            )
-        )
+        posterior, dataset = self._session(session)
+
+        emissions = self.model.model.emissions.get(session)
+        emissions = emissions.broadcast(posterior.batch_shape)
 
         return Sequences.from_padded(
-            traces,
-            self.data.get(session).lengths,
+            emissions.observation_mean(posterior.continuous),
+            dataset.lengths,
         )
 
     def most_likely_states(self, session: int | None = None) -> Sequences:
         """Return the marginally most likely discrete state at each time point."""
+        posterior, dataset = self._session(session)
+
         states = jnp.argmax(
-            self.posterior.discrete.state_probs,
+            posterior.discrete.state_probs,
             axis=-1,
         )
 
         return Sequences.from_padded(
             states,
-            self.data.get(session).lengths,
+            dataset.lengths,
         )
 
     def permute_states(

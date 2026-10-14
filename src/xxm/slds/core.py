@@ -5,6 +5,7 @@ Switching Linear Dynamical System: discrete and continuous latent states.
 import typing
 
 import jax
+import jax.numpy as jnp
 
 from xxm.core import batch
 from xxm.core.affine import Affine
@@ -13,7 +14,7 @@ from xxm.core.chains.gaussian import (
     GaussianChainMarginals,
 )
 from xxm.core.data import DatasetCollection, Sequences
-from xxm.core.emissions.collection import EmissionsCollection
+from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import EmissionsT
 from xxm.core.latents.discrete import CategoricalInitial, CategoricalTransitions
 from xxm.core.latents.gaussian import StateConditionedGaussian
@@ -76,6 +77,14 @@ class Posterior(typing.NamedTuple):
             discrete=self.discrete.permute_states(permutation),
         )
 
+    def entropy(self) -> jax.Array:
+        terms = (
+            self.discrete.entropy(),
+            self.continuous.entropy(),
+        )
+
+        return jnp.sum(sum(terms), axis=-1)
+
 
 class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     r"""Switching linear dynamical system.
@@ -92,7 +101,7 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     transitions: CategoricalTransitions
     latent_initial: StateConditionedGaussian
     dynamics: GaussianLinearSwitchingDynamics
-    emissions: EmissionsCollection[EmissionsT]
+    emissions: ContinuousEmissionsCollection[EmissionsT]
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
@@ -139,19 +148,11 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
 
     def fit_params(
         self,
-        data: DatasetCollection,
         posterior: Posterior,
+        data: DatasetCollection,
     ) -> typing.Self:
-        """Pool sequence statistics while preserving the model batch prefix."""
-        dataset = data.single()
-        expected_batch = (*self.batch_shape, *dataset.batch_shape)
-        if posterior.batch_shape != expected_batch:
-            raise ValueError(f'posterior batch must be {expected_batch}')
-        if posterior.continuous.max_steps != dataset.max_steps:
-            raise ValueError('posterior and dataset time dimensions must match')
-        if dataset.input_dim != self.dynamics.input_dim:
-            raise ValueError('dataset input dimension must match dynamics')
-        working_data = dataset.broadcast(self.batch_shape)
+        """Fit pooled latent parameters and session-specific emissions."""
+
         return self.__class__(
             state_initial=self.state_initial.fit_params(
                 posterior.discrete,
@@ -164,19 +165,13 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
                 posterior.continuous,
             ),
             dynamics=self.dynamics.fit_params(
-                discrete=posterior.discrete,
-                continuous=posterior.continuous,
-                inputs=working_data.lengths.transitions().clear(
-                    working_data.transition_inputs()
-                ),
+                posterior.discrete,
+                posterior.continuous,
+                inputs=data.pool_inputs(),
             ),
-            emissions=EmissionsCollection(
-                (
-                    self.emissions.single().fit_params(
-                        working_data.weighted_observations(),
-                        posterior.continuous,
-                    ),
-                )
+            emissions=self.emissions.fit_params(
+                posterior.continuous,
+                observations=data.weighted_observations(),
             ),
         )
 

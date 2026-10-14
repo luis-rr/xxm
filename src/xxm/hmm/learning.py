@@ -17,15 +17,8 @@ def em_step(
 ) -> InferenceState[Model, Posterior]:
     """Perform one EM update from an existing posterior."""
 
-    model = inferred.model.fit_params(
-        data,
-        inferred.posterior,
-    )
-
-    return infer_exact(
-        model,
-        data,
-    )
+    model = inferred.model.fit_params(inferred.posterior, data)
+    return infer_exact(model, data)
 
 
 def fit_em(
@@ -36,10 +29,7 @@ def fit_em(
 ) -> Fit[InferenceState[Model, Posterior]]:
     """Fit model via exact expectation-maximization."""
 
-    inferred = infer_exact(
-        model,
-        data,
-    )
+    inferred = infer_exact(model, data)
 
     return _fit_one(
         inferred,

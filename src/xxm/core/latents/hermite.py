@@ -10,6 +10,7 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core import batch
+from xxm.core.chains.gaussian import GaussianPotential
 from xxm.core.data import Sequences
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.latents.hermite_core import HermiteBasis
@@ -228,8 +229,6 @@ class HermiteGaussian:
         Returns shape `(*S, T, C)`, where `*S = ls.batch_shape`.
 
         The grid batch intentionally need not equal `self.batch_shape`.
-        LTR-SLDS uses one temporal grid per sequence while the coefficient
-        distribution additionally carries a state batch axis.
         """
         denominator = ls.lengths.shift(-1).clip_min(1).values
 
@@ -304,29 +303,48 @@ class HermiteGaussian:
         self,
         ls: LengthsSpec,
     ) -> Gaussian:
-        """Project coefficient uncertainty to one-time temporal marginals.
-
-        The returned Gaussian has batch shape `(*B, T)` and event dimension
-        `P`.
-        """
+        """Project coefficient uncertainty to masked temporal marginals."""
         batch.require_same_shape(
             self.batch_shape,
             ls.batch_shape,
         )
 
-        basis = self.temporal_basis(ls)
+        return self.marginals_from_basis(self.temporal_basis(ls))
+
+    def marginals_from_basis(
+        self,
+        basis_values: jax.Array,
+    ) -> Gaussian:
+        """Project coefficient moments through an evaluated temporal basis.
+
+        The basis has shape (*B, T, C). Invalid times should already
+        be zeroed in the supplied basis.
+        """
+        if basis_values.ndim != len(self.batch_shape) + 2:
+            raise ValueError('basis values must have shape (*B, T, C)')
+
+        if basis_values.shape[:-2] != self.batch_shape:
+            raise ValueError(
+                f'basis batch must be {self.batch_shape}; got {basis_values.shape[:-2]}'
+            )
+
+        if basis_values.shape[-1] != self.num_coefficients:
+            raise ValueError(
+                f'basis coefficient dimension must be '
+                f'{self.num_coefficients}; got {basis_values.shape[-1]}'
+            )
 
         mean = self.coefficients.mean.reshape(
-            self.batch_shape
-            + (
+            (
+                *self.batch_shape,
                 self.variable_dim,
                 self.num_coefficients,
             )
         )
 
         covariance = self.coefficients.covariance.reshape(
-            self.batch_shape
-            + (
+            (
+                *self.batch_shape,
                 self.variable_dim,
                 self.num_coefficients,
                 self.variable_dim,
@@ -336,29 +354,24 @@ class HermiteGaussian:
 
         temporal_mean = jnp.einsum(
             '...tc,...pc->...tp',
-            basis,
+            basis_values,
             mean,
         )
 
         temporal_covariance = jnp.einsum(
             '...tc,...pcqd,...td->...tpq',
-            basis,
+            basis_values,
             covariance,
-            basis,
+            basis_values,
         )
 
         temporal_covariance = 0.5 * (
-            temporal_covariance
-            + jnp.swapaxes(
-                temporal_covariance,
-                -1,
-                -2,
-            )
+            temporal_covariance + jnp.swapaxes(temporal_covariance, -1, -2)
         )
 
         return Gaussian(
-            mean=ls.lengths.clear(temporal_mean),
-            covariance=ls.lengths.clear(temporal_covariance),
+            mean=temporal_mean,
+            covariance=temporal_covariance,
         )
 
     def log_prob(
@@ -433,4 +446,72 @@ class HermiteGaussian:
             self,
             source,
             destination,
+        )
+
+    def compute_potential(self) -> GaussianPotential:
+        return GaussianPotential.from_moments(self.coefficients)
+
+    def to_coefficient_potential(
+        self,
+        local: GaussianPotential,
+        basis_values: jax.Array,
+    ) -> GaussianPotential:
+        """Pull time-local Gaussian factors back to Hermite coefficient space.
+
+        `basis_values` has shape (*B, T, C), where C is the number of
+        basis coefficients. `local` contains factors over P temporal
+        variables, with batch shape (*B, T).
+
+        The result is one potential over the flattened P * C coefficients
+        for each batch element.
+        """
+        if basis_values.ndim != len(self.batch_shape) + 2:
+            raise ValueError('basis values must have shape (*B, T, C)')
+
+        expected_basis_shape = (
+            *self.batch_shape,
+            basis_values.shape[-2],
+            self.num_coefficients,
+        )
+        if basis_values.shape != expected_basis_shape:
+            raise ValueError(
+                f'basis values must have shape {expected_basis_shape}; '
+                f'got {basis_values.shape}'
+            )
+
+        expected_local_batch = (
+            *self.batch_shape,
+            basis_values.shape[-2],
+        )
+        if local.batch_shape != expected_local_batch:
+            raise ValueError(
+                f'local potential batch must be {expected_local_batch}; '
+                f'got {local.batch_shape}'
+            )
+
+        if local.variable_dim != self.variable_dim:
+            raise ValueError(
+                f'local potential variable dimension must be '
+                f'{self.variable_dim}; got {local.variable_dim}'
+            )
+
+        coefficient_dim = self.coefficients.variable_dim
+
+        precision = jnp.einsum(
+            '...tc,...tpq,...td->...pcqd',
+            basis_values,
+            local.precision_blocks,
+            basis_values,
+        ).reshape((*self.batch_shape, coefficient_dim, coefficient_dim))
+
+        information = jnp.einsum(
+            '...tc,...tp->...pc',
+            basis_values,
+            local.information_vectors,
+        ).reshape((*self.batch_shape, coefficient_dim))
+
+        return GaussianPotential(
+            precision_blocks=precision,
+            information_vectors=information,
+            log_constant=jnp.sum(local.log_constant, axis=-1),
         )

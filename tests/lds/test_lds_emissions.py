@@ -124,7 +124,8 @@ def test_gaussian_fit_recovers_known_parameters():
     )
 
     fitted = emissions.fit_params(
-        WeightedObservations.from_array(observations), posterior
+        posterior,
+        WeightedObservations.from_array(observations),
     )
 
     expected_coefficient = 2.0 / (1.0 + gaussian_fit.DEFAULT_RIDGE)
@@ -350,7 +351,8 @@ def test_poisson_fit_recovers_known_parameters():
     )
 
     fitted = initial_emissions.fit_params(
-        WeightedObservations.from_array(observations), posterior
+        posterior,
+        WeightedObservations.from_array(observations),
     )
 
     np.testing.assert_allclose(
@@ -412,7 +414,7 @@ def test_gaussian_methods_are_jittable():
     sampled = jax.jit(emissions.sample)(jax.random.key(0), latent_sequences)
     assert sampled.values.shape == (3, 2)
     np.testing.assert_array_equal(sampled.lengths.values, posterior.lengths.values)
-    jax.jit(emissions.fit_params)(observations, posterior)
+    jax.jit(emissions.fit_params)(posterior, observations)
 
 
 def test_poisson_methods_are_jittable():
@@ -438,4 +440,4 @@ def test_poisson_methods_are_jittable():
     sampled = jax.jit(emissions.sample)(jax.random.key(0), latent_sequences)
     assert sampled.values.shape == (3, 2)
     np.testing.assert_array_equal(sampled.lengths.values, posterior.lengths.values)
-    jax.jit(emissions.fit_params)(observations, posterior)
+    jax.jit(emissions.fit_params)(posterior, observations)

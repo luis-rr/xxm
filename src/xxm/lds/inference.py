@@ -1,13 +1,18 @@
 """LDS inference via Gaussian message passing and Laplace approximation."""
 
+import typing
+
 import jax
 from jax import numpy as jnp
 
 from xxm.core import batch
 from xxm.core.chains.gaussian import GaussianChain as Chain
 from xxm.core.chains.gaussian import GaussianChainMarginals as Posterior
-from xxm.core.chains.gaussian import GaussianPairPotential, GaussianPotential
-from xxm.core.data import Dataset, DatasetCollection
+from xxm.core.chains.gaussian import (
+    GaussianChainPotentials,
+    GaussianPotential,
+)
+from xxm.core.data import DatasetCollection, Sequences
 from xxm.core.emissions.continuous import (
     EmissionsT,
     LaplaceEmissionsT,
@@ -20,67 +25,44 @@ from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
 from .core import Model
 
 
-def _prior_potentials(
-    working_model: Model[EmissionsT],
-    working_data: Dataset,
-) -> tuple[
-    GaussianPotential,
-    GaussianPairPotential,
-]:
-    """Construct the genuine initial and transition factors."""
-    initial_potential = working_model.initial.compute_potential()
-
-    valid_transitions = working_data.lengths.transitions()
-    safe_inputs = valid_transitions.clear(working_data.transition_inputs())
-
-    pair_potential = working_model.dynamics.compute_pair_potentials(safe_inputs)
-
-    pair_potential = pair_potential.scale(
-        valid_transitions.to_mask(working_data.max_steps - 1).values
-    )
-
-    return initial_potential, pair_potential
+class Potentials(typing.NamedTuple):
+    latent: GaussianChainPotentials
+    observation: GaussianPotential
 
 
-def to_chain(
+def compute_latent_potentials(
     model: Model[EmissionsT],
-    data: Dataset,
-) -> Chain:
-    """Construct proper latent chains for one selected, batch-aligned session."""
-    initial_potential, pair_potential = _prior_potentials(
-        model,
-        data,
+    inputs: Sequences,
+) -> GaussianChainPotentials:
+
+    initial = model.initial.compute_potential()
+
+    # Broadcast from (*M) initial and (N,) inputs to (*M, N) both.
+    initial, inputs = batch.cartesian_broadcast(initial, inputs)
+
+    # Broadcasting is handled internally.
+    pairs = model.dynamics.compute_pair_potentials(inputs)
+
+    return GaussianChainPotentials(
+        initial=initial,
+        pairs=pairs,
+        lengths=inputs.lengths,
     )
 
-    chain = Chain.from_pair_potentials(
-        initial_potential,
-        pair_potential,
-        lengths=data.lengths,
-    )
 
-    valid = data.lengths.to_mask(data.max_steps).values
-    latent_dim = model.dynamics.latent_dim
-    dtype = model.initial.dist.covariance.dtype
+def compute_potential(
+    model: Model[QuadraticEmissionsT],
+    data: DatasetCollection,
+) -> Potentials:
+    inputs = data.pool_inputs()
+    latent_potentials = compute_latent_potentials(model, inputs)
 
-    stabilizer = GaussianPotential(
-        precision_blocks=jnp.broadcast_to(
-            jnp.eye(latent_dim, dtype=dtype),
-            (*valid.shape, latent_dim, latent_dim),
-        ),
-        information_vectors=jnp.zeros(
-            (*valid.shape, latent_dim),
-            dtype=dtype,
-        ),
-        log_constant=jnp.zeros(
-            valid.shape,
-            dtype=dtype,
-        ),
-    )
+    observations = data.weighted_observations()
+    observation_potential = model.emissions.compute_potential(observations)
 
-    stabilizer = stabilizer.scale(~valid)
-
-    return chain.add_local_potential(
-        stabilizer,
+    return Potentials(
+        latent=latent_potentials,
+        observation=observation_potential,
     )
 
 
@@ -91,35 +73,18 @@ def infer_exact(
     Model[QuadraticEmissionsT],
     Posterior,
 ]:
-    """Run exact Gaussian inference independently across all sequences."""
-    dataset = data.single()
-    model_batch_shape = model.batch_shape
-    data_batch_shape = dataset.batch_shape
-    working_model, working_data = batch.cartesian_broadcast(model, dataset)
-    latent_chain = to_chain(working_model, working_data)
+    """Run exact inference across all sessions."""
 
-    observation_potential = working_model.emissions.single().compute_potential(
-        working_data.weighted_observations(),
-    )
+    potentials = compute_potential(model, data)
 
-    posterior_chain = latent_chain.add_local_potential(
-        observation_potential,
-    )
-
-    posterior, log_normalizer = posterior_chain.forward_backward()
-
-    data_axes = tuple(
-        range(
-            len(model_batch_shape),
-            len(model_batch_shape) + len(data_batch_shape),
-        )
-    )
-    objective = jnp.sum(log_normalizer, axis=data_axes) if data_axes else log_normalizer
+    latent_chain = Chain.from_potentials(potentials.latent)
+    latent_chain = latent_chain.add_local_potential(potentials.observation)
+    inferred = latent_chain.forward_backward()
 
     return InferenceState(
         model=model,
-        posterior=posterior,
-        objective=objective,
+        posterior=inferred.posterior,
+        objective=inferred.log_normalizer_total(),
     )
 
 
@@ -138,126 +103,29 @@ def infer_laplace(
     The model × dataset Cartesian batch is constructed explicitly before the
     generic Laplace stack is called.
     """
-    dataset = data.single()
-    model_batch_shape = model.batch_shape
-    data_batch_shape = dataset.batch_shape
-    working_model, working_data = batch.cartesian_broadcast(model, dataset)
-    chain = to_chain(working_model, working_data)
+    inputs = data.pool_inputs()
+    latent_potentials = compute_latent_potentials(model, inputs)
 
-    expected_latent_shape = (
-        *working_data.batch_shape,
-        working_data.max_steps,
-        working_model.dynamics.latent_dim,
-    )
+    observations = data.weighted_observations()
 
-    lengths = working_data.lengths
+    latent_chain = Chain.from_potentials(latent_potentials)
 
     if initial_latents is None:
-        prior, _ = chain.forward_backward()
-        latents = prior.means
-    else:
-        if initial_latents.shape != expected_latent_shape:
-            raise ValueError(
-                f'initial_latents must have shape {expected_latent_shape}; '
-                f'got {initial_latents.shape}'
-            )
-        latents = initial_latents
+        initial_latents = latent_chain.forward_backward().posterior.means
+    initial_latents = latent_chain.lengths.clear(initial_latents)
 
-    latents = lengths.clear(latents)
-
-    posterior, log_normalizer = laplace_inference(
-        chain=chain,
-        emissions=working_model.emissions.single(),
-        observations=working_data.weighted_observations(),
-        initial_latents=latents,
+    inferred = laplace_inference(
+        chain=latent_chain,
+        emissions=model.emissions,
+        observations=observations,
+        initial_latents=initial_latents,
         search_params=params,
     )
 
-    data_axes = tuple(
-        range(
-            len(model_batch_shape),
-            len(model_batch_shape) + len(data_batch_shape),
-        )
-    )
-    objective = jnp.sum(log_normalizer, axis=data_axes) if data_axes else log_normalizer
-
     return InferenceState(
         model=model,
-        posterior=posterior,
-        objective=objective,
-    )
-
-
-def elbo_terms(
-    model: Model[EmissionsT],
-    data: DatasetCollection,
-    posterior: Posterior,
-) -> tuple[
-    jax.Array,
-    jax.Array,
-    jax.Array,
-    jax.Array,
-]:
-    """Compute per-dataset ELBO contributions."""
-    dataset = data.single()
-    model_batch_shape = model.batch_shape
-    data_batch_shape = dataset.batch_shape
-
-    working_model, working_data = batch.cartesian_broadcast(
-        model,
-        dataset,
-    )
-
-    expected_batch_shape = (
-        *model_batch_shape,
-        *data_batch_shape,
-    )
-
-    if posterior.batch_shape != expected_batch_shape:
-        raise ValueError(
-            f'posterior must have batch shape {expected_batch_shape}; '
-            f'got {posterior.batch_shape}'
-        )
-
-    if posterior.max_steps != working_data.max_steps:
-        raise ValueError('posterior and dataset must have the same number of timesteps')
-
-    if posterior.variable_dim != working_model.dynamics.latent_dim:
-        raise ValueError(
-            'posterior variable dimension must match model latent dimension'
-        )
-
-    initial_potential, pair_potential = _prior_potentials(
-        working_model,
-        working_data,
-    )
-
-    second_moments = posterior.raw_second_moments()
-
-    initial = initial_potential.expected_log_potential(
-        posterior.means[..., 0, :],
-        second_moments[..., 0, :, :],
-    )
-
-    dynamics = jnp.sum(
-        pair_potential.expected_log_potential(
-            posterior.paired_marginals(),
-        ),
-        axis=-1,
-    )
-
-    emissions = working_model.emissions.single().expected_log_likelihood(
-        working_data.weighted_observations(),
-        posterior,
-    )
-
-    entropy = posterior.entropy()
-
-    return (
-        initial,
-        dynamics,
-        emissions,
-        entropy,
+        posterior=inferred.posterior,
+        objective=inferred.log_normalizer_total(),
     )
 
 
@@ -268,21 +136,19 @@ def elbo(
 ) -> jax.Array:
     """Compute the dataset-summed ELBO, preserving model batch."""
 
-    (initial, dynamics, emissions, entropy) = elbo_terms(model, data, posterior)
+    inputs = data.pool_inputs()
+    observations = data.weighted_observations()
 
-    value = initial + dynamics + emissions + entropy
+    latent = compute_latent_potentials(model, inputs)
 
-    data_axes = tuple(
-        range(
-            len(model.batch_shape),
-            value.ndim,
-        )
+    expected_latent = latent.expected_log_potential(posterior)
+
+    expected_observation = model.emissions.expected_log_likelihood(
+        observations,
+        posterior,
     )
 
-    if data_axes:
-        value = jnp.sum(
-            value,
-            axis=data_axes,
-        )
-
-    return value
+    return jnp.sum(
+        expected_latent + expected_observation + posterior.entropy(),
+        axis=-1,
+    )

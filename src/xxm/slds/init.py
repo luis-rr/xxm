@@ -13,7 +13,7 @@ from xxm.arhmm.init import (
 from xxm.arhmm.learning import fit_em as fit_arhmm
 from xxm.core.data import Dataset, DatasetCollection
 from xxm.core.dists.gaussian import LinearGaussian
-from xxm.core.emissions.collection import EmissionsCollection
+from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import (
     EmissionsT,
     GaussianEmissions,
@@ -291,7 +291,7 @@ def _init_from_arhmm(
         transitions=arhmm.transitions,
         latent_initial=latent_initial,
         dynamics=dynamics,
-        emissions=EmissionsCollection((emissions,)),
+        emissions=ContinuousEmissionsCollection((emissions,)),
     )
 
 

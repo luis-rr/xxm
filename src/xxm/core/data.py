@@ -827,6 +827,10 @@ class DatasetCollection(typing.NamedTuple):
         """Shared observation dtype across sessions."""
         return jnp.result_type(*(dataset.dtype for dataset in self.datasets))
 
+    def weighted_observations(self) -> tuple[WeightedObservations, ...]:
+        """Observation values with validity-aware weights."""
+        return tuple(dataset.weighted_observations() for dataset in self.datasets)
+
     def get(
         self,
         session: int | None = None,
@@ -884,72 +888,22 @@ class DatasetCollection(typing.NamedTuple):
         return tuple(data.observation_dim for data in self.datasets)
 
     @property
-    def sequence_counts(self) -> tuple[int, ...]:
-        """Number of source sequences in each session, in positional order."""
-        return tuple(data.batch_shape[0] for data in self.datasets)
-
-    @property
-    def pooled_batch_size(self) -> int:
-        """Total number of independent sequences across sessions."""
-        return sum(self.sequence_counts)
+    def partition(self) -> batch.Partition:
+        return batch.Partition(tuple(data.batch_shape[0] for data in self.datasets))
 
     @property
     def max_steps(self) -> int:
         """Common dense temporal horizon of normalized sessions."""
         return self.datasets[0].max_steps
 
-    def session_slice(
-        self,
-        session: int,
-    ) -> slice:
-        """Flat pooled-sequence slice occupied by one session."""
-        session = range(len(self.datasets))[session]
+    def pool_inputs(self) -> Sequences:
+        return batch.concatenate([dataset.inputs for dataset in self.datasets])
 
-        sizes = self.sequence_counts
-        start = sum(sizes[:session])
-
-        return slice(
-            start,
-            start + sizes[session],
+    def pool_lengths_spec(self) -> LengthsSpec:
+        return LengthsSpec(
+            lengths=batch.concatenate(
+                tuple(dataset.lengths for dataset in self.datasets),
+                axis=0,
+            ),
+            max_steps=self.max_steps,
         )
-
-    def pool_batchables(
-        self,
-        items: typing.Sequence[BatchableT],
-        *,
-        model_batch_shape: tuple[int, ...] = (),
-    ) -> BatchableT:
-        """Concatenate compatible common-space objects along the sequence axis."""
-        items = tuple(items)
-        if len(items) != len(self.datasets):
-            raise ValueError('items must contain exactly one object per session')
-
-        for session, (item, count) in enumerate(
-            zip(items, self.sequence_counts, strict=True)
-        ):
-            expected = (*model_batch_shape, count)
-
-            if item.batch_shape != expected:
-                raise ValueError(
-                    f'session {session} must have batch shape {expected}; '
-                    f'got {item.batch_shape}'
-                )
-
-        return batch.concatenate(items, axis=len(model_batch_shape))
-
-    def select_session(
-        self,
-        pooled: BatchableT,
-        session: int,
-        *,
-        model_batch_shape: tuple[int, ...] = (),
-    ) -> BatchableT:
-        """Slice one static session, preserving the model and sequence axes."""
-        expected = (*model_batch_shape, self.pooled_batch_size)
-        if pooled.batch_shape != expected:
-            raise ValueError(
-                f'pooled object must have batch shape {expected}; '
-                f'got {pooled.batch_shape}'
-            )
-        index = (slice(None),) * len(model_batch_shape) + (self.session_slice(session),)
-        return batch.select(pooled, index)

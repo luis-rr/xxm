@@ -159,7 +159,7 @@ def test_ar_gaussian_log_likelihoods_known_solution():
     )
 
     log_likelihoods = emissions.log_likelihoods(
-        ARDataset.from_array(observations, emissions.num_lags)
+        ARDataset.from_array(observations, emissions.num_lags).weighted_observations()
     )
 
     # y1 | y0 ~ N(1, 4), residual = 1
@@ -205,7 +205,7 @@ def test_ar_gaussian_log_likelihoods_shortest_valid_sequence():
     )
 
     log_likelihoods = emissions.log_likelihoods(
-        ARDataset.from_array(observations, emissions.num_lags)
+        ARDataset.from_array(observations, emissions.num_lags).weighted_observations()
     )
 
     # history = (y1, y0) = (2, 1)
@@ -255,8 +255,8 @@ def test_ar_gaussian_fit_recovers_known_ar2_parameters():
     )
 
     fitted = emissions.fit_params(
-        ARDataset.from_array(observations, emissions.num_lags),
         posterior,
+        ARDataset.from_array(observations, emissions.num_lags).weighted_observations(),
     )
 
     expected_coefficients = jnp.array(
@@ -406,11 +406,14 @@ def test_ar_gaussian_methods_are_jittable():
     )
 
     log_likelihoods_jit = jax.jit(
-        lambda emissions, data: emissions.log_likelihoods(data)
+        lambda emissions, data: emissions.log_likelihoods(data.weighted_observations())
     )
 
     fit_params_jit = jax.jit(
-        lambda emissions, data, posterior: emissions.fit_params(data, posterior)
+        lambda emissions, data, posterior: emissions.fit_params(
+            posterior,
+            data.weighted_observations(),
+        )
     )
 
     sample_jit = jax.jit(
@@ -434,7 +437,7 @@ def test_ar_gaussian_methods_are_jittable():
             emissions,
             data,
         ),
-        emissions.log_likelihoods(data),
+        emissions.log_likelihoods(data.weighted_observations()),
         atol=ATOL,
     )
 
@@ -445,8 +448,8 @@ def test_ar_gaussian_methods_are_jittable():
     )
 
     fitted = emissions.fit_params(
-        data,
         posterior,
+        data.weighted_observations(),
     )
 
     for actual, expected in zip(

@@ -10,7 +10,6 @@ from jax import numpy as jnp
 from xxm.core import batch
 from xxm.core.affine import Affine
 from xxm.core.chains.gaussian import (
-    GaussianChainMarginals,
     GaussianPotential,
 )
 from xxm.core.data import Sequences, WeightedObservations
@@ -50,8 +49,8 @@ class Emissions(typing.Protocol):
 
     def fit_params(
         self,
-        observations: WeightedObservations,
         posterior: ContinuousPosterior,
+        observations: WeightedObservations,
     ) -> typing.Self:
         """Fit shared emission parameters across independent sequences."""
         ...
@@ -67,7 +66,7 @@ class Emissions(typing.Protocol):
     def expected_log_likelihood(
         self,
         observations: WeightedObservations,
-        posterior: GaussianChainMarginals,
+        posterior: ContinuousPosterior,
     ) -> jax.Array:
         r"""Evaluate E_q[log p(y|x)] under Gaussian marginals."""
         ...
@@ -120,14 +119,6 @@ class LaplaceEmissions(Emissions, typing.Protocol):
         latents: jax.Array,
     ) -> GaussianPotential:
         r"""Construct a local Gaussian approximation to $\log p(y\mid x)$ at `latents`."""
-        ...
-
-    def expected_log_likelihood(
-        self,
-        observations: WeightedObservations,
-        posterior: GaussianChainMarginals,
-    ) -> jax.Array:
-        r"""Evaluate $\mathbb{E}_{q(x)}[\log p(y\mid x)]$ under Gaussian marginals."""
         ...
 
 
@@ -306,8 +297,8 @@ class GaussianEmissions(typing.NamedTuple):
 
     def fit_params(
         self,
-        observations: WeightedObservations,
         posterior: ContinuousPosterior,
+        observations: WeightedObservations,
         ridge=gaussian_fit.DEFAULT_RIDGE,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
     ) -> typing.Self:
@@ -576,8 +567,8 @@ class PoissonEmissions(typing.NamedTuple):
 
     def fit_params(
         self,
-        observations: WeightedObservations,
         posterior: ContinuousPosterior,
+        observations: WeightedObservations,
         ridge=poisson_fit.DEFAULT_RIDGE,
     ) -> typing.Self:
         """

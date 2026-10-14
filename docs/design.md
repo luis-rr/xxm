@@ -65,6 +65,18 @@ Inference should orchestrate those components rather than duplicate their genera
 
 The same model components should be used for simulation, inference, and learning whenever the mathematics permits it.
 
+
+### Potential-based inference
+
+Inference in `xxm` is organized around **explicit potential construction**.
+
+
+A potential is a nonnegative function of one or more latent variables that assigns an unnormalized probability weight to their configurations, representing a factor of the model's joint distribution. Potential objects represent the underlying statistical factors independently of the inference algorithm, allowing the same factors to be used for posterior updates and expected-log-potential calculations in objectives such as the ELBO. 
+
+Reusable model components own the conversion of their distributions into potentials, including component-specific time alignment, validity masking, and expansion over replicated batch dimensions. Model-family inference code orchestrates these components: it establishes Cartesian model–data batches, collects latent and observation potentials, assembles the appropriate inference chains, and computes posterior quantities.
+
+Operations depending on a variational posterior, such as mixing state-conditioned or gated potentials, remain in inference rather than in the generative components. This separation keeps mathematical details local to the components that define them while making model-family inference code concise, inspectable, and consistent across families.
+
 ### Batch semantics
 
 Reusable mathematical objects in `core` may support arbitrary leading batch dimensions representing independent copies of the same object.

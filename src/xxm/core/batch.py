@@ -1,5 +1,6 @@
 """Structural batch helpers for batch-aligned arrays and PyTrees."""
 
+import functools
 import itertools
 import math
 import operator
@@ -46,6 +47,12 @@ class VariableBatchable(Batchable, typing.Protocol):
     ) -> typing.Self:
         """Relabel variable coordinates."""
         ...
+
+    def broadcast(
+        self,
+        shape: tuple[int, ...],
+        axis: int = 0,
+    ) -> typing.Self: ...
 
 
 _BatchableT = typing.TypeVar('_BatchableT', bound=Batchable)
@@ -461,3 +468,71 @@ def weighted_sum(
         values * expand_trailing(weights, values.ndim),
         axis=axis,
     )
+
+
+def where(
+    condition: jax.Array,
+    true: _BatchableT,
+    false: _BatchableT,
+) -> _BatchableT:
+    """Select PyTree leaves per batch element, preserving intrinsic dimensions."""
+    require_same_shape(
+        condition.shape,
+        true.batch_shape,
+        false.batch_shape,
+    )
+
+    def select(a: jax.Array, b: jax.Array) -> jax.Array:
+        if a.shape != b.shape:
+            raise ValueError(
+                f'corresponding leaves must have equal shapes; '
+                f'got {a.shape} and {b.shape}'
+            )
+
+        return jnp.where(
+            expand_trailing(condition, a.ndim),
+            a,
+            b,
+        )
+
+    return typing.cast(
+        _BatchableT,
+        jax.tree.map(select, true, false),
+    )
+
+
+@jax.tree_util.register_static
+class Partition(typing.NamedTuple):
+    """Sizes of consecutive segments along a batch axis."""
+
+    sizes: tuple[int, ...]
+
+    @property
+    def total(self) -> int:
+        return sum(self.sizes)
+
+    def split(
+        self,
+        tree: _TreeT,
+        *,
+        axis: int,
+    ) -> tuple[_TreeT, ...]:
+        boundaries = (0, *itertools.accumulate(self.sizes))
+
+        return tuple(
+            jax.tree.map(
+                functools.partial(
+                    jax.lax.slice_in_dim,
+                    start_index=start,
+                    limit_index=stop,
+                    axis=axis,
+                ),
+                tree,
+            )
+            for start, stop in itertools.pairwise(boundaries)
+        )
+
+    def get_slice(self, index: int) -> slice:
+        index = range(len(self.sizes))[index]
+        start = sum(self.sizes[:index])
+        return slice(start, start + self.sizes[index])

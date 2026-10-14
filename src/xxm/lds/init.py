@@ -8,7 +8,7 @@ from jax import numpy as jnp
 
 from xxm.core.affine import Affine
 from xxm.core.data import Dataset, DatasetCollection, WeightedObservations
-from xxm.core.emissions.collection import EmissionsCollection
+from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
 from xxm.core.optim import gaussian as gaussian_fit
@@ -270,7 +270,7 @@ def init_gaussian_via_pca(
             ridge=ridge,
             covariance_floor=covariance_floor,
         ),
-        emissions=EmissionsCollection(
+        emissions=ContinuousEmissionsCollection(
             (
                 _init_gaussian_emissions(
                     latents,
@@ -317,7 +317,7 @@ def init_poisson_via_pca(
             ridge=ridge,
             covariance_floor=covariance_floor,
         ),
-        emissions=EmissionsCollection(
+        emissions=ContinuousEmissionsCollection(
             (
                 _init_poisson_emissions(
                     latents,

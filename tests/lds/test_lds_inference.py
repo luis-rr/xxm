@@ -4,10 +4,11 @@ import pytest
 from jax import numpy as jnp
 
 from xxm.core.affine import Affine
+from xxm.core.chains.gaussian import GaussianChain
 from xxm.core.data import Dataset, DatasetCollection
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
-from xxm.core.emissions.collection import EmissionsCollection
+from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
 from xxm.core.lengths import Lengths
@@ -18,9 +19,9 @@ from xxm.core.optim.laplace import (
 from xxm.core.optim.newton import NewtonSearch, OptimParams
 from xxm.lds.core import Model
 from xxm.lds.inference import (
+    compute_latent_potentials,
     infer_exact,
     infer_laplace,
-    to_chain,
 )
 
 from .lds_helpers import make_model, make_observations
@@ -37,7 +38,7 @@ def make_scalar_poisson_model() -> Model[PoissonEmissions]:
                 covariance=jnp.eye(1),
             ),
         ),
-        emissions=EmissionsCollection(
+        emissions=ContinuousEmissionsCollection(
             (
                 PoissonEmissions(
                     dist=LinearPoisson(
@@ -116,7 +117,7 @@ def test_hidden_timesteps_keep_known_inputs_and_padding_excludes_transitions():
             bias=jnp.zeros(1),
             covariance=jnp.eye(1),
         ),
-        emissions=EmissionsCollection(
+        emissions=ContinuousEmissionsCollection(
             (
                 GaussianEmissions(
                     LinearGaussian(Affine(jnp.eye(1), jnp.zeros(1)), jnp.eye(1))
@@ -160,7 +161,9 @@ def test_laplace_newton_steps_do_not_decrease_objective():
     data = Dataset.from_array(observations)
 
     laplace_model = _NewtonSearchModel(
-        latent_chain=to_chain(model=model, data=data),
+        latent_chain=GaussianChain.from_potentials(
+            compute_latent_potentials(model, data.inputs)
+        ),
         emissions=model.emissions.get(),
         observations=data.weighted_observations(),
     )
