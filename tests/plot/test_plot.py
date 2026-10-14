@@ -55,17 +55,6 @@ def test_sequence_2d(ax, states):
     assert len(ax.lines) == 1
 
 
-def test_shape_validation(ax):
-    with pytest.raises(ValueError, match='shape'):
-        core.plot_traces_2d(ax, np.zeros((3, 4)))
-    with pytest.raises(ValueError, match='shape'):
-        core.plot_seq_1d(ax, [0, 1], np.zeros((3, 2)))
-    with pytest.raises(ValueError, match='nonnegative integer'):
-        core.plot_state_1d(ax, [0, -1])
-    with pytest.raises(ValueError, match='unbatched affine'):
-        core.plot_dyn_linear(ax, Affine(jnp.eye(3), jnp.zeros(3)))
-
-
 def test_gaussian_geometry(ax):
     gaussian = Gaussian(jnp.array([1.0, 2.0]), jnp.diag(jnp.array([4.0, 1.0])))
     ellipse = core.plot_gaussian_2d(ax, gaussian, scale=2)

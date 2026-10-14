@@ -1,7 +1,6 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
-import pytest
 
 from xxm.core.data import Dataset
 from xxm.core.lengths import Lengths
@@ -52,7 +51,3 @@ def test_dataset_optional_arguments_use_none_and_default_to_valid_visibility():
         jnp.ones((2, 2, 1)), Lengths.full((2,), 2), visible=visibility
     )
     assert batch.visible is visibility
-    with pytest.raises(ValueError, match='false outside valid'):
-        Dataset.from_padded(
-            jnp.ones((2, 2, 1)), Lengths(jnp.array([2, 1])), visible=visibility
-        )

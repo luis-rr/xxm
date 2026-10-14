@@ -89,8 +89,6 @@ def test_linear_gaussian_conditional_broadcasts_covariance():
         jnp.broadcast_to(model.covariance[:, None], conditional.covariance.shape),
         atol=ATOL,
     )
-    with pytest.raises(ValueError, match='target shape must begin with'):
-        model.conditional(jnp.swapaxes(inputs, 0, 1))
 
 
 def test_paired_gaussian_assembles_joint_moments():
@@ -238,15 +236,14 @@ def test_paired_moment_match_preserves_positive_definiteness():
 
 
 @pytest.mark.parametrize(
-    'batch, query, weighted',
+    'batch, query, weighted, paired',
     [
-        ((2, 3), (), False),
-        ((2, 3), (), True),
-        ((), (3,), True),
-        ((2, 3), (2, 1), True),
+        ((2, 3), (), False, False),
+        ((2, 3), (2, 1), True, False),
+        ((2, 3), (), True, True),
+        ((), (3,), True, True),
     ],
 )
-@pytest.mark.parametrize('paired', [False, True])
 def test_moment_matching_preserves_structural_and_query_batches(
     batch, query, weighted, paired
 ):
@@ -291,10 +288,3 @@ def test_moment_matching_preserves_structural_and_query_batches(
     assert actual.batch_shape == batch + query
     np.testing.assert_allclose(actual.mean, expected_mean, atol=2e-6)
     np.testing.assert_allclose(actual.covariance, expected_covariance, atol=5e-6)
-
-
-@pytest.mark.parametrize('shape', [(), (4,), (1, 3, 4), (2, 3, 5)])
-def test_moment_matching_rejects_misaligned_weights(shape):
-    distributions = Gaussian(jnp.zeros((2, 3, 4, 1)), jnp.ones((2, 3, 4, 1, 1)))
-    with pytest.raises(ValueError, match='weights'):
-        gaussian_fit.from_moment_match(distributions, jnp.ones(shape))

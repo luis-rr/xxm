@@ -9,17 +9,10 @@ from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
-from xxm.core.inference.chains.gaussian import GaussianChain
-from xxm.core.inference.laplace import (
-    _NewtonSearchModel,
-    _NewtonSearchParams,
-)
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
 from xxm.core.lengths import Lengths
-from xxm.core.optim.newton import NewtonSearch, OptimParams
 from xxm.lds.core import Model
 from xxm.lds.inference import (
-    compute_latent_potentials,
     infer_exact,
     infer_laplace,
 )
@@ -154,41 +147,13 @@ def test_laplace_recovers_known_scalar_map():
     np.testing.assert_allclose(posterior.means, [[[0.0]]], atol=1e-6)
 
 
-def test_laplace_newton_steps_do_not_decrease_objective():
+def test_laplace_mode_does_not_decrease_log_joint():
     model = make_scalar_poisson_model()
-    observations = jnp.array([[3.0]])
+    data = DatasetCollection.from_datasets((Dataset.from_array(jnp.array([[3.0]])),))
+    initial_latents = model.compute_prior_means(inputs=data.pool_inputs()).values
+    initial_log_joint = model.log_joint(data, initial_latents)
+    posterior = infer_laplace(model, data, initial_latents=initial_latents).posterior
+    final_log_joint = model.log_joint(data, posterior.means)
 
-    data = Dataset.from_array(observations)
-
-    laplace_model = _NewtonSearchModel(
-        latent_chain=GaussianChain.from_potentials(
-            compute_latent_potentials(model, data.inputs)
-        ),
-        emissions=model.emissions.get(),
-        observations=data.weighted_observations(),
-    )
-
-    initial_params = _NewtonSearchParams(
-        latents=model.compute_prior_means(
-            inputs=data.inputs,
-        ).get(squeeze=False),
-    )
-
-    search = NewtonSearch[_NewtonSearchParams](
-        model=laplace_model,
-        optim_params=OptimParams(
-            max_line_search_iters=10,
-            tol=1e-6,
-            max_iter=100,
-        ),
-    )
-
-    state = search.initial_state(params=initial_params)
-
-    objectives = [state.objective]
-
-    for _ in range(5):
-        state = search._newton_step(state)
-        objectives.append(state.objective)
-
-    assert np.all(np.diff(np.asarray(objectives), axis=0) >= 0.0)
+    # The Laplace mode optimizes the joint density; this is not an ELBO claim.
+    assert bool(jnp.all(final_log_joint >= initial_log_joint - 1e-6))

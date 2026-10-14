@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from xxm.core.dists.discrete import DiscreteChainMarginals
-from xxm.core.inference.chains.discrete import DiscreteChain, _forward_backward
+from xxm.core.inference.chains.discrete import DiscreteChain
 from xxm.core.lengths import Lengths
 
 jax.config.update('jax_enable_x64', True)
@@ -160,20 +160,7 @@ def test_normalization_and_finiteness_invariants() -> None:
         lengths=Lengths(jnp.asarray(state_log_potentials.shape[-2])),
     )
 
-    messages = _forward_backward(chain)
-
-    np.testing.assert_allclose(
-        np.asarray(messages.forward_messages.sum(axis=1)),
-        np.ones(4),
-        atol=ATOL,
-    )
-
-    assert np.isfinite(np.asarray(messages.forward_messages)).all()
-    assert np.isfinite(np.asarray(messages.backward_messages)).all()
-    assert np.isfinite(np.asarray(messages.log_scaling_factors)).all()
-    assert (np.asarray(messages.forward_messages) >= 0.0).all()
-
-    marginals, log_normalizer = messages.compute_marginals(chain)
+    marginals, log_normalizer = chain.forward_backward()
 
     np.testing.assert_allclose(
         np.asarray(marginals.state_probs.sum(axis=1)),
@@ -235,7 +222,7 @@ def test_marginal_consistency_between_state_and_pair_posteriors() -> None:
         )
 
 
-def test_log_normalizer_matches_scaling_and_exact_enumeration() -> None:
+def test_large_log_potentials_match_exact_enumeration() -> None:
     initial_probs = jnp.array([0.5, 0.5])
     transition_probs = _stack_static_transition(
         jnp.array(
@@ -261,7 +248,6 @@ def test_log_normalizer_matches_scaling_and_exact_enumeration() -> None:
         lengths=Lengths(jnp.asarray(state_log_potentials.shape[-2])),
     )
 
-    messages = _forward_backward(chain)
     result, log_normalizer = chain.forward_backward()
     (
         exact_state_posterior_probs,
@@ -273,12 +259,6 @@ def test_log_normalizer_matches_scaling_and_exact_enumeration() -> None:
         state_log_potentials=np.asarray(chain.state_log_potentials),
     )
 
-    np.testing.assert_allclose(
-        float(log_normalizer),
-        float(np.sum(messages.log_scaling_factors)),
-        atol=ATOL,
-        rtol=RTOL,
-    )
     np.testing.assert_allclose(
         float(log_normalizer),
         exact_log_marginal_likelihood,
@@ -545,87 +525,17 @@ def test_forward_backward_supports_batching_with_vmap() -> None:
     assert batched_result.pair_probs.shape == (2, 2, 2, 2)
     assert batched_log_normalizer.shape == (2,)
 
-
-def test_vmapped_forward_backward_is_jit_compatible() -> None:
-    initial_probs = jnp.array(
-        [
-            [0.6, 0.4],
-            [0.3, 0.7],
-        ]
-    )
-
-    transition_probs = jnp.array(
-        [
-            [
-                [[0.8, 0.2], [0.3, 0.7]],
-                [[0.6, 0.4], [0.1, 0.9]],
-            ],
-            [
-                [[0.5, 0.5], [0.2, 0.8]],
-                [[0.9, 0.1], [0.4, 0.6]],
-            ],
-        ]
-    )
-
-    state_log_potentials = jnp.log(
-        jnp.array(
-            [
-                [
-                    [0.9, 0.1],
-                    [0.4, 0.6],
-                    [0.7, 0.3],
-                ],
-                [
-                    [0.2, 0.8],
-                    [0.6, 0.4],
-                    [0.3, 0.7],
-                ],
-            ]
-        )
-    )
-
-    def run(
-        initial_probs: jax.Array,
-        transition_probs: jax.Array,
-        state_log_potentials: jax.Array,
-    ) -> tuple[DiscreteChainMarginals, jax.Array]:
-        return DiscreteChain(
-            initial_probs=initial_probs,
-            transition_probs=transition_probs,
-            state_log_potentials=state_log_potentials,
-            lengths=Lengths(jnp.asarray(state_log_potentials.shape[-2])),
-        ).forward_backward()
-
-    batched_run = jax.vmap(run)
-
-    eager, eager_log_normalizer = batched_run(
-        initial_probs,
-        transition_probs,
-        state_log_potentials,
-    )
-    jitted, jitted_log_normalizer = jax.jit(batched_run)(
-        initial_probs,
-        transition_probs,
-        state_log_potentials,
-    )
-
-    np.testing.assert_allclose(
-        jitted.state_probs,
-        eager.state_probs,
-        atol=ATOL,
-        rtol=RTOL,
+    jitted, jitted_log_normalizer = jax.jit(jax.vmap(run))(
+        initial_probs, transition_probs, state_log_potentials
     )
     np.testing.assert_allclose(
-        jitted.pair_probs,
-        eager.pair_probs,
-        atol=ATOL,
-        rtol=RTOL,
+        jitted.state_probs, batched_result.state_probs, atol=ATOL, rtol=RTOL
     )
     np.testing.assert_allclose(
-        jitted_log_normalizer,
-        eager_log_normalizer,
-        atol=ATOL,
-        rtol=RTOL,
+        jitted.pair_probs, batched_result.pair_probs, atol=ATOL, rtol=RTOL
+    )
+    np.testing.assert_allclose(
+        jitted_log_normalizer, batched_log_normalizer, atol=ATOL, rtol=RTOL
     )
 
 

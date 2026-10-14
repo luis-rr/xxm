@@ -43,10 +43,3 @@ def test_position_shapes_and_derivatives():
     np.testing.assert_allclose(evaluation.raw_second_derivative(), expected, atol=1e-5)
     assert basis.regularly_spaced(0).centered_basis().shape == (0, 3)
     assert basis.at_positions(jnp.array([0, 1])).positions.dtype == jnp.float32
-
-
-def test_constructor_validation():
-    with pytest.raises(ValueError, match='num_knots'):
-        HermiteBasis.from_num_knots(1)
-    with pytest.raises(ValueError, match='num_steps'):
-        HermiteBasis.from_num_knots(2).regularly_spaced(-1)

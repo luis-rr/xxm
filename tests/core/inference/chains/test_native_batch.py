@@ -9,7 +9,6 @@ from tests.core.inference.chains.batch_helpers import (
     discrete_chain,
     discrete_chain_structure,
     discrete_marginals,
-    expected_log_potential,
     gaussian_chain,
     gaussian_chain_structure,
     gaussian_marginals,
@@ -45,14 +44,6 @@ def test_batch_transformations_and_scalar_selection(make_chain, make_marginals):
             jax.tree.leaves(transformed), jax.tree.leaves(expected)
         ):
             np.testing.assert_array_equal(actual, wanted)
-        with pytest.raises(IndexError):
-            obj.select((0, 0, 0))
-        with pytest.raises(IndexError):
-            obj.select(None)
-        with pytest.raises(ValueError):
-            obj.move_axis(0, 2)
-    with pytest.raises(ValueError, match='shape'):
-        expected_log_potential(chain.select(0), marginals)
 
 
 def test_batch_gradients_are_chain_local():

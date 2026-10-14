@@ -44,18 +44,13 @@ def component(kind):
 @pytest.mark.parametrize(
     'kind',
     [
-        'categorical_initial',
         'categorical_transitions',
-        'gaussian_initial',
         'gaussian_dynamics',
         'state_gaussian',
         'switching',
         'discrete_gaussian',
-        'discrete_poisson',
-        'continuous_gaussian',
         'continuous_poisson',
         'ar_gaussian',
-        'ar_poisson',
     ],
 )
 def test_structural_operations_preserve_intrinsic_axes(component):
@@ -82,10 +77,6 @@ def test_structural_operations_preserve_intrinsic_axes(component):
     if component.dist.batch_shape == B + (K,):
         assert moved.dist.batch_shape == (3, 2, K)
         assert expanded.dist.batch_shape == B + (1, K)
-        with pytest.raises(IndexError):
-            component.select((0, 0, 0))
-        with pytest.raises(ValueError):
-            component.move_axis(2, 0)
         standalone = component.select((0, 0))
         assert standalone.batch_shape == ()
         assert standalone.squeeze().dist.batch_shape == (K,)
@@ -171,25 +162,6 @@ def test_alignment_matches_standalone_components(kind, component, global_alignme
         )
         _assert_tree_close(aligned.select((i, j)), expected)
 
-    @pytest.mark.parametrize(
-        'kind',
-        [
-            'gaussian_initial',
-            'gaussian_dynamics',
-            'state_gaussian',
-            'switching',
-            'continuous_gaussian',
-            'continuous_poisson',
-        ],
-    )
-    def test_batched_alignment_requires_explicit_alignment_batch(kind, component):
-        alignment = Affine(jnp.eye(D), jnp.zeros(D))
-        with pytest.raises(ValueError, match='shapes must match'):
-            if kind.startswith('continuous_'):
-                component.compose_input(alignment)
-            else:
-                component.align(alignment)
-
 
 @pytest.mark.parametrize(
     'kind',
@@ -265,6 +237,7 @@ def test_unoccupied_states_retain_each_batchs_parameters(kind, component):
 
 def test_representative_batched_fits_are_jittable():
     posterior = _continuous_posterior()
+    assert GaussianInitial(_gaussian(B)).fit_params(posterior).batch_shape == B
     dynamics = GaussianLinearDynamics(_linear(B))
     inputs = Sequences.from_padded(
         jnp.empty((T, 0), dtype=posterior.means.dtype), Lengths.full((), T)

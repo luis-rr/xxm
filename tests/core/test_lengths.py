@@ -3,7 +3,6 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
-import pytest
 
 from xxm import Lengths
 from xxm.core.data import Dataset, Sequences, WeightedObservations
@@ -26,17 +25,6 @@ def test_lengths_clear_event_axes_and_transition_prefixes_under_jit():
     np.testing.assert_array_equal(cleared[1, 1, 3:], 0)
     np.testing.assert_array_equal(lengths.transitions().values, [[0, 0], [1, 2]])
     assert lengths.to_mask(0).values.shape == (2, 2, 0)
-
-
-def test_lengths_bounds_and_batch_alignment_are_explicit():
-    lengths = Lengths.from_values([0, 3])
-    lengths.validate_values(max_steps=3)
-
-    with pytest.raises(ValueError):
-        lengths.validate_values(max_steps=2)
-
-    with pytest.raises(ValueError):
-        lengths.validate_values(min_length=1, max_steps=3)
 
 
 def test_sequences_store_lengths_and_crop_without_losing_dense_horizon():

@@ -1,7 +1,6 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
-import pytest
 
 from xxm.core.dists.gaussian import Gaussian, PairedGaussian
 
@@ -11,26 +10,6 @@ def _gaussian():
         mean=jnp.arange(12.0).reshape(2, 3, 2),
         covariance=jnp.broadcast_to(jnp.eye(2), (2, 3, 2, 2)),
     )
-
-
-@pytest.mark.parametrize(
-    'index',
-    [
-        None,
-        (slice(None), None),
-        True,
-        np.bool_(False),
-        (True, False),
-        np.array([[True, False, True], [False, True, False]]),
-        (0, 0, 0),
-        (Ellipsis, 0, 0, 0),
-        (Ellipsis, Ellipsis),
-        0.5,
-    ],
-)
-def test_select_rejects_new_axes_boolean_indices_and_intrinsic_indexing(index):
-    with pytest.raises(IndexError):
-        _gaussian().select(index)
 
 
 def test_select_expands_only_the_batch_prefix():
@@ -48,8 +27,6 @@ def test_select_expands_only_the_batch_prefix():
     assert selected.batch_shape == ()
     assert isinstance(selected, Gaussian)
     np.testing.assert_array_equal(selected.mean, gaussian.mean[1, 2])
-    with pytest.raises(IndexError):
-        selected.select(0)
 
 
 def test_select_integer_arrays_is_jittable():

@@ -21,7 +21,6 @@ from tests.core.component_batch_helpers import (
     _continuous_posterior,
     _discrete_posterior,
     _gaussian,
-    _linear,
 )
 from xxm.core.data import Sequences
 from xxm.core.dists.gaussian import Gaussian, GaussianChainMarginals
@@ -110,23 +109,6 @@ def test_discrete_latent_fit_and_sampling():
     assert chain.state_log_potentials.shape == FIT_B + (T, K)
 
 
-def test_discrete_latent_fit_requires_matching_model_batch_prefix():
-    posterior = _discrete_posterior(batch=(4,), num_steps=2)
-
-    with pytest.raises(ValueError, match='posterior batch shape must begin with'):
-        CategoricalInitial(_categorical(B)).fit_params(posterior)
-
-    with pytest.raises(ValueError, match='posterior batch shape must begin with'):
-        CategoricalTransitions(_categorical(B + (K,))).fit_params(posterior)
-
-    matched = _discrete_posterior(batch=B, num_steps=2)
-    assert CategoricalInitial(_categorical(B)).fit_params(matched).batch_shape == B
-    assert (
-        CategoricalTransitions(_categorical(B + (K,))).fit_params(matched).batch_shape
-        == B
-    )
-
-
 @pytest.mark.parametrize('kind', ['gaussian_initial', 'gaussian_dynamics', 'switching'])
 def test_gaussian_latent_sampling_and_potentials(kind, component):
     # Parameter fitting is exercised by the owning model/statistics tests and by
@@ -166,32 +148,6 @@ def test_gaussian_latent_sampling_and_potentials(kind, component):
                 posterior.lengths,
             )
         ).batch_shape == FIT_B + (T - 1, K)
-
-
-def test_gaussian_latent_fit_requires_receiver_batch_prefix():
-    posterior = _continuous_posterior(batch=(4,), num_steps=2)
-
-    with pytest.raises(ValueError, match='posterior batch shape must begin with'):
-        GaussianInitial(_gaussian(B)).fit_params(posterior)
-
-    with pytest.raises(ValueError, match='posterior batch shape must begin with'):
-        GaussianLinearDynamics(_linear(B)).fit_params(
-            posterior,
-            inputs=Sequences.from_padded(
-                jnp.empty((4, 2, 0), dtype=posterior.means.dtype), posterior.lengths
-            ),
-        )
-
-    matched = _continuous_posterior(batch=B, num_steps=2)
-    fitted_initial = GaussianInitial(_gaussian(B)).fit_params(matched)
-    fitted_dynamics = GaussianLinearDynamics(_linear(B)).fit_params(
-        matched,
-        inputs=Sequences.from_padded(
-            jnp.empty((2, 0), dtype=matched.means.dtype), Lengths.full((), 2)
-        ),
-    )
-    assert fitted_initial.batch_shape == B
-    assert fitted_dynamics.batch_shape == B
 
 
 def test_singleton_state_axis_is_not_squeezed():

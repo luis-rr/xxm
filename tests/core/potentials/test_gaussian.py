@@ -217,31 +217,9 @@ def test_gaussian_potential_from_moments_batched():
     assert result.information_vectors.shape == (2, 2, 2)
     assert result.log_constant.shape == (2, 2)
 
-
-def test_gaussian_potential_from_moments_batched_jit():
-    means = jnp.array(
-        [
-            [1.0, -0.5],
-            [0.2, 0.7],
-        ]
-    )
-    covariances = jnp.array(
-        [
-            [[2.0, 0.3], [0.3, 1.5]],
-            [[1.2, 0.1], [0.1, 0.9]],
-        ]
-    )
-
-    eager = GaussianPotential.from_moments(Gaussian(means, covariances))
-    jitted = jax.jit(
-        lambda mean, covariance: GaussianPotential.from_moments(
-            Gaussian(mean, covariance)
-        )
-    )(means, covariances)
-
-    np.testing.assert_allclose(jitted.precision_blocks, eager.precision_blocks)
-    np.testing.assert_allclose(jitted.information_vectors, eager.information_vectors)
-    np.testing.assert_allclose(jitted.log_constant, eager.log_constant)
+    jitted = jax.jit(GaussianPotential.from_moments)(Gaussian(means, covariances))
+    for eager_field, jitted_field in zip(result, jitted, strict=True):
+        np.testing.assert_allclose(jitted_field, eager_field)
 
 
 def test_gaussian_pair_potential_from_linear_conditional_batched():
@@ -304,39 +282,8 @@ def test_gaussian_pair_potential_from_linear_conditional_batched():
     assert result.left_information.shape == (3, 2)
     assert result.log_constant.shape == (3,)
 
-
-def test_gaussian_pair_potential_from_linear_conditional_batched_jit():
-    matrices = jnp.array(
-        [
-            [[0.8, 0.1], [-0.2, 0.9]],
-            [[1.0, -0.1], [0.3, 0.7]],
-        ]
+    jitted = jax.jit(GaussianPairPotential.from_linear_conditional)(
+        LinearGaussian(Affine(matrices, biases), covariances)
     )
-    biases = jnp.array(
-        [
-            [0.5, -0.3],
-            [-0.2, 0.4],
-        ]
-    )
-    covariances = jnp.array(
-        [
-            [[1.5, 0.2], [0.2, 1.0]],
-            [[1.2, -0.1], [-0.1, 0.9]],
-        ]
-    )
-
-    eager = GaussianPairPotential.from_linear_conditional(
-        LinearGaussian(
-            affine=Affine(coefficients=matrices, bias=biases), covariance=covariances
-        )
-    )
-    jitted = jax.jit(
-        lambda matrix, bias, covariance: GaussianPairPotential.from_linear_conditional(
-            LinearGaussian(
-                affine=Affine(coefficients=matrix, bias=bias), covariance=covariance
-            )
-        )
-    )(matrices, biases, covariances)
-
-    for eager_field, jitted_field in zip(eager, jitted, strict=True):
+    for eager_field, jitted_field in zip(result, jitted, strict=True):
         np.testing.assert_allclose(jitted_field, eager_field, atol=ATOL, rtol=RTOL)

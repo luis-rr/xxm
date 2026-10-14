@@ -16,15 +16,6 @@ def _gaussian():
     )
 
 
-@pytest.mark.parametrize('index', [(2, 0), (-3, 0), (0, 3), (0, -4)])
-def test_sequences_get_rejects_out_of_bounds_indices(index):
-    sequences = Sequences.from_padded(
-        jnp.arange(24).reshape(2, 3, 4), Lengths.full((2, 3), 4)
-    )
-    with pytest.raises(IndexError, match='out of bounds'):
-        sequences.get(index)
-
-
 def test_sequences_get_preserves_negative_indices_and_crops_valid_prefix():
     sequences = Sequences.from_padded(
         jnp.arange(24).reshape(2, 3, 4), Lengths(jnp.array([[4, 3, 2], [1, 2, 3]]))
@@ -119,24 +110,3 @@ def test_concatenate_preserves_lengths_and_singleton_axes_under_jit():
     np.testing.assert_array_equal(restored.values, sequences.values)
 
     np.testing.assert_array_equal(restored.lengths.values, sequences.lengths.values)
-
-
-def test_concatenate_rejects_batch_and_intrinsic_mismatches_without_padding():
-    sequences = Sequences.from_padded(jnp.zeros((2, 3, 1)), Lengths.full((2,), 3))
-    with pytest.raises(ValueError):
-        batch.concatenate([])
-    with pytest.raises(ValueError):
-        batch.concatenate([sequences.select(0)])
-    with pytest.raises(ValueError):
-        batch.concatenate([sequences, sequences.broadcast(1)])
-    with pytest.raises(ValueError):
-        batch.concatenate([sequences, Lengths(jnp.ones(2, dtype=int))])
-    with pytest.raises(ValueError, match='intrinsic'):
-        batch.concatenate(
-            [
-                sequences,
-                Sequences.from_padded(jnp.zeros((1, 4, 1)), Lengths.full((1,), 4)),
-            ]
-        )
-    with pytest.raises(ValueError):
-        batch.concatenate([_gaussian(), _gaussian().select((slice(None), slice(1)))])

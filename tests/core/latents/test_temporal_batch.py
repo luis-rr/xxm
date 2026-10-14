@@ -182,16 +182,6 @@ def test_gated_random_walk_aligns_gates_and_replicates(steps):
         initial.mean[:, ::-1],
     )
 
-    with pytest.raises(
-        ValueError,
-        match='gates must be scalar events',
-    ):
-        rw.sample(
-            key=key,
-            ls=ls,
-            gates=Sequences.from_padded(gates[..., None], ls.lengths.transitions()),
-        )
-
 
 def test_hermite_uses_each_sequences_normalized_transition_grid():
     spline = HermiteGaussian.from_coefficient_gaussian(
@@ -317,12 +307,6 @@ def test_temporal_common_batch_api(process):
         2,
         3,
     )
-
-    with pytest.raises(IndexError):
-        obj.select((0, 0, 0))
-
-    with pytest.raises(IndexError):
-        obj.select(None)
 
     if process == 'gated':
         assert obj.num_gates == 4

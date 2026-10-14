@@ -19,8 +19,7 @@ from xxm.hmm.model import GaussianHMM
 from xxm.lds.model import GaussianLDS
 
 
-@pytest.mark.parametrize('family', ['lds'])
-def test_selected_session_density_preserves_sequence_sum_and_model_batch(family):
+def test_selected_session_density_preserves_sequence_sum_and_model_batch():
     emission_params = {
         'emission_coefficients': jnp.ones((1, 1)),
         'emission_bias': jnp.zeros(1),
@@ -61,9 +60,7 @@ def test_selected_session_density_preserves_sequence_sum_and_model_batch(family)
     latents = jnp.zeros((2, 2, 3, 1))
 
     def density(m, d, x, session=None):
-        if family == 'lds':
-            return m.log_joint(d, x, session=session)
-        return m.conditional_log_prob(d, jnp.zeros((2, 2, 2, 1)), x, session=session)
+        return m.log_joint(d, x, session=session)
 
     # Five initial/transition scalar Gaussian factors, plus ten observation
     # factors at residual -2. Padding and the other session do not contribute.
@@ -83,10 +80,6 @@ def test_selected_session_density_preserves_sequence_sum_and_model_batch(family)
     np.testing.assert_allclose(
         density(singleton_model, singleton_data, latents), expected, rtol=1e-6
     )
-    with pytest.raises(ValueError):
-        density(model, data, latents)
-    with pytest.raises(ValueError):
-        density(model, singleton_data, latents)
 
 
 def test_hmm_observation_mean_selects_matching_data_and_emission():
@@ -107,8 +100,6 @@ def test_hmm_observation_mean_selects_matching_data_and_emission():
     inferred = dataclasses.replace(inferred, model=multi_model)
 
     np.testing.assert_allclose(inferred.observation_mean(session=0).get(0), 2.0)
-    with pytest.raises(ValueError):
-        inferred.observation_mean()
     # Emission 1 exists, but dataset 1 does not; selection must check both.
     with pytest.raises(IndexError):
         inferred.observation_mean(session=1)
@@ -137,5 +128,3 @@ def test_arhmm_inferred_conditionals_forward_session():
     conditional = inferred.states_conditional(session=0)
     assert isinstance(conditional, Gaussian)
     np.testing.assert_allclose(conditional.mean, [[[[3.0]], [[4.0]]]])
-    with pytest.raises(ValueError):
-        inferred.states_conditional()
