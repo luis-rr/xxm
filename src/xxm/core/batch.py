@@ -118,6 +118,27 @@ def select(batchable: _BatchableT, index: SelT) -> _BatchableT:
     return _map_batch_leaves(batchable, lambda values: values[index])
 
 
+def get(batchable: _BatchableT, index: SelT | None = None) -> _BatchableT:
+    """Return exactly one batch item, preserving its type.
+
+    An optional selection is applied first. The resulting batch must
+    contain exactly one item, regardless of its number of dimensions.
+
+    The returned object always has batch_shape == ().
+    """
+    if index is not None:
+        validate_selection(index, batchable.batch_shape)
+        batchable = select(batchable, index)
+
+    if math.prod(batchable.batch_shape) != 1:
+        raise ValueError(
+            'get requires exactly one batch item; '
+            f'got batch_shape {batchable.batch_shape}'
+        )
+
+    return squeeze(batchable)
+
+
 def concatenate(
     batchables: typing.Sequence[_BatchableT],
     axis: int = 0,

@@ -9,7 +9,7 @@ from xxm.arhmm.emissions import AREmissionsCollection
 from xxm.arhmm.model import GaussianARHMM
 from xxm.core.affine import Affine
 from xxm.core.data import Dataset, DatasetCollection
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.dists.gaussian import LinearGaussian, TemporalGaussian
 from xxm.core.emissions.collection import (
     ContinuousEmissionsCollection,
     DiscreteEmissionsCollection,
@@ -126,5 +126,5 @@ def test_arhmm_inferred_conditionals_forward_session():
     inferred = dataclasses.replace(inferred, model=multi_model)
 
     conditional = inferred.states_conditional(session=0)
-    assert isinstance(conditional, Gaussian)
-    np.testing.assert_allclose(conditional.mean, [[[[3.0]], [[4.0]]]])
+    assert isinstance(conditional, TemporalGaussian)
+    np.testing.assert_allclose(conditional.dist.mean, [[[[3.0]], [[4.0]]]])

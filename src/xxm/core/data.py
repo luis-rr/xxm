@@ -413,23 +413,12 @@ class Sequences:
         *,
         squeeze: bool = True,
     ) -> jax.Array:
-        """Retrieve one unpadded `(T_i, *E)` array on the host."""
-        if index is None:
-            selected = self
-
-        else:
-            batch.validate_selection(index, self.batch_shape)
-            selected = self.select(index)
-
-        if selected.batch_shape:
-            raise ValueError('get requires selecting exactly one batch item')
+        """Retrieve one unpadded item."""
+        selected = batch.get(self, index)
 
         result = selected.values[: int(selected.lengths.values)]
 
-        if squeeze:
-            result = jnp.squeeze(result)
-
-        return result
+        return jnp.squeeze(result) if squeeze else result
 
     def items(self) -> typing.Iterator[tuple[tuple[int, ...], jax.Array]]:
         """Yield `(index, get(index))` pairs on the host in batch order.
@@ -797,6 +786,41 @@ class DatasetCollection(typing.NamedTuple):
     """
 
     datasets: tuple[Dataset, ...]
+
+    @classmethod
+    def from_array(
+        cls,
+        observations: jax.Array,
+        *,
+        inputs: jax.Array | None = None,
+        visible: jax.Array | ArbitraryMask | None = None,
+    ) -> typing.Self:
+        """Construct a single-session unbatched trajectory from `(T, D_y)` observations."""
+        data = Dataset.from_array(
+            observations,
+            inputs=inputs,
+            visible=visible,
+        )
+
+        return cls.from_datasets((data,))
+
+    @classmethod
+    def from_arrays(
+        cls,
+        observations: typing.Sequence[jax.Array],
+        *,
+        inputs: typing.Sequence[jax.Array] | None = None,
+        visible: typing.Sequence[jax.Array] | None = None,
+    ) -> typing.Self:
+        """Construct a single-session batched set of trajectories from many observations."""
+
+        data = Dataset.from_arrays(
+            observations,
+            inputs=inputs,
+            visible=visible,
+        )
+
+        return cls.from_datasets((data,))
 
     @classmethod
     def from_datasets(cls, datasets: typing.Sequence[Dataset]) -> typing.Self:

@@ -11,8 +11,8 @@ import jax.numpy as jnp
 from xxm.core.affine import Affine
 from xxm.core.data import Dataset, DatasetCollection, Sequences
 from xxm.core.dists.discrete import Categorical
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian
-from xxm.core.dists.poisson import LinearPoisson, Poisson
+from xxm.core.dists.gaussian import LinearGaussian, TemporalGaussian
+from xxm.core.dists.poisson import LinearPoisson, TemporalPoisson
 from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
@@ -148,7 +148,7 @@ class GaussianARHMM:
         data: DatasetCollection,
         *,
         session: int | None = None,
-    ) -> Gaussian:
+    ) -> TemporalGaussian:
         """
         Conditional distributions for observations following the AR history.
 
@@ -157,9 +157,19 @@ class GaussianARHMM:
         """
         dataset = data.get(session)
         prepared = ARDataset.from_dataset(dataset, self.num_lags)
-        return self._model.emissions.get(session).conditional(
+
+        conditional = self._model.emissions.get(session).conditional(
             prepared.predictors,
         )
+
+        temporal = TemporalGaussian(
+            dist=conditional,
+            lengths=dataset.lengths.shift(-self.model.num_lags),
+        )
+
+        temporal.validate()
+
+        return temporal
 
     def most_likely_states(self, posterior: Posterior) -> jax.Array:
         """Return the marginally most likely state at each modeled time point."""
@@ -179,7 +189,7 @@ class GaussianARHMM:
         return self.states_conditional(
             data,
             session=session,
-        ).mixture_mean(
+        ).dist.mixture_mean(
             posterior.state_probs,
             axis=-1,
         )
@@ -403,7 +413,7 @@ class PoissonARHMM:
         data: DatasetCollection,
         *,
         session: int | None = None,
-    ) -> Poisson:
+    ) -> TemporalPoisson:
         """
         Conditional distributions for observations following the AR history.
 
@@ -412,9 +422,18 @@ class PoissonARHMM:
         """
         dataset = data.get(session)
         prepared = ARDataset.from_dataset(dataset, self.num_lags)
-        return self._model.emissions.get(session).conditional(
+        conditional = self._model.emissions.get(session).conditional(
             prepared.predictors,
         )
+
+        temporal = TemporalPoisson(
+            dist=conditional,
+            lengths=dataset.lengths.shift(-self.model.num_lags),
+        )
+
+        temporal.validate()
+
+        return temporal
 
     def most_likely_states(self, posterior: Posterior) -> jax.Array:
         """Return the marginally most likely state at each modeled time point."""
@@ -434,7 +453,7 @@ class PoissonARHMM:
         return self.states_conditional(
             data,
             session=session,
-        ).mixture_mean(
+        ).dist.mixture_mean(
             posterior.state_probs,
             axis=-1,
         )
@@ -662,7 +681,9 @@ class Inferred(typing.Generic[ARHMMFacadeT]):
             data=self.data,
         )
 
-    def states_conditional(self, session: int | None = None) -> Poisson | Gaussian:
+    def states_conditional(
+        self, session: int | None = None
+    ) -> TemporalPoisson | TemporalGaussian:
         return self.model.states_conditional(
             self.data,
             session=session,

@@ -154,6 +154,7 @@ def plot_fit_progress(
     axs[0, 0].set(ylabel=name, title=title)
     axs[1, 0].set_ylabel('change in ' + name)
     axs[1, 0].set_yscale('symlog', linthresh=linthresh)
+    axs[1, 0].axhline(0, color='k', linewidth=0.5)
     return axs[:, 0]
 
 

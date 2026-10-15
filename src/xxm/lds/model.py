@@ -484,6 +484,15 @@ class Inferred(typing.Generic[LDSFacadeT]):
             lengths=self.data.get(session).lengths,
         )
 
+    def latent_std(self, session: int | None = None) -> Sequences:
+        """Return latent standard deviations with the source batch shape and lengths."""
+        stds = jnp.sqrt(jnp.diagonal(self.posterior.covariances, axis1=-2, axis2=-1))
+
+        return Sequences.from_padded(
+            values=stds,
+            lengths=self.data.get(session).lengths,
+        )
+
     def observation_mean(self, session: int | None = None) -> Sequences:
         """Return expected observations, including masked valid steps."""
         dataset = self.data.get(session)

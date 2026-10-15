@@ -71,7 +71,7 @@ def test_exact_posterior_matches_enumerated_paths(family, num_targets):
         atol=1e-6,
     )
     dataset = DatasetCollection.from_datasets((Dataset.from_array(observations),))
-    assert model.states_conditional(dataset).batch_shape == (1, num_targets, 2)
+    assert model.states_conditional(dataset).dist.batch_shape == (1, num_targets, 2)
 
     paths = list(itertools.product(range(2), repeat=num_targets))
     initial = np.array([0.6, 0.4])

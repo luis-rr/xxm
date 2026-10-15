@@ -8,7 +8,9 @@ import jax.scipy as jsp
 
 from xxm.core import batch
 from xxm.core.affine import Affine
+from xxm.core.data import Sequences
 from xxm.core.dists.gaussian import Gaussian
+from xxm.core.lengths import Lengths
 
 
 class Poisson(typing.NamedTuple):
@@ -243,3 +245,124 @@ class LinearPoisson(typing.NamedTuple):
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another position."""
         return batch.move_axis(self, source, destination)
+
+
+class TemporalPoisson(typing.NamedTuple):
+    """Time-indexed Poisson distributions with valid-prefix lengths.
+
+    dist.log_rates: (*B, T, *C, D)
+    lengths.values: (*B,)
+
+    *B: structural batch dimensions
+    T: time
+    *C: additional distribution batch dimensions, e.g. states
+    D: number of independent Poisson variables
+
+    Batch operations affect only *B.
+    """
+
+    dist: Poisson
+    lengths: Lengths
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        return self.lengths.batch_shape
+
+    @property
+    def time_axis(self) -> int:
+        return len(self.batch_shape)
+
+    @property
+    def max_steps(self) -> int:
+        return self.dist.batch_shape[self.time_axis]
+
+    @property
+    def variable_dim(self) -> int:
+        return self.dist.variable_dim
+
+    def validate(self) -> None:
+        trailing = batch.split_prefix(
+            self.dist.batch_shape,
+            self.batch_shape,
+            name='Poisson batch shape',
+        )
+
+        if not trailing:
+            raise ValueError('TemporalPoisson requires a time axis')
+
+        if not jnp.issubdtype(self.lengths.values.dtype, jnp.integer):
+            raise ValueError('lengths must have an integer dtype')
+
+    @property
+    def log_rates(self) -> Sequences:
+        """Log rates, with padded timesteps cleared."""
+        return Sequences.from_padded(
+            self.dist.log_rates,
+            self.lengths,
+        )
+
+    @property
+    def rates(self) -> Sequences:
+        """Poisson rates, with padded timesteps cleared."""
+        return Sequences.from_padded(
+            self.dist.rates,
+            self.lengths,
+        )
+
+    @property
+    def mean(self) -> Sequences:
+        """Poisson means, equal to the rates."""
+        return self.rates
+
+    @property
+    def variance(self) -> Sequences:
+        """Poisson variances, equal to the rates."""
+        return self.rates
+
+    def select(self, index: batch.SelT) -> typing.Self:
+        """Select only structural batch dimensions."""
+        return batch.select(self, index)
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        return batch.broadcast(self, shape, axis=axis)
+
+    def squeeze(self, axis=None) -> typing.Self:
+        return batch.squeeze(self, axis=axis)
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        return batch.permute(self, permutation, axis=axis)
+
+    def move_axis(
+        self,
+        source: int,
+        destination: int,
+    ) -> typing.Self:
+        return batch.move_axis(self, source, destination)
+
+    def select_time(
+        self,
+        *,
+        start: int,
+        stop: int | None = None,
+    ) -> typing.Self:
+        """Select a time interval, adjusting valid-prefix lengths."""
+        start, stop, _ = slice(start, stop).indices(self.max_steps)
+
+        new_lengths = Lengths(
+            jnp.clip(
+                self.lengths.values - start,
+                0,
+                max(stop - start, 0),
+            )
+        )
+
+        time_slice = (slice(None),) * self.time_axis + (slice(start, stop),)
+
+        return type(self)(
+            dist=self.dist.select(time_slice),
+            lengths=new_lengths,
+        )
+
+    def get(self, index: batch.SelT | None = None) -> typing.Self:
+        """Retrieve exactly one unbatched item."""
+        return batch.get(self, index)
