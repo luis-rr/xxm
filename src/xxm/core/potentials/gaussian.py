@@ -61,6 +61,16 @@ class GaussianPotential(typing.NamedTuple):
     information_vectors: jax.Array  # (..., N)
     log_constant: jax.Array  # (...)
 
+    def normalize(self) -> Gaussian:
+        """Return the normalized Gaussian distribution defined by this potential.
+
+        Requires a positive-definite precision matrix.
+        """
+        return Gaussian.from_canonical(
+            precision=self.precision_blocks,
+            information=self.information_vectors,
+        )
+
     @property
     def batch_shape(self) -> tuple[int, ...]:
         """Batch shape shared by the canonical parameters."""

@@ -9,7 +9,7 @@ import jax.numpy as jnp
 import jax.scipy as jsp
 
 from xxm.core import batch
-from xxm.core.dists.discrete import DiscreteMarginals
+from xxm.core.dists.discrete import Categorical, DiscreteMarginals
 from xxm.core.lengths import Lengths
 
 
@@ -22,6 +22,15 @@ class DiscretePotential(typing.NamedTuple):
     """
 
     log_values: jax.Array  # (..., K)
+
+    def normalize(self) -> Categorical:
+        """Return the normalized categorical distribution defined by this potential.
+
+        Requires at least one category with finite log potential in each batch.
+        """
+        return Categorical(
+            probs=jax.nn.softmax(self.log_values, axis=-1),
+        )
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
