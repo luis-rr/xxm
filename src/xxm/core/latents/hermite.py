@@ -213,11 +213,6 @@ class HermiteGaussian:
             basis=self.basis,
         )
 
-        if result.variable_dim != self.variable_dim:
-            raise ValueError(
-                'replacement coefficients must preserve variable dimension'
-            )
-
         return result
 
     def temporal_basis(
@@ -450,68 +445,3 @@ class HermiteGaussian:
 
     def compute_potential(self) -> GaussianPotential:
         return GaussianPotential.from_moments(self.coefficients)
-
-    def to_coefficient_potential(
-        self,
-        local: GaussianPotential,
-        basis_values: jax.Array,
-    ) -> GaussianPotential:
-        """Pull time-local Gaussian factors back to Hermite coefficient space.
-
-        `basis_values` has shape (*B, T, C), where C is the number of
-        basis coefficients. `local` contains factors over P temporal
-        variables, with batch shape (*B, T).
-
-        The result is one potential over the flattened P * C coefficients
-        for each batch element.
-        """
-        if basis_values.ndim != len(self.batch_shape) + 2:
-            raise ValueError('basis values must have shape (*B, T, C)')
-
-        expected_basis_shape = (
-            *self.batch_shape,
-            basis_values.shape[-2],
-            self.num_coefficients,
-        )
-        if basis_values.shape != expected_basis_shape:
-            raise ValueError(
-                f'basis values must have shape {expected_basis_shape}; '
-                f'got {basis_values.shape}'
-            )
-
-        expected_local_batch = (
-            *self.batch_shape,
-            basis_values.shape[-2],
-        )
-        if local.batch_shape != expected_local_batch:
-            raise ValueError(
-                f'local potential batch must be {expected_local_batch}; '
-                f'got {local.batch_shape}'
-            )
-
-        if local.variable_dim != self.variable_dim:
-            raise ValueError(
-                f'local potential variable dimension must be '
-                f'{self.variable_dim}; got {local.variable_dim}'
-            )
-
-        coefficient_dim = self.coefficients.variable_dim
-
-        precision = jnp.einsum(
-            '...tc,...tpq,...td->...pcqd',
-            basis_values,
-            local.precision_blocks,
-            basis_values,
-        ).reshape((*self.batch_shape, coefficient_dim, coefficient_dim))
-
-        information = jnp.einsum(
-            '...tc,...tp->...pc',
-            basis_values,
-            local.information_vectors,
-        ).reshape((*self.batch_shape, coefficient_dim))
-
-        return GaussianPotential(
-            precision_blocks=precision,
-            information_vectors=information,
-            log_constant=jnp.sum(local.log_constant, axis=-1),
-        )
