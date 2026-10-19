@@ -9,7 +9,7 @@ import jax
 from jax import numpy as jnp
 
 from xxm.core.affine import Affine
-from xxm.core.data import DatasetCollection, Sequences
+from xxm.core.data import Dataset, DatasetCollection, Sequences
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.gaussian import GaussianChainMarginals as Posterior
 from xxm.core.dists.poisson import LinearPoisson
@@ -462,8 +462,7 @@ class Inferred(typing.Generic[LDSFacadeT]):
     data: DatasetCollection
 
     def __post_init__(self) -> None:
-        dataset = self.data.single()
-        expected_batch = dataset.batch_shape
+        expected_batch = (self.data.partition.total,)
 
         if self.posterior.batch_shape != expected_batch:
             raise ValueError(
@@ -471,31 +470,40 @@ class Inferred(typing.Generic[LDSFacadeT]):
                 f'got {self.posterior.batch_shape}'
             )
 
-        if self.posterior.max_steps != dataset.max_steps:
+        if self.posterior.max_steps != self.data.max_steps:
             raise ValueError('posterior must match the padded time dimension')
 
         if self.posterior.variable_dim != self.model.latent_dim:
             raise ValueError('posterior variable dimension must match model latent_dim')
 
+    def _session(self, session: int | None) -> tuple[Posterior, Dataset]:
+        """Select one session from the pooled posterior."""
+        dataset = self.data.get(session)
+        index = 0 if session is None else session
+        posterior = self.posterior.select(self.data.partition.get_slice(index))
+        return posterior, dataset
+
     def latent_mean(self, session: int | None = None) -> Sequences:
         """Return latent means with the source batch shape and lengths."""
+        posterior, dataset = self._session(session)
         return Sequences.from_padded(
-            values=self.posterior.means,
-            lengths=self.data.get(session).lengths,
+            values=posterior.means,
+            lengths=dataset.lengths,
         )
 
     def latent_std(self, session: int | None = None) -> Sequences:
         """Return latent standard deviations with the source batch shape and lengths."""
-        stds = jnp.sqrt(jnp.diagonal(self.posterior.covariances, axis1=-2, axis2=-1))
+        posterior, dataset = self._session(session)
+        stds = jnp.sqrt(jnp.diagonal(posterior.covariances, axis1=-2, axis2=-1))
 
         return Sequences.from_padded(
             values=stds,
-            lengths=self.data.get(session).lengths,
+            lengths=dataset.lengths,
         )
 
     def observation_mean(self, session: int | None = None) -> Sequences:
         """Return expected observations, including masked valid steps."""
-        dataset = self.data.get(session)
+        posterior, dataset = self._session(session)
         emissions = self.model._model.emissions.get(session)
 
         if dataset.batch_shape:
@@ -504,7 +512,7 @@ class Inferred(typing.Generic[LDSFacadeT]):
                 axis=0,
             )
 
-        values = emissions.observation_mean(self.posterior)
+        values = emissions.observation_mean(posterior)
 
         return Sequences.from_padded(
             values=values,

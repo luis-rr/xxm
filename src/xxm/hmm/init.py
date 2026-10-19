@@ -7,7 +7,6 @@ from xxm.core.data import Dataset, DatasetCollection
 from xxm.core.dists.discrete import Categorical
 from xxm.core.emissions.collection import DiscreteEmissionsCollection
 from xxm.core.emissions.discrete import (
-    Emissions,
     GaussianEmissions,
     PoissonEmissions,
 )
@@ -42,7 +41,7 @@ def _visible_observations(data: Dataset, num_states: int) -> jax.Array:
 
 
 def _init(
-    emissions: Emissions,
+    emissions: DiscreteEmissionsCollection,
     num_states: int,
     dtype: jnp.dtype,
     self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
@@ -75,7 +74,7 @@ def _init(
     return Model(
         initial=CategoricalInitial(Categorical(probs=initial_probs)),
         transitions=CategoricalTransitions(Categorical(probs=transition_probs)),
-        emissions=DiscreteEmissionsCollection((emissions,)),
+        emissions=emissions,
     )
 
 
@@ -110,22 +109,31 @@ def init_gaussian_via_kmeans(
     self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
     covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
 ) -> Model:
-    """Initialize a shared Gaussian HMM from visible valid Dataset rows."""
-    dataset = data.single()
-    _validate_inputs(dataset, num_states)
+    """Initialize session emissions independently, retaining shared state priors.
 
-    observations = _visible_observations(dataset, num_states)
-    emissions = _init_gaussian_emissions(
-        observations=observations,
-        num_states=num_states,
-        key=key,
-        covariance_floor=covariance_floor,
+    K-means labels are not aligned across sessions.
+    """
+    # Keep the original key for singleton initialization.
+    keys = (
+        (key,) if len(data.datasets) == 1 else jax.random.split(key, len(data.datasets))
     )
+    emissions = []
+    for dataset, session_key in zip(data.datasets, keys, strict=True):
+        _validate_inputs(dataset, num_states)
+        observations = _visible_observations(dataset, num_states)
+        emissions.append(
+            _init_gaussian_emissions(
+                observations=observations,
+                num_states=num_states,
+                key=session_key,
+                covariance_floor=covariance_floor,
+            )
+        )
     return _init(
-        emissions=emissions,
+        emissions=DiscreteEmissionsCollection(tuple(emissions)),
         num_states=num_states,
         self_transition_prob=self_transition_prob,
-        dtype=observations.dtype,
+        dtype=data.dtype,
     )
 
 
@@ -158,19 +166,27 @@ def init_poisson_via_kmeans(
     self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
     dtype=jnp.float32,
 ) -> Model:
-    """Initialize a shared Poisson HMM from visible valid Dataset rows."""
-    dataset = data.single()
-    _validate_inputs(dataset, num_states)
+    """Initialize independent session K-means emissions with shared state priors.
 
-    observations = _visible_observations(dataset, num_states)
-    emissions = _init_poisson_emissions(
-        key=key,
-        observations=observations,
-        num_states=num_states,
+    K-means labels are not aligned across sessions.
+    """
+    keys = (
+        (key,) if len(data.datasets) == 1 else jax.random.split(key, len(data.datasets))
     )
+    emissions = []
+    for dataset, session_key in zip(data.datasets, keys, strict=True):
+        _validate_inputs(dataset, num_states)
+        observations = _visible_observations(dataset, num_states)
+        emissions.append(
+            _init_poisson_emissions(
+                key=session_key,
+                observations=observations,
+                num_states=num_states,
+            )
+        )
     return _init(
-        emissions=emissions,
+        emissions=DiscreteEmissionsCollection(tuple(emissions)),
         num_states=num_states,
         self_transition_prob=self_transition_prob,
-        dtype=jnp.result_type(observations.dtype, dtype),
+        dtype=jnp.result_type(data.dtype, dtype),
     )

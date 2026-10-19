@@ -13,18 +13,16 @@ from xxm.core.optim import poisson as poisson_fit
 from xxm.core.optim.kmeans import kmeans_assignments
 
 from .core import Model
-from .data import ARDatasetCollection
+from .data import ARDataset, ARDatasetCollection
 from .emissions import AREmissions, AREmissionsCollection, ConditionalDistT
 
 DEFAULT_SELF_TRANSITION_PROB = 0.9
 
 
 def _visible_rows(
-    data_col: ARDatasetCollection,
+    data: ARDataset,
 ) -> tuple[jax.Array, jax.Array]:
     """Pool visible complete AR windows across independent sequences."""
-
-    data = data_col.single()
 
     observations = data.weighted_targets()
 
@@ -118,11 +116,11 @@ def _init_state_assignments(
 
 def _init_gaussian_emissions(
     key: jax.Array,
-    data: ARDatasetCollection,
+    data: ARDataset,
     num_states: int,
     ridge=gaussian_fit.DEFAULT_RIDGE,
     covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
-) -> AREmissionsCollection[LinearGaussian]:
+) -> AREmissions[LinearGaussian]:
     predictors, current = _visible_rows(data)
 
     if predictors.shape[0] < num_states:
@@ -147,7 +145,7 @@ def _init_gaussian_emissions(
         covariance_floor=covariance_floor,
     )
 
-    return AREmissionsCollection((AREmissions(model),))
+    return AREmissions(model)
 
 
 def init_gaussian_via_kmeans(
@@ -158,13 +156,24 @@ def init_gaussian_via_kmeans(
     *,
     covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
 ) -> Model[LinearGaussian]:
-    r"""Initialize Gaussian AR-HMM with first $L$ observations as fixed history."""
+    r"""Initialize per-session K-means emissions with first $L$ values fixed.
 
-    emissions = _init_gaussian_emissions(
-        key=key,
-        data=data,
-        num_states=num_states,
-        covariance_floor=covariance_floor,
+    Shared state priors are retained; session state labels are not aligned.
+    """
+
+    keys = (
+        (key,) if len(data.datasets) == 1 else jax.random.split(key, len(data.datasets))
+    )
+    emissions = AREmissionsCollection(
+        tuple(
+            _init_gaussian_emissions(
+                key=session_key,
+                data=dataset,
+                num_states=num_states,
+                covariance_floor=covariance_floor,
+            )
+            for dataset, session_key in zip(data.datasets, keys, strict=True)
+        )
     )
 
     return _init(
@@ -177,10 +186,10 @@ def init_gaussian_via_kmeans(
 
 def _init_poisson_emissions(
     key: jax.Array,
-    data: ARDatasetCollection,
+    data: ARDataset,
     num_states: int,
     ridge=poisson_fit.DEFAULT_RIDGE,
-) -> AREmissionsCollection[LinearPoisson]:
+) -> AREmissions[LinearPoisson]:
     predictors, current = _visible_rows(data)
 
     if predictors.shape[0] < num_states:
@@ -204,7 +213,7 @@ def _init_poisson_emissions(
         ridge=ridge,
     )
 
-    return AREmissionsCollection((AREmissions(model),))
+    return AREmissions(model)
 
 
 def init_poisson_via_kmeans(
@@ -220,16 +229,28 @@ def init_poisson_via_kmeans(
 
     ``observations[:num_lags]`` provide the fixed autoregressive history.
     Latent states correspond only to ``observations[num_lags:]``.
+    K-means emissions are initialized independently per session without
+    aligning labels; initial-state and transition priors are shared.
     """
     prepared = ARDatasetCollection.from_datasets(
         data,
         num_lags,
     )
 
-    emissions = _init_poisson_emissions(
-        key=key,
-        data=prepared,
-        num_states=num_states,
+    keys = (
+        (key,)
+        if len(prepared.datasets) == 1
+        else jax.random.split(key, len(prepared.datasets))
+    )
+    emissions = AREmissionsCollection(
+        tuple(
+            _init_poisson_emissions(
+                key=session_key,
+                data=dataset,
+                num_states=num_states,
+            )
+            for dataset, session_key in zip(prepared.datasets, keys, strict=True)
+        )
     )
 
     return _init(
