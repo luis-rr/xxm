@@ -77,9 +77,9 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
     def permute_states(
         self,
         permutation: jax.Array,
-    ) -> Model:
+    ) -> typing.Self:
         """Relabel discrete states by permutation."""
-        return Model(
+        return self._replace(
             initial=self.initial.permute_states(permutation),
             transitions=self.transitions.permute_states(permutation),
             emissions=self.emissions.permute_states(permutation),

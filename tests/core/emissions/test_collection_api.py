@@ -48,7 +48,7 @@ def test_selected_session_density_preserves_sequence_sum_and_model_batch():
     )
     model = model._replace(
         emissions=ContinuousEmissionsCollection(
-            (model.emissions.single(), selected_emission)
+            (model.emissions.get(), selected_emission)
         )
     ).broadcast((2,))
     data = DatasetCollection.from_datasets(

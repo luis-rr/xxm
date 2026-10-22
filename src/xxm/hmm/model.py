@@ -8,7 +8,7 @@ import typing
 import jax
 import jax.numpy as jnp
 
-from xxm.core.data import Dataset, DatasetCollection, Sequences
+from xxm.core.data import DatasetCollection, Sequences
 from xxm.core.dists.discrete import Categorical
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
@@ -17,12 +17,16 @@ from xxm.core.emissions.discrete import (
     GaussianEmissions,
     PoissonEmissions,
 )
+from xxm.core.facade import CombinableFacadeCollection as HMMCollection
+from xxm.core.facade import Fit
+from xxm.core.facade import Inferred as BaseInferred
 from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
 )
 from xxm.core.lengths import LengthsLike, LengthsSpec
 
+from .collection import combine as _combine
 from .core import Model, Posterior, Sample
 from .inference import infer_exact
 from .init import (
@@ -120,7 +124,7 @@ class GaussianHMM:
         emission_means: jax.Array,
         emission_covariances: jax.Array,
     ) -> typing.Self:
-        r"""Construct a Gaussian HMM from its parameters."""
+        r"""Construct a model from its parameters."""
         initial, transitions = _categorical_components_from_params(
             initial_probs,
             transition_probs,
@@ -151,16 +155,30 @@ class GaussianHMM:
         num_states: int,
         *,
         self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
-    ) -> typing.Self:
-        """Initialize a Gaussian HMM by clustering the observations with K-means."""
-        model = init_gaussian_via_kmeans(
-            key=key,
-            data=data,
-            num_states=num_states,
-            self_transition_prob=self_transition_prob,
+    ) -> HMMCollection[typing.Self, Inferred[typing.Self], Model[GaussianEmissions]]:
+        """Initialize an independent HMM for every session."""
+        keys = jax.random.split(key, len(data.datasets))
+
+        models = tuple(
+            cls(
+                init_gaussian_via_kmeans(
+                    key=session_key,
+                    dataset=dataset,
+                    num_states=num_states,
+                    self_transition_prob=self_transition_prob,
+                )
+            )
+            for session_key, dataset in zip(
+                keys,
+                data.datasets,
+                strict=True,
+            )
         )
 
-        return cls(model)
+        return HMMCollection(
+            models=models,
+            combine_fn=_combine,
+        )
 
     def sample(
         self,
@@ -195,7 +213,7 @@ class GaussianHMM:
         *,
         num_iters: int,
         progress: bool | str = 'EM',
-    ) -> Fit[GaussianHMM]:
+    ) -> Fit[Inferred[typing.Self]]:
         """Fit model parameters by expectation-maximization."""
         fit = _fit_em_jit(
             self._model,
@@ -266,7 +284,7 @@ class PoissonHMM:
         transition_probs: jax.Array,
         emission_log_rates: jax.Array,
     ) -> typing.Self:
-        r"""Construct a Poisson HMM from categorical and log-rate parameters."""
+        r"""Construct a model from categorical and log-rate parameters."""
         initial, transitions = _categorical_components_from_params(
             initial_probs,
             transition_probs,
@@ -296,16 +314,30 @@ class PoissonHMM:
         num_states: int,
         *,
         self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
-    ) -> typing.Self:
-        """Initialize a Poisson HMM by clustering the observations with K-means."""
-        model = init_poisson_via_kmeans(
-            key=key,
-            data=data,
-            num_states=num_states,
-            self_transition_prob=self_transition_prob,
+    ) -> HMMCollection[typing.Self, Inferred[typing.Self], Model[PoissonEmissions]]:
+        """Initialize an independent HMM for every session."""
+        keys = jax.random.split(key, len(data.datasets))
+
+        models = tuple(
+            cls(
+                init_poisson_via_kmeans(
+                    key=session_key,
+                    dataset=dataset,
+                    num_states=num_states,
+                    self_transition_prob=self_transition_prob,
+                )
+            )
+            for session_key, dataset in zip(
+                keys,
+                data.datasets,
+                strict=True,
+            )
         )
 
-        return cls(model)
+        return HMMCollection(
+            models=models,
+            combine_fn=_combine,
+        )
 
     def sample(
         self,
@@ -340,7 +372,7 @@ class PoissonHMM:
         *,
         num_iters: int,
         progress: bool | str = 'EM',
-    ) -> Fit[PoissonHMM]:
+    ) -> Fit[Inferred[typing.Self]]:
         """Fit model parameters by expectation-maximization."""
         fit = fit_em(
             self._model,
@@ -363,37 +395,20 @@ HMMFacadeT = typing.TypeVar('HMMFacadeT', GaussianHMM, PoissonHMM)
 
 
 @dataclasses.dataclass(frozen=True, eq=False)
-class Inferred(typing.Generic[HMMFacadeT]):
+class Inferred(
+    BaseInferred[HMMFacadeT, Posterior],
+    typing.Generic[HMMFacadeT],
+):
     """HMM, pooled posterior, and source session collection."""
 
-    model: HMMFacadeT
-    posterior: Posterior
-    data: DatasetCollection
-
     def __post_init__(self) -> None:
-        expected_batch = (self.data.partition.total,)
-
-        if self.posterior.batch_shape != expected_batch:
-            raise ValueError(
-                f'posterior batch must be {expected_batch}; '
-                f'got {self.posterior.batch_shape}'
-            )
+        super().__post_init__()
 
         if self.posterior.max_steps != self.data.max_steps:
             raise ValueError('posterior must match the padded time dimension')
 
         if self.posterior.num_states != self.model.num_states:
             raise ValueError('posterior must match the model number of states')
-
-    def _session(self, session: int | None) -> tuple[Posterior, Dataset]:
-        """Select one session from the pooled posterior."""
-
-        dataset = self.data.get(session)
-        index = 0 if session is None else session
-
-        posterior = self.posterior.select(self.data.partition.get_slice(index))
-
-        return posterior, dataset
 
     def state_probs(self, session: int | None = None) -> Sequences:
         """Return state probabilities for one session."""
@@ -438,10 +453,3 @@ class Inferred(typing.Generic[HMMFacadeT]):
             jnp.argmax(posterior.state_probs, axis=-1),
             dataset.lengths,
         )
-
-
-class Fit(typing.NamedTuple, typing.Generic[HMMFacadeT]):
-    """Fitted result and objective trace, including the initial objective."""
-
-    inferred: Inferred[HMMFacadeT]
-    objective_trace: jax.Array

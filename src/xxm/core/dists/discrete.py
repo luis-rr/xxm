@@ -141,6 +141,26 @@ class DiscreteChainMarginals(typing.NamedTuple):
         """State probabilities associated with incoming transitions."""
         return self.state_probs[..., 1:, :]
 
+    def expected_initial_counts(self) -> jax.Array:
+        """Expected initial counts, pooled over the sequence axis."""
+        counts = jnp.where(
+            self.lengths.values[..., None] > 0,
+            self.state_probs[..., 0, :],
+            0,
+        )
+
+        return counts.sum(axis=-2) if self.batch_shape else counts
+
+    def expected_transition_counts(self) -> jax.Array:
+        """Expected transition counts, pooled over sequences and time."""
+        transitions = self.lengths.transitions().clear(self.pair_probs)
+
+        return (
+            transitions.sum(axis=(-4, -3))
+            if self.batch_shape
+            else transitions.sum(axis=-3)
+        )
+
     def entropy(self) -> jax.Array:
         """
         Entropy of the normalized chain distribution.

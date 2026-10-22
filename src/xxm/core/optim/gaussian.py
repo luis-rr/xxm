@@ -220,29 +220,21 @@ def from_samples_grouped(
     num_groups: int,
     *,
     covariance_floor: float,
+    sample_weights: jax.Array | None = None,  # (S,)
 ) -> Gaussian:
-    """Fit one Gaussian to each group of assigned values."""
-    num_samples = values.shape[0]
-    if assignments.ndim != 1:
-        raise ValueError('assignments must have shape (S,)')
-    if assignments.shape[0] != num_samples:
-        raise ValueError(
-            'assignments must contain one entry per sample; '
-            f'expected {num_samples}, got {assignments.shape[0]}'
-        )
-
+    """Fit one Gaussian to each weighted group of assigned values."""
     weights = jnp.moveaxis(
         jax.nn.one_hot(
             assignments,
             num_groups,
-            dtype=jnp.result_type(
-                values,
-                jnp.float32,
-            ),
+            dtype=jnp.result_type(values, jnp.float32),
         ),
         -1,
         0,
-    )
+    )  # (K, S)
+
+    if sample_weights is not None:
+        weights = weights * sample_weights[None, :]
 
     return from_samples_weighted(
         values=values,

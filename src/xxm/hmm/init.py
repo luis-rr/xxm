@@ -1,12 +1,15 @@
 """HMM initialization from data via clustering."""
 
+import typing
+
 import jax
 from jax import numpy as jnp
 
-from xxm.core.data import Dataset, DatasetCollection
+from xxm.core.data import Dataset
 from xxm.core.dists.discrete import Categorical
 from xxm.core.emissions.collection import DiscreteEmissionsCollection
 from xxm.core.emissions.discrete import (
+    Emissions,
     GaussianEmissions,
     PoissonEmissions,
 )
@@ -19,6 +22,12 @@ from xxm.hmm.core import Model
 DEFAULT_SELF_TRANSITION_PROB = 0.9
 
 
+EmissionT = typing.TypeVar(
+    'EmissionT',
+    bound=Emissions,
+)
+
+
 def _validate_inputs(data: Dataset, num_states: int):
     if data.input_dim != 0:
         raise ValueError('stationary HMMs require data.input_dim == 0')
@@ -27,25 +36,26 @@ def _validate_inputs(data: Dataset, num_states: int):
         raise ValueError('num_states must be positive')
 
 
-def _visible_observations(data: Dataset, num_states: int) -> jax.Array:
-    """Collect visible valid rows on the host for clustering."""
+def _clustering_observations(
+    data: Dataset,
+) -> tuple[jax.Array, jax.Array]:
+    """Flatten observations and their visibility-aware weights."""
+    observations = data.weighted_observations()
 
-    observations = data.observations.values[data.observation_weights()]
-
-    if observations.shape[0] < num_states:
-        raise ValueError(
-            'HMM initialization requires at least num_states visible valid rows'
-        )
-
-    return observations
+    return (
+        # Fixed number of rows
+        observations.safe_values().reshape(-1, data.observation_dim),
+        # Zero for invisible/padded rows
+        observations.weights.reshape(-1),
+    )
 
 
 def _init(
-    emissions: DiscreteEmissionsCollection,
+    emissions: DiscreteEmissionsCollection[EmissionT],
     num_states: int,
     dtype: jnp.dtype,
     self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
-) -> Model:
+) -> Model[EmissionT]:
     if num_states == 1:
         transition_probs = jnp.array(
             [[1.0]],
@@ -81,112 +91,148 @@ def _init(
 def _init_gaussian_emissions(
     key: jax.Array,
     observations: jax.Array,  # (T, N)
+    sample_weights: jax.Array,
     num_states: int,
-    covariance_floor,
+    covariance_floor: float,
 ) -> GaussianEmissions:
     assignments = kmeans_assignments(
-        key=key,
-        observations=observations,
-        num_groups=num_states,
+        key,
+        observations,
+        num_states,
+        sample_weights=sample_weights,
     )  # (T,)
 
     gaussian = gaussian_fit.from_samples_grouped(
         values=observations,
         assignments=assignments,
         num_groups=num_states,
+        sample_weights=sample_weights,
         covariance_floor=covariance_floor,
     )
 
-    return GaussianEmissions(
-        dist=gaussian,
+    counts = jnp.bincount(
+        assignments,
+        weights=sample_weights.astype(jnp.result_type(observations, jnp.float32)),
+        length=num_states,
     )
+
+    pooled = gaussian_fit.from_samples_weighted(
+        observations,
+        sample_weights,
+        covariance_floor=covariance_floor,
+    )
+
+    empty = counts <= 0
+
+    gaussian = gaussian._replace(
+        mean=jnp.where(
+            empty[:, None],
+            pooled.mean[None, :],
+            gaussian.mean,
+        ),
+        covariance=jnp.where(
+            empty[:, None, None],
+            pooled.covariance[None, :, :],
+            gaussian.covariance,
+        ),
+    )
+
+    return GaussianEmissions(dist=gaussian)
 
 
 def init_gaussian_via_kmeans(
     key: jax.Array,
-    data: DatasetCollection,
+    dataset: Dataset,
     num_states: int,
     self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
     covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
-) -> Model:
-    """Initialize session emissions independently, retaining shared state priors.
+) -> Model[GaussianEmissions]:
+    """Initialize a Gaussian HMM with weighted K-means."""
+    _validate_inputs(dataset, num_states)
 
-    K-means labels are not aligned across sessions.
-    """
-    # Keep the original key for singleton initialization.
-    keys = (
-        (key,) if len(data.datasets) == 1 else jax.random.split(key, len(data.datasets))
+    observations, weights = _clustering_observations(dataset)
+
+    emissions = _init_gaussian_emissions(
+        key=key,
+        observations=observations,
+        sample_weights=weights,
+        num_states=num_states,
+        covariance_floor=covariance_floor,
     )
-    emissions = []
-    for dataset, session_key in zip(data.datasets, keys, strict=True):
-        _validate_inputs(dataset, num_states)
-        observations = _visible_observations(dataset, num_states)
-        emissions.append(
-            _init_gaussian_emissions(
-                observations=observations,
-                num_states=num_states,
-                key=session_key,
-                covariance_floor=covariance_floor,
-            )
-        )
+
     return _init(
-        emissions=DiscreteEmissionsCollection(tuple(emissions)),
+        emissions=DiscreteEmissionsCollection((emissions,)),
         num_states=num_states,
         self_transition_prob=self_transition_prob,
-        dtype=data.dtype,
+        dtype=observations.dtype,
     )
 
 
 def _init_poisson_emissions(
     key: jax.Array,
-    observations: jax.Array,  # (T, N)
+    observations: jax.Array,
+    sample_weights: jax.Array,
     num_states: int,
 ) -> PoissonEmissions:
     assignments = kmeans_assignments(
         key=key,
         observations=observations,
         num_groups=num_states,
+        sample_weights=sample_weights,
     )  # (T,)
 
     poisson = poisson_fit.from_samples_grouped(
         values=observations,
         assignments=assignments,
         num_groups=num_states,
+        sample_weights=sample_weights,
     )
 
-    return PoissonEmissions(
-        dist=poisson,
+    counts = jnp.bincount(
+        assignments,
+        weights=sample_weights.astype(jnp.result_type(observations, jnp.float32)),
+        length=num_states,
     )
+
+    pooled = poisson_fit.from_samples_weighted(
+        observations,
+        sample_weights,
+    )
+
+    poisson = poisson._replace(
+        log_rates=jnp.where(
+            (counts <= 0)[:, None],
+            pooled.log_rates[None, :],
+            poisson.log_rates,
+        )
+    )
+
+    return PoissonEmissions(dist=poisson)
 
 
 def init_poisson_via_kmeans(
     key: jax.Array,
-    data: DatasetCollection,
+    dataset: Dataset,
     num_states: int,
     self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
     dtype=jnp.float32,
-) -> Model:
-    """Initialize independent session K-means emissions with shared state priors.
+) -> Model[PoissonEmissions]:
+    """Initialize a Poisson HMM with weighted K-means."""
 
-    K-means labels are not aligned across sessions.
-    """
-    keys = (
-        (key,) if len(data.datasets) == 1 else jax.random.split(key, len(data.datasets))
+    _validate_inputs(dataset, num_states)
+
+    observations, weights = _clustering_observations(dataset)
+
+    emissions = _init_poisson_emissions(
+        key=key,
+        observations=observations,
+        sample_weights=weights,
+        num_states=num_states,
     )
-    emissions = []
-    for dataset, session_key in zip(data.datasets, keys, strict=True):
-        _validate_inputs(dataset, num_states)
-        observations = _visible_observations(dataset, num_states)
-        emissions.append(
-            _init_poisson_emissions(
-                key=session_key,
-                observations=observations,
-                num_states=num_states,
-            )
-        )
+
     return _init(
-        emissions=DiscreteEmissionsCollection(tuple(emissions)),
+        emissions=DiscreteEmissionsCollection((emissions,)),
         num_states=num_states,
         self_transition_prob=self_transition_prob,
-        dtype=jnp.result_type(data.dtype, dtype),
+        dtype=jnp.result_type(observations.dtype, dtype),
     )

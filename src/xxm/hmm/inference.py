@@ -37,13 +37,16 @@ class Potentials(typing.NamedTuple):
         )
 
 
+InferenceT = InferenceState[
+    Model[EmissionsT],
+    Posterior,
+]
+
+
 def infer_exact(
     model: Model[EmissionsT],
     data: DatasetCollection,
-) -> InferenceState[
-    Model[EmissionsT],
-    Posterior,
-]:
+) -> InferenceT:
     """Run exact inference across all sessions."""
 
     potentials = Potentials.from_data(model, data)

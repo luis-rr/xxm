@@ -1,6 +1,7 @@
 """State alignment and coordinate alignment utilities."""
 
 import itertools
+import typing
 
 import jax
 import jax.numpy as jnp
@@ -10,7 +11,110 @@ from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.optim import gaussian as _gaussian_fit
 
+PermutationEval = typing.Callable[[jax.Array], jax.Array]
 
+
+def maximize_permutation_exhaustive(
+    objective: PermutationEval,
+    size: int,
+) -> jax.Array:
+    """Maximize an objective over all permutations."""
+    permutations = jnp.asarray(
+        list(itertools.permutations(range(size))),
+        dtype=jnp.int32,
+    )
+
+    scores = jax.vmap(objective)(permutations)
+    return permutations[jnp.argmax(scores)]
+
+
+def _improve_permutation(
+    objective: PermutationEval,
+    start: jax.Array,
+) -> jax.Array:
+    """Improve a permutation through best pair swaps."""
+    size = start.shape[0]
+
+    pairs = jnp.asarray(
+        list(itertools.combinations(range(size), 2)),
+        dtype=jnp.int32,
+    ).reshape(-1, 2)
+
+    def condition(carry):
+        _, _, improved = carry
+        return improved
+
+    def step(carry):
+        current, current_score, _ = carry
+
+        def swap(pair):
+            i, j = pair
+            return current.at[i].set(current[j]).at[j].set(current[i])
+
+        neighbors = jax.vmap(swap)(pairs)
+
+        candidates = jnp.concatenate(
+            (current[None], neighbors),
+            axis=0,
+        )
+
+        scores = jax.vmap(objective)(candidates)
+        best = jnp.argmax(scores)
+
+        return (
+            candidates[best],
+            scores[best],
+            scores[best] > current_score,
+        )
+
+    best, _, _ = jax.lax.while_loop(
+        condition,
+        step,
+        (
+            start,
+            objective(start),
+            jnp.asarray(True),
+        ),
+    )
+
+    return best
+
+
+def maximize_permutation_random(
+    objective: PermutationEval,
+    start: jax.Array,
+    key: jax.Array,
+    *,
+    num_restarts: int = 16,
+) -> jax.Array:
+    """Maximize using multistart pair-swap local search."""
+    size = start.shape[0]
+
+    random_starts = jax.vmap(lambda k: jax.random.permutation(k, size))(
+        jax.random.split(key, num_restarts)
+    )
+
+    starts = jnp.concatenate(
+        (
+            start[None],
+            jnp.arange(size, dtype=start.dtype)[None],
+            random_starts,
+        ),
+        axis=0,
+    )
+
+    candidates = jax.vmap(
+        lambda permutation: _improve_permutation(
+            objective,
+            permutation,
+        )
+    )(starts)
+
+    scores = jax.vmap(objective)(candidates)
+    return candidates[jnp.argmax(scores)]
+
+
+# TODO: switch everything to use maximization objectives instead of minimzation of costs.
 def match_permutation(costs: jax.Array) -> jax.Array:
     """Permutation minimizing total pairwise matching cost.
 

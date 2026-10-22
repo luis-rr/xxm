@@ -9,34 +9,70 @@ def kmeans_assignments(
     observations: jax.Array,
     num_groups: int,
     num_iters: int = 20,
+    *,
+    sample_weights: jax.Array | None = None,
 ) -> jax.Array:
-    """Compute K-means cluster assignments."""
+    """Compute K-means assignments with optional sample weights.
+
+    Zero-weight observations are excluded from center initialization
+    and center updates. Requires at least num_groups positive-weight
+    observations when sample_weights is provided.
+    """
     observations = jnp.asarray(
         observations,
         dtype=jnp.result_type(observations, jnp.float32),
     )
 
-    initial_indices = jax.random.choice(
-        key,
-        observations.shape[0],
-        shape=(num_groups,),
-        replace=False,
-    )
+    if sample_weights is None:
+        initial_indices = jax.random.choice(
+            key,
+            observations.shape[0],
+            shape=(num_groups,),
+            replace=False,
+        )
+    else:
+        sample_weights = jnp.asarray(
+            sample_weights,
+            dtype=observations.dtype,
+        )
+
+        initial_indices = jax.random.choice(
+            key,
+            observations.shape[0],
+            shape=(num_groups,),
+            replace=False,
+            p=sample_weights / sample_weights.sum(),
+        )
+
     initial_centers = observations[initial_indices]
 
-    def step(_, centers):
+    def assign(centers):
         distances = jnp.sum(
             (observations[:, None, :] - centers[None, :, :]) ** 2,
             axis=-1,
         )
-        assignments = jnp.argmin(distances, axis=1)
+        return jnp.argmin(distances, axis=1)
 
-        weights = jax.nn.one_hot(assignments, num_groups, dtype=observations.dtype)
+    def step(_, centers):
+        assignments = assign(centers)
+
+        weights = jax.nn.one_hot(
+            assignments,
+            num_groups,
+            dtype=observations.dtype,
+        )
+
+        if sample_weights is not None:
+            weights = weights * sample_weights[:, None]
+
         counts = weights.sum(axis=0)
 
-        new_centers = weights.T @ observations / jnp.maximum(counts[:, None], 1)
+        new_centers = (
+            weights.T
+            @ observations
+            / jnp.where(counts[:, None] > 0, counts[:, None], 1)
+        )
 
-        # Keep the old center if a cluster is empty.
         return jnp.where(
             (counts > 0)[:, None],
             new_centers,
@@ -50,8 +86,4 @@ def kmeans_assignments(
         initial_centers,
     )
 
-    distances = jnp.sum(
-        (observations[:, None, :] - centers[None, :, :]) ** 2,
-        axis=-1,
-    )
-    return jnp.argmin(distances, axis=1)
+    return assign(centers)
