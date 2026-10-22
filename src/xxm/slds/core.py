@@ -75,6 +75,12 @@ class Posterior(typing.NamedTuple):
             discrete=self.discrete.permute_states(permutation),
         )
 
+    def align(self, alignment: Affine) -> typing.Self:
+        r"""Transform continuous latents $x$ by an affine map."""
+        return self._replace(
+            continuous=self.continuous.affine(alignment),
+        )
+
     def entropy(self) -> jax.Array:
         terms = (
             self.discrete.entropy(),

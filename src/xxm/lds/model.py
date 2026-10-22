@@ -8,13 +8,15 @@ import typing
 import jax
 from jax import numpy as jnp
 
+from xxm.core import facade as _facade
 from xxm.core.affine import Affine
-from xxm.core.data import Dataset, DatasetCollection, Sequences
+from xxm.core.data import DatasetCollection, Sequences
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.gaussian import GaussianChainMarginals as Posterior
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
+from xxm.core.facade import Fit
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
 from xxm.core.lengths import LengthsLike, LengthsSpec
 from xxm.core.optim import gaussian as gaussian_fit
@@ -92,7 +94,7 @@ def _conditioned_dynamics(
 
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, eq=False)
-class GaussianLDS:
+class GaussianLDS(_facade.AlignableFacade[Model[GaussianEmissions]]):
     r"""Linear dynamical system with Gaussian emissions.
 
     $$x_0 \sim \mathcal{N}(m_0,S_0),$$
@@ -103,38 +105,32 @@ class GaussianLDS:
     $$y_t\mid x_t \sim \mathcal{N}(Cx_t+d,R).$$
     """
 
-    _model: Model[GaussianEmissions]
-
-    def __post_init__(self) -> None:
-        if self._model.batch_shape != ():
-            raise ValueError('GaussianLDS facade requires an unbatched core model')
-
     @property
     def latent_dim(self) -> int:
         """Dimension $D_x$ of the continuous latent state."""
-        return self._model.dynamics.latent_dim
+        return self.core.dynamics.latent_dim
 
     def observation_dim(self, session: int | None = None) -> int:
         """Dimension $D_y$ of each observation."""
-        return self._model.emissions.get(session).observation_dim
+        return self.core.emissions.get(session).observation_dim
 
     @property
     def input_dim(self) -> int:
         """Dimension $D_u$ of known dynamics inputs."""
-        return self._model.dynamics.input_dim
+        return self.core.dynamics.input_dim
 
     @property
     def input_coefficients(self) -> jax.Array:
         """Known-input dynamics coefficients $B$."""
-        return self._model.dynamics.input_coefficients
+        return self.core.dynamics.input_coefficients
 
     def dynamics(self, inputs: jax.Array | None = None) -> LinearGaussian:
         r"""Return $p(x_t\mid x_{t-1},u_t)$ conditioned on a known input."""
-        return _conditioned_dynamics(self._model, inputs)
+        return _conditioned_dynamics(self.core, inputs)
 
     def emissions(self, session: int | None = None) -> LinearGaussian:
         """Linear-Gaussian observation distribution."""
-        return self._model.emissions.get(session).dist
+        return self.core.emissions.get(session).dist
 
     @classmethod
     def from_params(
@@ -162,7 +158,7 @@ class GaussianLDS:
         )
 
         return cls(
-            _model=Model(
+            core=Model(
                 initial=initial,
                 dynamics=dynamics,
                 emissions=ContinuousEmissionsCollection(
@@ -184,20 +180,25 @@ class GaussianLDS:
     @classmethod
     def via_pca(
         cls,
+        key: jax.Array,
         data: DatasetCollection,
         latent_dim: int,
         *,
         ridge=gaussian_fit.DEFAULT_RIDGE,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
-    ) -> typing.Self:
-        """Initialize one shared Gaussian LDS from a Dataset."""
-        return cls(
-            init_gaussian_via_pca(
-                data,
-                latent_dim=latent_dim,
-                ridge=ridge,
-                covariance_floor=covariance_floor,
-            )
+    ) -> GaussianLDSCollection:
+        """Initialize an independent model for every session."""
+        return GaussianLDSCollection.from_datasets(
+            key=key,
+            data=data,
+            init_fn=lambda _session_key, dataset: cls(
+                init_gaussian_via_pca(
+                    DatasetCollection((dataset,)),
+                    latent_dim=latent_dim,
+                    ridge=ridge,
+                    covariance_floor=covariance_floor,
+                )
+            ),
         )
 
     def sample(
@@ -211,23 +212,23 @@ class GaussianLDS:
         r"""Sample latent states and observations."""
 
         ls = LengthsSpec.from_params(steps, min_length=1)
-        input_sequences = _sampling_inputs(self._model, ls, inputs)
+        input_sequences = _sampling_inputs(self.core, ls, inputs)
 
-        return self._model.sample(key, inputs=input_sequences, session=session)
+        return self.core.sample(key, inputs=input_sequences, session=session)
 
     def infer(
         self,
         data: DatasetCollection,
-    ) -> Inferred[GaussianLDS]:
+    ) -> Inferred[typing.Self]:
         """Compute exact posteriors with the Dataset's batch shape."""
 
         inferred = _infer_exact_jit(
-            self._model,
+            self.core,
             data,
         )
 
         return Inferred(
-            model=self.__class__(inferred.model),
+            model=self,
             posterior=inferred.posterior,
             data=data,
         )
@@ -238,10 +239,10 @@ class GaussianLDS:
         *,
         num_iters: int,
         progress: bool | str = 'EM',
-    ) -> Fit[GaussianLDS]:
+    ) -> Fit[Inferred[typing.Self]]:
         """Fit shared parameters across all Dataset batch entries by EM."""
         fit = _fit_em_jit(
-            self._model,
+            self.core,
             data,
             num_iters=num_iters,
             progress=progress,
@@ -249,23 +250,17 @@ class GaussianLDS:
 
         return Fit(
             inferred=Inferred(
-                model=self.__class__(fit.state.model),
+                model=self._with_core(fit.state.model),
                 posterior=fit.state.posterior,
                 data=data,
             ),
             objective_trace=fit.objective_trace,
         )
 
-    def align(self, alignment: Affine) -> typing.Self:
-        """Express the latent dynamics in aligned coordinates."""
-        return self.__class__(
-            _model=self._model.align(alignment),
-        )
-
 
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, eq=False)
-class PoissonLDS:
+class PoissonLDS(_facade.AlignableFacade[Model[PoissonEmissions]]):
     r"""Linear dynamical system with Poisson emissions.
 
     $$x_0 \sim \mathcal{N}(m_0,S_0),$$
@@ -276,38 +271,32 @@ class PoissonLDS:
     $$y_t\mid x_t \sim \operatorname{Poisson}(\exp(Cx_t+d)).$$
     """
 
-    _model: Model[PoissonEmissions]
-
-    def __post_init__(self) -> None:
-        if self._model.batch_shape != ():
-            raise ValueError('PoissonLDS facade requires an unbatched core model')
-
     @property
     def latent_dim(self) -> int:
         """Dimension $D_x$ of the continuous latent state."""
-        return self._model.dynamics.latent_dim
+        return self.core.dynamics.latent_dim
 
     def observation_dim(self, session: int | None = None) -> int:
         """Dimension $D_y$ of each observation."""
-        return self._model.emissions.get(session).observation_dim
+        return self.core.emissions.get(session).observation_dim
 
     @property
     def input_dim(self) -> int:
         """Dimension $D_u$ of known dynamics inputs."""
-        return self._model.dynamics.input_dim
+        return self.core.dynamics.input_dim
 
     @property
     def input_coefficients(self) -> jax.Array:
         """Known-input dynamics coefficients $B$."""
-        return self._model.dynamics.input_coefficients
+        return self.core.dynamics.input_coefficients
 
     def dynamics(self, inputs: jax.Array | None = None) -> LinearGaussian:
         r"""Return $p(x_t\mid x_{t-1},u_t)$ conditioned on a known input."""
-        return _conditioned_dynamics(self._model, inputs)
+        return _conditioned_dynamics(self.core, inputs)
 
     def emissions(self, session: int | None = None) -> LinearPoisson:
         """Linear-Poisson observation distribution in log-rate form."""
-        return self._model.emissions.get(session).dist
+        return self.core.emissions.get(session).dist
 
     @classmethod
     def from_params(
@@ -334,7 +323,7 @@ class PoissonLDS:
         )
 
         return cls(
-            _model=Model(
+            core=Model(
                 initial=initial,
                 dynamics=dynamics,
                 emissions=ContinuousEmissionsCollection(
@@ -355,22 +344,27 @@ class PoissonLDS:
     @classmethod
     def via_pca(
         cls,
+        key: jax.Array,
         data: DatasetCollection,
         latent_dim: int,
         *,
         ridge=gaussian_fit.DEFAULT_RIDGE,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
         count_floor: float = poisson_fit.DEFAULT_COUNT_FLOOR,
-    ) -> typing.Self:
-        """Initialize one shared Poisson LDS from a Dataset."""
-        return cls(
-            init_poisson_via_pca(
-                data,
-                latent_dim=latent_dim,
-                ridge=ridge,
-                covariance_floor=covariance_floor,
-                count_floor=count_floor,
-            )
+    ) -> PoissonLDSCollection:
+        """Initialize an independent model for every session."""
+        return PoissonLDSCollection.from_datasets(
+            key=key,
+            data=data,
+            init_fn=lambda _session_key, dataset: cls(
+                init_poisson_via_pca(
+                    DatasetCollection((dataset,)),
+                    latent_dim=latent_dim,
+                    ridge=ridge,
+                    covariance_floor=covariance_floor,
+                    count_floor=count_floor,
+                )
+            ),
         )
 
     def sample(
@@ -384,9 +378,9 @@ class PoissonLDS:
         r"""Sample latent states and observations."""
 
         ls = LengthsSpec.from_params(steps, min_length=1)
-        input_sequences = _sampling_inputs(self._model, ls, inputs)
+        input_sequences = _sampling_inputs(self.core, ls, inputs)
 
-        return self._model.sample(key, inputs=input_sequences, session=session)
+        return self.core.sample(key, inputs=input_sequences, session=session)
 
     def infer(
         self,
@@ -394,20 +388,20 @@ class PoissonLDS:
         *,
         initial_latents: jax.Array | None = None,
         laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
-    ) -> Inferred[PoissonLDS]:
+    ) -> Inferred[typing.Self]:
         """Compute Laplace posteriors with the Dataset's batch shape.
 
         Optional initial latents have shape `(*data.batch_shape, T, D_x)`.
         """
         inferred = _infer_laplace_jit(
-            self._model,
+            self.core,
             data,
             initial_latents=initial_latents,
             params=laplace_params,
         )
 
         return Inferred(
-            model=self.__class__(inferred.model),
+            model=self,
             posterior=inferred.posterior,
             data=data,
         )
@@ -419,10 +413,10 @@ class PoissonLDS:
         num_iters: int,
         progress: bool | str = 'Laplace EM',
         laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
-    ) -> Fit[PoissonLDS]:
+    ) -> Fit[Inferred[typing.Self]]:
         """Fit shared parameters across Dataset batch entries by Laplace EM."""
         fit = _fit_laplace_em_jit(
-            self._model,
+            self.core,
             data,
             num_iters=num_iters,
             progress=progress,
@@ -431,17 +425,11 @@ class PoissonLDS:
 
         return Fit(
             inferred=Inferred(
-                model=self.__class__(fit.state.model),
+                model=self._with_core(fit.state.model),
                 posterior=fit.state.posterior,
                 data=data,
             ),
             objective_trace=fit.objective_trace,
-        )
-
-    def align(self, alignment: Affine) -> typing.Self:
-        """Express the latent dynamics in aligned coordinates."""
-        return self.__class__(
-            _model=self._model.align(alignment),
         )
 
 
@@ -449,7 +437,10 @@ LDSFacadeT = typing.TypeVar('LDSFacadeT', GaussianLDS, PoissonLDS)
 
 
 @dataclasses.dataclass(frozen=True, eq=False)
-class Inferred(typing.Generic[LDSFacadeT]):
+class Inferred(
+    _facade.AlignableInferred[LDSFacadeT, Posterior],
+    typing.Generic[LDSFacadeT],
+):
     """Singular LDS facade, posterior, and the exact source data.
 
     Temporal accessors return `Sequences` with the source batch shape and lengths.
@@ -457,31 +448,14 @@ class Inferred(typing.Generic[LDSFacadeT]):
     Masked observations within each sequence's length retain their timesteps.
     """
 
-    model: LDSFacadeT
-    posterior: Posterior
-    data: DatasetCollection
-
     def __post_init__(self) -> None:
-        expected_batch = (self.data.partition.total,)
-
-        if self.posterior.batch_shape != expected_batch:
-            raise ValueError(
-                f'expected posterior batch shape {expected_batch}, '
-                f'got {self.posterior.batch_shape}'
-            )
+        super().__post_init__()
 
         if self.posterior.max_steps != self.data.max_steps:
             raise ValueError('posterior must match the padded time dimension')
 
         if self.posterior.variable_dim != self.model.latent_dim:
             raise ValueError('posterior variable dimension must match model latent_dim')
-
-    def _session(self, session: int | None) -> tuple[Posterior, Dataset]:
-        """Select one session from the pooled posterior."""
-        dataset = self.data.get(session)
-        index = 0 if session is None else session
-        posterior = self.posterior.select(self.data.partition.get_slice(index))
-        return posterior, dataset
 
     def latent_mean(self, session: int | None = None) -> Sequences:
         """Return latent means with the source batch shape and lengths."""
@@ -504,7 +478,7 @@ class Inferred(typing.Generic[LDSFacadeT]):
     def observation_mean(self, session: int | None = None) -> Sequences:
         """Return expected observations, including masked valid steps."""
         posterior, dataset = self._session(session)
-        emissions = self.model._model.emissions.get(session)
+        emissions = self.model.core.emissions.get(session)
 
         if dataset.batch_shape:
             emissions = emissions.broadcast(
@@ -519,36 +493,42 @@ class Inferred(typing.Generic[LDSFacadeT]):
             lengths=dataset.lengths,
         )
 
-    def align(self, alignment: Affine) -> Inferred[LDSFacadeT]:
-        """Transform model and posterior coordinates exactly, without reinference."""
-        model = self.model.align(alignment)
-
-        posterior_alignment = alignment
-        if self.posterior.batch_shape:
-            posterior_alignment = alignment.broadcast(
-                self.posterior.batch_shape,
-                axis=0,
-            )
-
-        return self.__class__(
-            model=model,
-            posterior=self.posterior.affine(posterior_alignment),
-            data=self.data,
-        )
-
     def elbo(self) -> jax.Array:
         return _elbo_jit(
-            self.model._model,
+            self.model.core,
             self.data,
             self.posterior,
         )
 
 
-class Fit(
-    typing.NamedTuple,
+@dataclasses.dataclass(frozen=True, eq=False)
+class LDSInferredCollection(
+    _facade.AlignableInferredCollection[
+        'LDSCollection[LDSFacadeT]',
+        Posterior,
+    ],
     typing.Generic[LDSFacadeT],
 ):
-    """Result of fitting a model."""
+    """Independent LDS posteriors with coordinated latent alignments."""
 
-    inferred: Inferred[LDSFacadeT]
-    objective_trace: jax.Array
+
+@dataclasses.dataclass(frozen=True, eq=False)
+class LDSCollection(
+    _facade.FacadeCollection[
+        LDSFacadeT,
+        Inferred[LDSFacadeT],
+        LDSInferredCollection[LDSFacadeT],
+    ],
+    typing.Generic[LDSFacadeT],
+):
+    """Independent LDS facades with shared inference/fit orchestration."""
+
+    @classmethod
+    def _inferred_collection_cls(
+        cls,
+    ) -> type[LDSInferredCollection[LDSFacadeT]]:
+        return LDSInferredCollection
+
+
+GaussianLDSCollection = LDSCollection[GaussianLDS]
+PoissonLDSCollection = LDSCollection[PoissonLDS]

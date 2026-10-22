@@ -250,30 +250,25 @@ def collection_align(
 def collection_compose(
     models: tuple[Model[EmissionsT], ...],
     posteriors: tuple[Posterior, ...],
-    alignment: jax.Array,
 ) -> Model[EmissionsT]:
-    """Compose aligned HMMs by pooling Markov sufficient statistics."""
+    """Compose already-aligned HMMs by pooling Markov sufficient statistics."""
 
-    aligned_models = tuple(
-        model.permute_states(permutation)
-        for model, permutation in zip(models, alignment, strict=True)
+    if not models:
+        raise ValueError('At least one model is required')
+
+    if len(models) != len(posteriors):
+        raise ValueError('Expected one posterior per model')
+
+    initial_counts = jnp.stack([p.expected_initial_counts() for p in posteriors]).sum(
+        axis=0
     )
-
-    aligned_posteriors = tuple(
-        posterior.permute_states(permutation)
-        for posterior, permutation in zip(posteriors, alignment, strict=True)
-    )
-
-    initial_counts = jnp.stack(
-        [p.expected_initial_counts() for p in aligned_posteriors]
-    ).sum(axis=0)
 
     transition_counts = jnp.stack(
-        [p.expected_transition_counts() for p in aligned_posteriors]
+        [p.expected_transition_counts() for p in posteriors]
     ).sum(axis=0)
 
-    initial = aligned_models[0].initial
-    transitions = aligned_models[0].transitions
+    initial = models[0].initial
+    transitions = models[0].transitions
 
     pseudocount = categorical_fit.DEFAULT_PSEUDOCOUNT
 
@@ -307,28 +302,6 @@ def collection_compose(
             dist=fitted_transitions._replace(probs=transition_probs)
         ),
         emissions=DiscreteEmissionsCollection(
-            tuple(model.emissions.get() for model in aligned_models)
+            tuple(model.emissions.get() for model in models)
         ),
-    )
-
-
-def combine(
-    key: jax.Array,
-    models: tuple[Model[EmissionsT], ...],
-    posteriors: tuple[Posterior, ...],
-    *,
-    num_restarts: int | None = 10,
-) -> Model[EmissionsT]:
-    """Align and compose existing HMM models without additional fitting."""
-
-    alignment = collection_align(
-        key,
-        posteriors,
-        num_restarts=num_restarts,
-    )
-
-    return collection_compose(
-        models,
-        posteriors,
-        alignment,
     )

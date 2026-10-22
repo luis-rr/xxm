@@ -337,7 +337,7 @@ For example:
 import xxm
 
 data = xxm.DatasetCollection.from_datasets((xxm.Dataset.from_array(observations),))
-model = xxm.GaussianLDS.via_pca(data, latent_dim=3)
+model = xxm.GaussianLDS.via_pca(key, data, latent_dim=3)
 
 fit = model.fit(data, num_iters=50)
 

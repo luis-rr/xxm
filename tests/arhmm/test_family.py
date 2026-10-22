@@ -12,7 +12,7 @@ from xxm.arhmm.data import ARDataset
 from xxm.core.data import Dataset, DatasetCollection
 
 
-def _model(family):
+def core(family):
     params = {
         'initial_probs': jnp.array([0.6, 0.4]),
         'transition_probs': jnp.array([[0.8, 0.2], [0.3, 0.7]]),
@@ -29,7 +29,7 @@ def _model(family):
 @pytest.mark.parametrize('family', ['gaussian', 'poisson'])
 @pytest.mark.parametrize('num_targets', [1, 3])
 def test_exact_posterior_matches_enumerated_paths(family, num_targets):
-    model = _model(family)
+    model = core(family)
     observations = jnp.array([[0.0], [1.0], [2.0], [0.0], [1.0]])[: 2 + num_targets]
     values = np.asarray(observations[:, 0])
     coefficients = np.asarray(model.states().affine.coefficients[:, 0, :, 0])
@@ -59,12 +59,12 @@ def test_exact_posterior_matches_enumerated_paths(family, num_targets):
 
     data = ARDataset.from_dataset(Dataset.from_array(observations), num_lags=2)
     np.testing.assert_allclose(
-        model._model.emissions.get().log_likelihoods(data.weighted_observations()),
+        model.core.emissions.get().log_likelihoods(data.weighted_observations()),
         log_likelihoods,
         atol=1e-6,
     )
     np.testing.assert_allclose(
-        model._model.emissions.get()
+        model.core.emissions.get()
         .compute_potential(data.weighted_observations())
         .log_values,
         log_likelihoods,
@@ -131,7 +131,9 @@ def test_fitting_and_multiple_initializations(facade):
     # calculation already covered by lower-level/integration tests.
     observations = jnp.array([[0.0], [1.0], [2.0], [1.0]])
     data = DatasetCollection.from_datasets((Dataset.from_array(observations),))
-    initialized = facade.via_kmeans(jax.random.key(2), data, num_states=2, num_lags=1)
+    initialized = facade.via_kmeans(
+        jax.random.key(2), data, num_states=2, num_lags=1
+    ).get()
     assert initialized.states().affine.coefficients.shape == (2, 1, 1, 1)
 
     fit = initialized.fit(data, num_iters=1, progress=False)
@@ -143,7 +145,7 @@ def test_fitting_and_multiple_initializations(facade):
 
 @pytest.mark.parametrize('family', ['gaussian', 'poisson'])
 def test_continuation_uses_chronological_history(family):
-    model = _model(family)
+    model = core(family)
     key = jax.random.key(7)
     history = jnp.array([[2.0], [1.0]])
     states, actual = model.sample(key, 3, initial_history=history)

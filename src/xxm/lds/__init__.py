@@ -7,11 +7,10 @@ from .init import (
     init_poisson_via_pca,
 )
 from .learning import fit_em, fit_laplace_em
-from .model import GaussianLDS, Inferred, PoissonLDS
+from .model import GaussianLDS, PoissonLDS
 
 __all__ = [
     'GaussianLDS',
-    'Inferred',
     'PoissonLDS',
     'Posterior',
     'fit_em',

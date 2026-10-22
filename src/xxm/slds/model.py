@@ -8,14 +8,16 @@ import typing
 import jax
 import jax.numpy as jnp
 
+from xxm.core import facade as _facade
 from xxm.core.affine import Affine
-from xxm.core.data import Dataset, DatasetCollection, Sequences
+from xxm.core.data import DatasetCollection, Sequences
 from xxm.core.dists.discrete import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
 from xxm.core.emissions.initialization import initial_latent_trajectory
+from xxm.core.facade import Fit
 from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
@@ -138,7 +140,10 @@ def _conditioned_dynamics(model: Model, inputs: jax.Array | None) -> LinearGauss
 
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, eq=False)
-class GaussianSLDS:
+class GaussianSLDS(
+    _facade.PermutableFacade[Model[GaussianEmissions]],
+    _facade.AlignableFacade[Model[GaussianEmissions]],
+):
     r"""
     Switching linear dynamical system with Gaussian emissions.
 
@@ -154,57 +159,35 @@ class GaussianSLDS:
     For $t>0$, $z_t$ selects the dynamics generating $x_t$ from $x_{t-1}$.
     """
 
-    _model: Model[GaussianEmissions]
-
-    def __post_init__(self) -> None:
-        if self._model.batch_shape != ():
-            raise ValueError('GaussianSLDS facade requires an unbatched core model')
-
-    @property
-    def model(self) -> Model[GaussianEmissions]:
-        return self._model
-
     @property
     def input_dim(self) -> int:
-        return self._model.dynamics.input_dim
+        return self.core.dynamics.input_dim
 
     @property
     def input_coefficients(self) -> jax.Array:
-        return self._model.dynamics.input_coefficients
+        return self.core.dynamics.input_coefficients
 
     @property
     def num_states(self) -> int:
         """Number of discrete dynamical states $K$."""
-        return self._model.num_states
+        return self.core.num_states
 
     @property
     def latent_dim(self) -> int:
         """Dimension $D_x$ of the continuous latent state."""
-        return self._model.dynamics.dist.output_dim
+        return self.core.dynamics.dist.output_dim
 
     def observation_dim(self, session: int | None = None) -> int:
         """Dimension $D_y$ of each observation."""
-        return self._model.emissions.get(session).observation_dim
+        return self.core.emissions.get(session).observation_dim
 
     def dynamics(self, inputs: jax.Array | None = None) -> LinearGaussian:
         """State-specific latent transitions conditioned on known inputs."""
-        return _conditioned_dynamics(self._model, inputs)
+        return _conditioned_dynamics(self.core, inputs)
 
     def emissions(self, session: int | None = None) -> LinearGaussian:
         """Linear-Gaussian observation distribution."""
-        return self._model.emissions.get(session).dist
-
-    def permute_states(self, permutation: jax.Array) -> typing.Self:
-        """Relabel the discrete latent states."""
-        return self.__class__(
-            _model=self._model.permute_states(permutation),
-        )
-
-    def align(self, alignment: Affine) -> typing.Self:
-        """Express the latent dynamics in aligned coordinates."""
-        return self.__class__(
-            _model=self._model.align(alignment),
-        )
+        return self.core.emissions.get(session).dist
 
     def most_likely_states(self, posterior: Posterior) -> jax.Array:
         """Return the marginally most likely discrete state at each time point."""
@@ -235,7 +218,7 @@ class GaussianSLDS:
     ) -> typing.Self:
         """Construct a Gaussian SLDS from discrete, latent, and emission parameters."""
         return cls(
-            _model=Model(
+            core=Model(
                 state_initial=CategoricalInitial(
                     dist=Categorical(
                         probs=initial_probs,
@@ -284,18 +267,22 @@ class GaussianSLDS:
         *,
         self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
-    ) -> typing.Self:
-        """Initialize a Gaussian SLDS from a principal-component decomposition."""
-        model = init_gaussian_via_pca(
+    ) -> GaussianSLDSCollection:
+        """Initialize an independent model for every session."""
+        return GaussianSLDSCollection.from_datasets(
             key=key,
             data=data,
-            num_states=num_states,
-            latent_dim=latent_dim,
-            self_transition_prob=self_transition_prob,
-            covariance_floor=covariance_floor,
+            init_fn=lambda session_key, dataset: cls(
+                init_gaussian_via_pca(
+                    key=session_key,
+                    data=DatasetCollection((dataset,)),
+                    num_states=num_states,
+                    latent_dim=latent_dim,
+                    self_transition_prob=self_transition_prob,
+                    covariance_floor=covariance_floor,
+                )
+            ),
         )
-
-        return cls(model)
 
     @classmethod
     def via_arhmm(
@@ -309,20 +296,24 @@ class GaussianSLDS:
         self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
         progress: bool | str = 'AR-HMM',
-    ) -> typing.Self:
-        """Initialize a Gaussian SLDS using an autoregressive HMM fit."""
-        model = init_gaussian_via_arhmm(
+    ) -> GaussianSLDSCollection:
+        """Initialize an independent model for every session."""
+        return GaussianSLDSCollection.from_datasets(
             key=key,
             data=data,
-            num_states=num_states,
-            latent_dim=latent_dim,
-            num_arhmm_iters=num_arhmm_iters,
-            self_transition_prob=self_transition_prob,
-            covariance_floor=covariance_floor,
-            progress=progress,
+            init_fn=lambda session_key, dataset: cls(
+                init_gaussian_via_arhmm(
+                    key=session_key,
+                    data=DatasetCollection((dataset,)),
+                    num_states=num_states,
+                    latent_dim=latent_dim,
+                    num_arhmm_iters=num_arhmm_iters,
+                    self_transition_prob=self_transition_prob,
+                    covariance_floor=covariance_floor,
+                    progress=progress,
+                )
+            ),
         )
-
-        return cls(model)
 
     def sample(
         self,
@@ -336,9 +327,9 @@ class GaussianSLDS:
 
         ls = LengthsSpec.from_params(steps, min_length=1)
 
-        return self._model.sample(
+        return self.core.sample(
             key,
-            inputs=_sampling_inputs(self._model, ls, inputs),
+            inputs=_sampling_inputs(self.core, ls, inputs),
             session=session,
         )
 
@@ -348,12 +339,12 @@ class GaussianSLDS:
         *,
         num_iters: int,
         initial_latents: jax.Array | None = None,
-    ) -> Inferred[GaussianSLDS]:
+    ) -> Inferred[typing.Self]:
         """Infer structured posteriors with a visibility-respecting initial trajectory."""
-        initial_latents = _initial_latents(self._model.emissions, data, initial_latents)
+        initial_latents = _initial_latents(self.core.emissions, data, initial_latents)
 
         inferred = _infer_variational_jit(
-            self._model,
+            self.core,
             data,
             num_iters=num_iters,
             initial_latents=initial_latents,
@@ -373,12 +364,12 @@ class GaussianSLDS:
         num_inference_iters: int,
         initial_latents: jax.Array | None = None,
         progress: bool | str = 'Variational EM',
-    ) -> Fit[GaussianSLDS]:
+    ) -> Fit[Inferred[typing.Self]]:
         """Fit model parameters with variational expectation-maximization."""
-        initial_latents = _initial_latents(self._model.emissions, data, initial_latents)
+        initial_latents = _initial_latents(self.core.emissions, data, initial_latents)
 
         fit = _fit_variational_em_jit(
-            self._model,
+            self.core,
             data,
             num_iters=num_iters,
             num_inference_iters=num_inference_iters,
@@ -388,7 +379,7 @@ class GaussianSLDS:
 
         return Fit(
             inferred=Inferred(
-                model=self.__class__(fit.state.model),
+                model=self._with_core(fit.state.model),
                 posterior=fit.state.posterior,
                 data=data,
             ),
@@ -398,7 +389,10 @@ class GaussianSLDS:
 
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, eq=False)
-class PoissonSLDS:
+class PoissonSLDS(
+    _facade.PermutableFacade[Model[PoissonEmissions]],
+    _facade.AlignableFacade[Model[PoissonEmissions]],
+):
     r"""
     Switching linear dynamical system with Poisson emissions.
 
@@ -414,57 +408,35 @@ class PoissonSLDS:
     For $t>0$, $z_t$ selects the dynamics generating $x_t$ from $x_{t-1}$.
     """
 
-    _model: Model[PoissonEmissions]
-
-    def __post_init__(self) -> None:
-        if self._model.batch_shape != ():
-            raise ValueError('PoissonSLDS facade requires an unbatched core model')
-
-    @property
-    def model(self) -> Model[PoissonEmissions]:
-        return self._model
-
     @property
     def input_dim(self) -> int:
-        return self._model.dynamics.input_dim
+        return self.core.dynamics.input_dim
 
     @property
     def input_coefficients(self) -> jax.Array:
-        return self._model.dynamics.input_coefficients
+        return self.core.dynamics.input_coefficients
 
     @property
     def num_states(self) -> int:
         """Number of discrete dynamical states $K$."""
-        return self._model.num_states
+        return self.core.num_states
 
     @property
     def latent_dim(self) -> int:
         """Dimension $D_x$ of the continuous latent state."""
-        return self._model.dynamics.dist.output_dim
+        return self.core.dynamics.dist.output_dim
 
     def observation_dim(self, session: int | None = None) -> int:
         """Dimension $D_y$ of each observation."""
-        return self._model.emissions.get(session).observation_dim
+        return self.core.emissions.get(session).observation_dim
 
     def dynamics(self, inputs: jax.Array | None = None) -> LinearGaussian:
         """State-specific latent transitions conditioned on known inputs."""
-        return _conditioned_dynamics(self._model, inputs)
+        return _conditioned_dynamics(self.core, inputs)
 
     def emissions(self, session: int | None = None) -> LinearPoisson:
         """Linear-Poisson observation distribution in log-rate form."""
-        return self._model.emissions.get(session).dist
-
-    def permute_states(self, permutation: jax.Array) -> typing.Self:
-        """Relabel the discrete latent states."""
-        return self.__class__(
-            _model=self._model.permute_states(permutation),
-        )
-
-    def align(self, alignment: Affine) -> typing.Self:
-        """Express the latent dynamics in aligned coordinates."""
-        return self.__class__(
-            _model=self._model.align(alignment),
-        )
+        return self.core.emissions.get(session).dist
 
     def most_likely_states(self, posterior: Posterior) -> jax.Array:
         """Return the marginally most likely discrete state at each time point."""
@@ -494,7 +466,7 @@ class PoissonSLDS:
     ) -> typing.Self:
         """Construct a Poisson SLDS from discrete, latent, and emission parameters."""
         return cls(
-            _model=Model(
+            core=Model(
                 state_initial=CategoricalInitial(
                     dist=Categorical(
                         probs=initial_probs,
@@ -542,18 +514,22 @@ class PoissonSLDS:
         *,
         self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
-    ) -> typing.Self:
-        """Initialize a Poisson SLDS from a principal-component decomposition."""
-        model = init_poisson_via_pca(
+    ) -> PoissonSLDSCollection:
+        """Initialize an independent model for every session."""
+        return PoissonSLDSCollection.from_datasets(
             key=key,
             data=data,
-            num_states=num_states,
-            latent_dim=latent_dim,
-            self_transition_prob=self_transition_prob,
-            covariance_floor=covariance_floor,
+            init_fn=lambda session_key, dataset: cls(
+                init_poisson_via_pca(
+                    key=session_key,
+                    data=DatasetCollection((dataset,)),
+                    num_states=num_states,
+                    latent_dim=latent_dim,
+                    self_transition_prob=self_transition_prob,
+                    covariance_floor=covariance_floor,
+                )
+            ),
         )
-
-        return cls(model)
 
     @classmethod
     def via_arhmm(
@@ -567,20 +543,24 @@ class PoissonSLDS:
         self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
         progress: bool | str = 'AR-HMM',
-    ) -> typing.Self:
-        """Initialize a Poisson SLDS using an autoregressive HMM fit."""
-        model = init_poisson_via_arhmm(
+    ) -> PoissonSLDSCollection:
+        """Initialize an independent model for every session."""
+        return PoissonSLDSCollection.from_datasets(
             key=key,
             data=data,
-            num_states=num_states,
-            latent_dim=latent_dim,
-            num_arhmm_iters=num_arhmm_iters,
-            self_transition_prob=self_transition_prob,
-            covariance_floor=covariance_floor,
-            progress=progress,
+            init_fn=lambda session_key, dataset: cls(
+                init_poisson_via_arhmm(
+                    key=session_key,
+                    data=DatasetCollection((dataset,)),
+                    num_states=num_states,
+                    latent_dim=latent_dim,
+                    num_arhmm_iters=num_arhmm_iters,
+                    self_transition_prob=self_transition_prob,
+                    covariance_floor=covariance_floor,
+                    progress=progress,
+                )
+            ),
         )
-
-        return cls(model)
 
     def sample(
         self,
@@ -594,9 +574,9 @@ class PoissonSLDS:
 
         ls = LengthsSpec.from_params(steps, min_length=1)
 
-        return self._model.sample(
+        return self.core.sample(
             key,
-            inputs=_sampling_inputs(self._model, ls, inputs),
+            inputs=_sampling_inputs(self.core, ls, inputs),
             session=session,
         )
 
@@ -607,12 +587,12 @@ class PoissonSLDS:
         num_iters: int,
         params: OptimParams = DEFAULT_OPTIM_PARAMS,
         initial_latents: jax.Array | None = None,
-    ) -> Inferred[PoissonSLDS]:
+    ) -> Inferred[typing.Self]:
         """Infer structured posteriors with a visibility-respecting initial trajectory."""
-        initial_latents = _initial_latents(self._model.emissions, data, initial_latents)
+        initial_latents = _initial_latents(self.core.emissions, data, initial_latents)
 
         inferred = _infer_laplace_jit(
-            self._model,
+            self.core,
             data,
             num_iters=num_iters,
             initial_latents=initial_latents,
@@ -634,13 +614,13 @@ class PoissonSLDS:
         initial_latents: jax.Array | None = None,
         laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
         progress: bool | str = 'Laplace EM',
-    ) -> Fit[PoissonSLDS]:
+    ) -> Fit[Inferred[typing.Self]]:
         """Fit model parameters with Laplace EM."""
 
-        initial_latents = _initial_latents(self._model.emissions, data, initial_latents)
+        initial_latents = _initial_latents(self.core.emissions, data, initial_latents)
 
         fit = _fit_laplace_em_jit(
-            self._model,
+            self.core,
             data,
             num_iters=num_iters,
             num_inference_iters=num_inference_iters,
@@ -651,7 +631,7 @@ class PoissonSLDS:
 
         return Fit(
             inferred=Inferred(
-                model=self.__class__(fit.state.model),
+                model=self._with_core(fit.state.model),
                 posterior=fit.state.posterior,
                 data=data,
             ),
@@ -663,21 +643,15 @@ SLDSFacadeT = typing.TypeVar('SLDSFacadeT', GaussianSLDS, PoissonSLDS)
 
 
 @dataclasses.dataclass(frozen=True, eq=False)
-class Inferred(typing.Generic[SLDSFacadeT]):
+class Inferred(
+    _facade.PermutableInferred[SLDSFacadeT, Posterior],
+    _facade.AlignableInferred[SLDSFacadeT, Posterior],
+    typing.Generic[SLDSFacadeT],
+):
     """Singular SLDS, structured posterior, and the exact source data."""
 
-    model: SLDSFacadeT
-    posterior: Posterior
-    data: DatasetCollection
-
     def __post_init__(self) -> None:
-        expected_batch = (self.data.partition.total,)
-
-        if self.posterior.batch_shape != expected_batch:
-            raise ValueError(
-                f'posterior batch must be {expected_batch}; '
-                f'got {self.posterior.batch_shape}'
-            )
+        super().__post_init__()
 
         if self.posterior.max_steps != self.data.max_steps:
             raise ValueError('posterior must match the padded time dimension')
@@ -687,16 +661,6 @@ class Inferred(typing.Generic[SLDSFacadeT]):
 
         if self.posterior.discrete.num_states != self.model.num_states:
             raise ValueError('posterior must match the model number of states')
-
-    def _session(self, session: int | None) -> tuple[Posterior, Dataset]:
-        """Select a session's posterior and source dataset."""
-
-        dataset = self.data.get(session)
-        index = 0 if session is None else session
-
-        posterior = self.posterior.select(self.data.partition.get_slice(index))
-
-        return posterior, dataset
 
     def latent_mean(self, session: int | None = None) -> Sequences:
         """Return posterior continuous latent means."""
@@ -720,7 +684,7 @@ class Inferred(typing.Generic[SLDSFacadeT]):
         """Return posterior mean observations."""
         posterior, dataset = self._session(session)
 
-        emissions = self.model.model.emissions.get(session)
+        emissions = self.model.core.emissions.get(session)
         emissions = emissions.broadcast(posterior.batch_shape)
 
         return Sequences.from_padded(
@@ -742,44 +706,39 @@ class Inferred(typing.Generic[SLDSFacadeT]):
             dataset.lengths,
         )
 
-    def permute_states(
-        self,
-        permutation: jax.Array,
-    ) -> Inferred[SLDSFacadeT]:
-        """Relabel discrete states in both the model and posterior."""
-        return self.__class__(
-            model=self.model.permute_states(permutation),
-            posterior=self.posterior.permute_states(permutation),
-            data=self.data,
-        )
 
-    def align(
-        self,
-        alignment: Affine,
-    ) -> Inferred[SLDSFacadeT]:
-        """Transform continuous latent coordinates without reinference."""
-        model = self.model.align(alignment)
-
-        posterior_alignment = alignment
-        if self.posterior.batch_shape:
-            posterior_alignment = alignment.broadcast(
-                self.posterior.batch_shape,
-                axis=0,
-            )
-
-        return self.__class__(
-            model=model,
-            posterior=self.posterior._replace(
-                continuous=self.posterior.continuous.affine(
-                    posterior_alignment,
-                ),
-            ),
-            data=self.data,
-        )
+@dataclasses.dataclass(frozen=True, eq=False)
+class SLDSInferredCollection(
+    _facade.PermutableInferredCollection[
+        'SLDSCollection[SLDSFacadeT]',
+        Posterior,
+    ],
+    _facade.AlignableInferredCollection[
+        'SLDSCollection[SLDSFacadeT]',
+        Posterior,
+    ],
+    typing.Generic[SLDSFacadeT],
+):
+    """Independent SLDS posteriors with coordinated latent transformations."""
 
 
-class Fit(typing.NamedTuple, typing.Generic[SLDSFacadeT]):
-    """Final inference result and objective trace including the initial objective."""
+@dataclasses.dataclass(frozen=True, eq=False)
+class SLDSCollection(
+    _facade.FacadeCollection[
+        SLDSFacadeT,
+        Inferred[SLDSFacadeT],
+        SLDSInferredCollection[SLDSFacadeT],
+    ],
+    typing.Generic[SLDSFacadeT],
+):
+    """Independent SLDS facades with shared inference/fit orchestration."""
 
-    inferred: Inferred[SLDSFacadeT]
-    objective_trace: jax.Array
+    @classmethod
+    def _inferred_collection_cls(
+        cls,
+    ) -> type[SLDSInferredCollection[SLDSFacadeT]]:
+        return SLDSInferredCollection
+
+
+GaussianSLDSCollection = SLDSCollection[GaussianSLDS]
+PoissonSLDSCollection = SLDSCollection[PoissonSLDS]

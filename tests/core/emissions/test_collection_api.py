@@ -36,7 +36,7 @@ def test_selected_session_density_preserves_sequence_sum_and_model_batch():
         dynamics_coefficients=jnp.eye(1),
         dynamics_bias=jnp.zeros(1),
         dynamics_covariance=jnp.eye(1),
-    )._model
+    ).core
 
     # Different observation dimensions and sequence shapes expose mismatched
     # session selection. The second emission mean is 2 at zero latents.
@@ -91,9 +91,9 @@ def test_hmm_observation_mean_selects_matching_data_and_emission():
     )
     data = DatasetCollection.from_datasets((Dataset.from_array(jnp.zeros((3, 1))),))
     inferred = model.infer(data)
-    emissions = model.model.emissions
+    emissions = model.core.emissions
     multi_model = GaussianHMM(
-        model.model._replace(
+        model.core._replace(
             emissions=DiscreteEmissionsCollection((emissions.get(), emissions.get()))
         )
     )
@@ -117,9 +117,9 @@ def test_arhmm_inferred_conditionals_forward_session():
         (Dataset.from_array(jnp.array([[1.0], [2.0], [3.0]])),)
     )
     inferred = model.infer(data)
-    emissions = model.model.emissions
+    emissions = model.core.emissions
     multi_model = GaussianARHMM(
-        model.model._replace(
+        model.core._replace(
             emissions=AREmissionsCollection((emissions.get(), emissions.get()))
         )
     )

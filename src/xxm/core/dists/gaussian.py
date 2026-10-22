@@ -1014,6 +1014,10 @@ class GaussianChainMarginals(typing.NamedTuple):
         terms = self.lengths.clear(terms)
         return jnp.sum(terms, axis=-1)
 
+    def align(self, alignment: Affine) -> typing.Self:
+        """Express posterior marginals in aligned latent coordinates."""
+        return self.affine(alignment)
+
     def affine(self, affine: Affine) -> typing.Self:
         """Push posterior marginals through a batch-aligned affine map."""
         batch.require_same_shape(self.batch_shape, affine.batch_shape)

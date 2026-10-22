@@ -52,7 +52,7 @@ def _lds_poisson():
         dynamics_covariance=jnp.array([[0.5]]),
         emission_coefficients=jnp.zeros((1, 1)),
         emission_bias=jnp.zeros(1),
-    )._model
+    ).core
 
 
 def _slds_gaussian():
@@ -67,7 +67,7 @@ def _slds_gaussian():
         emission_coefficients=jnp.array([[1.0]]),
         emission_bias=jnp.zeros(1),
         emission_covariance=jnp.array([[1.0]]),
-    )._model
+    ).core
 
 
 def _slds_poisson():
@@ -81,7 +81,7 @@ def _slds_poisson():
         dynamics_covariances=jnp.array([[[0.5]], [[0.5]]]),
         emission_coefficients=jnp.zeros((1, 1)),
         emission_bias=jnp.zeros(1),
-    )._model
+    ).core
 
 
 # These cases represent the distinct expensive JIT-compatible learning stacks.

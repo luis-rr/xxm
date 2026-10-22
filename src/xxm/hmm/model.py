@@ -8,6 +8,7 @@ import typing
 import jax
 import jax.numpy as jnp
 
+from xxm.core import facade as _facade
 from xxm.core.data import DatasetCollection, Sequences
 from xxm.core.dists.discrete import Categorical
 from xxm.core.dists.gaussian import Gaussian
@@ -17,16 +18,14 @@ from xxm.core.emissions.discrete import (
     GaussianEmissions,
     PoissonEmissions,
 )
-from xxm.core.facade import CombinableFacadeCollection as HMMCollection
 from xxm.core.facade import Fit
-from xxm.core.facade import Inferred as BaseInferred
 from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
 )
 from xxm.core.lengths import LengthsLike, LengthsSpec
 
-from .collection import combine as _combine
+from .collection import collection_align, collection_compose
 from .core import Model, Posterior, Sample
 from .inference import infer_exact
 from .init import (
@@ -67,7 +66,7 @@ def _categorical_components_from_params(
 
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, eq=False)
-class GaussianHMM:
+class GaussianHMM(_facade.PermutableFacade[Model[GaussianEmissions]]):
     r"""Hidden Markov model with Gaussian state-conditional emissions.
 
     $$z_0\sim\operatorname{Categorical}(\pi),\qquad
@@ -75,45 +74,25 @@ class GaussianHMM:
 
     $$y_t\mid z_t=k \sim \mathcal{N}(\mu_k, \Sigma_k).$$
 
-    `_model.initial.dist.probs` stores $\pi$, `_model.transitions.dist.probs`
+    `core.initial.dist.probs` stores $\pi$, `core.transitions.dist.probs`
     stores $P$, and `states` stores the Gaussian emission parameters.
     """
 
-    _model: Model[GaussianEmissions]
-
-    def __post_init__(self) -> None:
-        if self._model.batch_shape != ():
-            raise ValueError('GaussianHMM facade requires an unbatched core model')
-
-    @property
-    def model(self) -> Model[GaussianEmissions]:
-        """Underlying core model."""
-        return self._model
-
     def observation_dim(self, session: int | None = None) -> int:
-        return self._model.emissions.get(session).observation_dim
+        return self.core.emissions.get(session).observation_dim
 
     @property
     def num_states(self) -> int:
         """Number of discrete states $K$."""
-        return self._model.num_states
-
-    def permute_states(self, permutation: jax.Array) -> GaussianHMM:
-        """Relabel discrete states by permutation."""
-        return GaussianHMM(
-            _model=self._model.permute_states(permutation),
-        )
+        return self.core.num_states
 
     def states(self, session: int | None = None) -> Gaussian:
         """State-conditional emission distributions."""
-        return self._model.emissions.get(session).dist
+        return self.core.emissions.get(session).dist
 
     def most_likely_states(self, posterior: Posterior) -> jax.Array:
         """Return the marginally most likely state at each time point."""
-        return jnp.argmax(
-            posterior.state_probs,
-            axis=-1,
-        )
+        return jnp.argmax(posterior.state_probs, axis=-1)
 
     @classmethod
     def from_params(
@@ -131,7 +110,7 @@ class GaussianHMM:
         )
 
         return cls(
-            _model=Model(
+            core=Model(
                 initial=initial,
                 transitions=transitions,
                 emissions=DiscreteEmissionsCollection(
@@ -155,30 +134,23 @@ class GaussianHMM:
         num_states: int,
         *,
         self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
-    ) -> HMMCollection[typing.Self, Inferred[typing.Self], Model[GaussianEmissions]]:
+    ) -> GaussianHMMCollection:
         """Initialize an independent HMM for every session."""
-        keys = jax.random.split(key, len(data.datasets))
 
-        models = tuple(
-            cls(
+        collection = GaussianHMMCollection.from_datasets(
+            key=key,
+            data=data,
+            init_fn=lambda session_key, dataset: cls(
                 init_gaussian_via_kmeans(
                     key=session_key,
                     dataset=dataset,
                     num_states=num_states,
                     self_transition_prob=self_transition_prob,
                 )
-            )
-            for session_key, dataset in zip(
-                keys,
-                data.datasets,
-                strict=True,
-            )
+            ),
         )
 
-        return HMMCollection(
-            models=models,
-            combine_fn=_combine,
-        )
+        return collection
 
     def sample(
         self,
@@ -189,15 +161,12 @@ class GaussianHMM:
     ) -> Sample:
         r"""Sample state and observation sequences with requested lengths."""
         ls = LengthsSpec.from_params(steps, min_length=1)
-        return self._model.sample(key, ls=ls, session=session)
+        return self.core.sample(key, ls=ls, session=session)
 
-    def infer(
-        self,
-        data: DatasetCollection,
-    ) -> Inferred[GaussianHMM]:
+    def infer(self, data: DatasetCollection) -> Inferred[GaussianHMM]:
         """Infer states for all Dataset sequences and retain their source structure."""
         inferred = _infer_exact_jit(
-            self._model,
+            self.core,
             data,
         )
 
@@ -216,7 +185,7 @@ class GaussianHMM:
     ) -> Fit[Inferred[typing.Self]]:
         """Fit model parameters by expectation-maximization."""
         fit = _fit_em_jit(
-            self._model,
+            self.core,
             data,
             num_iters=num_iters,
             progress=progress,
@@ -234,7 +203,7 @@ class GaussianHMM:
 
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass(frozen=True, eq=False)
-class PoissonHMM:
+class PoissonHMM(_facade.PermutableFacade[Model[PoissonEmissions]]):
     r"""
     Hidden Markov model with Poisson emissions.
 
@@ -243,38 +212,21 @@ class PoissonHMM:
 
     $$y_t\mid z_t=k \sim \operatorname{Poisson}(\lambda_k).$$
 
-    `_model.initial.dist.probs` stores $\pi$, `_model.transitions.dist.probs`
+    `core.initial.dist.probs` stores $\pi$, `core.transitions.dist.probs`
     stores $P$, and `states.log_rates` stores $\eta_k=\log\lambda_k$.
     """
 
-    _model: Model[PoissonEmissions]
-
-    def __post_init__(self) -> None:
-        if self._model.batch_shape != ():
-            raise ValueError('PoissonHMM facade requires an unbatched core model')
-
-    @property
-    def model(self) -> Model[PoissonEmissions]:
-        """Underlying core model."""
-        return self._model
-
     def observation_dim(self, session: int | None = None) -> int:
-        return self._model.emissions.get(session).observation_dim
+        return self.core.emissions.get(session).observation_dim
 
     @property
     def num_states(self) -> int:
         """Number of discrete states $K$."""
-        return self._model.num_states
-
-    def permute_states(self, permutation: jax.Array) -> PoissonHMM:
-        """Relabel discrete states by permutation."""
-        return PoissonHMM(
-            _model=self._model.permute_states(permutation),
-        )
+        return self.core.num_states
 
     def states(self, session: int | None = None) -> Poisson:
         """State-conditional Poisson emission distributions."""
-        return self._model.emissions.get(session).dist
+        return self.core.emissions.get(session).dist
 
     @classmethod
     def from_params(
@@ -291,7 +243,7 @@ class PoissonHMM:
         )
 
         return cls(
-            _model=Model(
+            core=Model(
                 initial=initial,
                 transitions=transitions,
                 emissions=DiscreteEmissionsCollection(
@@ -314,30 +266,22 @@ class PoissonHMM:
         num_states: int,
         *,
         self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
-    ) -> HMMCollection[typing.Self, Inferred[typing.Self], Model[PoissonEmissions]]:
+    ) -> PoissonHMMCollection:
         """Initialize an independent HMM for every session."""
-        keys = jax.random.split(key, len(data.datasets))
-
-        models = tuple(
-            cls(
+        collection = PoissonHMMCollection.from_datasets(
+            key=key,
+            data=data,
+            init_fn=lambda session_key, dataset: cls(
                 init_poisson_via_kmeans(
                     key=session_key,
                     dataset=dataset,
                     num_states=num_states,
                     self_transition_prob=self_transition_prob,
                 )
-            )
-            for session_key, dataset in zip(
-                keys,
-                data.datasets,
-                strict=True,
-            )
+            ),
         )
 
-        return HMMCollection(
-            models=models,
-            combine_fn=_combine,
-        )
+        return collection
 
     def sample(
         self,
@@ -348,7 +292,7 @@ class PoissonHMM:
     ) -> Sample:
         r"""Sample state and observation sequences with requested lengths."""
         ls = LengthsSpec.from_params(steps, min_length=1)
-        return self._model.sample(key, ls=ls, session=session)
+        return self.core.sample(key, ls=ls, session=session)
 
     def infer(
         self,
@@ -356,7 +300,7 @@ class PoissonHMM:
     ) -> Inferred[PoissonHMM]:
         """Infer states for all Dataset sequences and retain their source structure."""
         inferred = infer_exact(
-            self._model,
+            self.core,
             data,
         )
 
@@ -375,7 +319,7 @@ class PoissonHMM:
     ) -> Fit[Inferred[typing.Self]]:
         """Fit model parameters by expectation-maximization."""
         fit = fit_em(
-            self._model,
+            self.core,
             data,
             num_iters=num_iters,
             progress=progress,
@@ -396,7 +340,7 @@ HMMFacadeT = typing.TypeVar('HMMFacadeT', GaussianHMM, PoissonHMM)
 
 @dataclasses.dataclass(frozen=True, eq=False)
 class Inferred(
-    BaseInferred[HMMFacadeT, Posterior],
+    _facade.PermutableInferred[HMMFacadeT, Posterior],
     typing.Generic[HMMFacadeT],
 ):
     """HMM, pooled posterior, and source session collection."""
@@ -425,7 +369,7 @@ class Inferred(
 
         posterior, dataset = self._session(session)
 
-        emissions = self.model.model.emissions.get(session)
+        emissions = self.model.core.emissions.get(session)
         emissions = emissions.broadcast(posterior.batch_shape)
 
         means = emissions.observation_mean(posterior)
@@ -433,15 +377,6 @@ class Inferred(
         return Sequences.from_padded(
             means,
             dataset.lengths,
-        )
-
-    def permute_states(self, permutation: jax.Array) -> typing.Self:
-        """Relabel discrete states by permutation."""
-
-        return type(self)(
-            model=self.model.permute_states(permutation),
-            posterior=self.posterior.permute_states(permutation),
-            data=self.data,
         )
 
     def most_likely_states(self, session: int | None = None) -> Sequences:
@@ -453,3 +388,94 @@ class Inferred(
             jnp.argmax(posterior.state_probs, axis=-1),
             dataset.lengths,
         )
+
+
+# Additional imports in hmm/model.py:
+#
+# from .collection import collection_align, collection_compose
+# from xxm.core import facade as _facade
+#
+# Remove the old CombinableFacadeCollection aliases and
+# the old _combine import.
+
+
+HMMFacadeT = typing.TypeVar('HMMFacadeT', GaussianHMM, PoissonHMM)
+
+HMMFacadeT = typing.TypeVar(
+    'HMMFacadeT',
+    GaussianHMM,
+    PoissonHMM,
+)
+
+
+@dataclasses.dataclass(frozen=True, eq=False)
+class HMMInferredCollection(
+    _facade.PermutableInferredCollection[
+        'HMMCollection[HMMFacadeT]',
+        Posterior,
+    ],
+    typing.Generic[HMMFacadeT],
+):
+    def align_states(
+        self,
+        key: jax.Array,
+        *,
+        num_restarts: int | None = 10,
+    ) -> typing.Self:
+        if len(self.posteriors) == 1:
+            return self
+
+        permutations = collection_align(
+            key,
+            self.posteriors,
+            num_restarts=num_restarts,
+        )
+
+        return self.permute_states(permutations)
+
+    def compose(self) -> HMMFacadeT:
+        """Pool sufficient statistics from already aligned sessions."""
+        if len(self.posteriors) == 1:
+            return self.models.get()
+
+        cores = typing.cast(
+            tuple[Model[typing.Any], ...],
+            tuple(model.core for model in self.models.models),
+        )
+
+        combined = collection_compose(cores, self.posteriors)
+
+        return self.models.get(0)._with_core(combined)
+
+    def combine(
+        self,
+        key: jax.Array,
+        *,
+        num_restarts: int | None = 10,
+    ) -> HMMFacadeT:
+        return self.align_states(
+            key,
+            num_restarts=num_restarts,
+        ).compose()
+
+
+@dataclasses.dataclass(frozen=True, eq=False)
+class HMMCollection(
+    _facade.FacadeCollection[
+        HMMFacadeT,
+        Inferred[HMMFacadeT],
+        HMMInferredCollection[HMMFacadeT],
+    ],
+    typing.Generic[HMMFacadeT],
+):
+    """Independent HMM facades with shared inference/fit orchestration."""
+
+    @classmethod
+    def _inferred_collection_cls(
+        cls,
+    ) -> type[HMMInferredCollection[HMMFacadeT]]:
+        return HMMInferredCollection
+
+
+GaussianHMMCollection = HMMCollection[GaussianHMM]
+PoissonHMMCollection = HMMCollection[PoissonHMM]

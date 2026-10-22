@@ -66,7 +66,7 @@ def test_slds_arhmm_warm_start(facade):
         latent_dim=1,
         num_arhmm_iters=1,
         progress=False,
-    )
+    ).get()
     assert model.num_states == 2
     assert model.latent_dim == 1
     for leaf in jax.tree.leaves(model):
