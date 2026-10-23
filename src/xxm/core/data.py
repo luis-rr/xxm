@@ -1,6 +1,7 @@
 """Batched temporal values and known data for independent trajectories."""
 
 import dataclasses
+import logging
 import typing
 
 import jax
@@ -9,6 +10,8 @@ import jax.numpy as jnp
 from xxm.core import batch
 from xxm.core.lengths import FillT, Lengths, LengthsSpec
 from xxm.core.mask import ArbitraryMask
+
+logger = logging.getLogger(__name__)
 
 BatchableT = typing.TypeVar('BatchableT', bound=batch.Batchable)
 
@@ -626,6 +629,15 @@ class Dataset:
                     batch.pad_axis(values, sequences.max_steps, axis=0)
                     for values in visible
                 ],
+            )
+
+        min_steps = min(values.shape[0] for values in observations)
+        max_steps = sequences.max_steps
+        if max_steps > 1.5 * min_steps:
+            logger.warning(
+                f'Sequence lengths range from {min_steps} to {max_steps} steps; '
+                'the longest exceeds 1.5 times the shortest. All sequences are '
+                f'padded to {max_steps} steps, which may waste memory and computation.',
             )
 
         return cls.from_padded(
