@@ -575,6 +575,18 @@ JAX compilation changes the cost model of the package, so performance work shoul
 
 Readability should only be traded for performance when the gain is meaningful and the mathematical behavior remains testable and documented.
 
+
+## Storage
+
+Concrete facades own canonical `to_params()` / `from_params(**params)` inverses.
+They expose stored mathematical parameters, preserving numerical values,
+shapes, dtypes, emission order, and all sessions. HDF5 model loading uses
+only `from_params`, with no separate reconstruction implementation.
+
+All transfers and I/O run on the host. No arbitrary Python objects, PyTree
+definitions, callables, fitting configuration, or optimization history are
+stored.
+
 ## Scope and dependencies
 
 `xxm` models statistical arrays. It is not intended to become a general data-management or experimental-analysis package.

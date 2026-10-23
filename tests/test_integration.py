@@ -50,8 +50,12 @@ def _lds_poisson():
         dynamics_coefficients=jnp.array([[0.8]]),
         dynamics_bias=jnp.array([0.0]),
         dynamics_covariance=jnp.array([[0.5]]),
-        emission_coefficients=jnp.zeros((1, 1)),
-        emission_bias=jnp.zeros(1),
+        emissions=(
+            {
+                'coefficients': jnp.zeros((1, 1)),
+                'bias': jnp.zeros(1),
+            },
+        ),
     ).core
 
 
@@ -64,9 +68,13 @@ def _slds_gaussian():
         dynamics_coefficients=jnp.array([[[0.8]], [[0.2]]]),
         dynamics_bias=jnp.zeros((2, 1)),
         dynamics_covariances=jnp.array([[[0.5]], [[0.5]]]),
-        emission_coefficients=jnp.array([[1.0]]),
-        emission_bias=jnp.zeros(1),
-        emission_covariance=jnp.array([[1.0]]),
+        emissions=(
+            {
+                'coefficients': jnp.array([[1.0]]),
+                'bias': jnp.zeros(1),
+                'covariance': jnp.array([[1.0]]),
+            },
+        ),
     ).core
 
 
@@ -79,8 +87,12 @@ def _slds_poisson():
         dynamics_coefficients=jnp.array([[[0.8]], [[0.2]]]),
         dynamics_bias=jnp.zeros((2, 1)),
         dynamics_covariances=jnp.array([[[0.5]], [[0.5]]]),
-        emission_coefficients=jnp.zeros((1, 1)),
-        emission_bias=jnp.zeros(1),
+        emissions=(
+            {
+                'coefficients': jnp.zeros((1, 1)),
+                'bias': jnp.zeros(1),
+            },
+        ),
     ).core
 
 

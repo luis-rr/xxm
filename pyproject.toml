@@ -13,6 +13,7 @@ dependencies = [
     'jax',
     'jax-tqdm',
     'numpy',
+    'h5py>=3.16,<4',
 ]
 
 [project.optional-dependencies]

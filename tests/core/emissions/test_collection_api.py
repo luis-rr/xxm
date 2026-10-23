@@ -21,9 +21,9 @@ from xxm.lds.model import GaussianLDS
 
 def test_selected_session_density_preserves_sequence_sum_and_model_batch():
     emission_params = {
-        'emission_coefficients': jnp.ones((1, 1)),
-        'emission_bias': jnp.zeros(1),
-        'emission_covariance': jnp.eye(1),
+        'coefficients': jnp.ones((1, 1)),
+        'bias': jnp.zeros(1),
+        'covariance': jnp.eye(1),
     }
     initial_params = {
         'initial_mean': jnp.zeros(1),
@@ -32,7 +32,7 @@ def test_selected_session_density_preserves_sequence_sum_and_model_batch():
 
     model = GaussianLDS.from_params(
         **initial_params,
-        **emission_params,
+        emissions=(emission_params,),
         dynamics_coefficients=jnp.eye(1),
         dynamics_bias=jnp.zeros(1),
         dynamics_covariance=jnp.eye(1),
@@ -86,8 +86,12 @@ def test_hmm_observation_mean_selects_matching_data_and_emission():
     model = GaussianHMM.from_params(
         initial_probs=jnp.ones(1),
         transition_probs=jnp.ones((1, 1)),
-        emission_means=jnp.full((1, 1), 2.0),
-        emission_covariances=jnp.ones((1, 1, 1)),
+        emissions=(
+            {
+                'mean': jnp.full((1, 1), 2.0),
+                'covariance': jnp.ones((1, 1, 1)),
+            },
+        ),
     )
     data = DatasetCollection.from_datasets((Dataset.from_array(jnp.zeros((3, 1))),))
     inferred = model.infer(data)
@@ -109,9 +113,13 @@ def test_arhmm_inferred_conditionals_forward_session():
     model = GaussianARHMM.from_params(
         initial_probs=jnp.ones(1),
         transition_probs=jnp.ones((1, 1)),
-        emission_coefficients=jnp.ones((1, 1, 1, 1)),
-        emission_bias=jnp.full((1, 1), 2.0),
-        emission_covariances=jnp.ones((1, 1, 1)),
+        emissions=(
+            {
+                'coefficients': jnp.ones((1, 1, 1, 1)),
+                'bias': jnp.full((1, 1), 2.0),
+                'covariance': jnp.ones((1, 1, 1)),
+            },
+        ),
     )
     data = DatasetCollection.from_datasets(
         (Dataset.from_array(jnp.array([[1.0], [2.0], [3.0]])),)

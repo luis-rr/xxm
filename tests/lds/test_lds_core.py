@@ -77,17 +77,21 @@ def test_dynamics_from_params_and_potentials_with_batch_and_query_axes(controlle
 @pytest.mark.parametrize('facade', [GaussianLDS, PoissonLDS])
 @pytest.mark.parametrize('controlled', [False, True])
 def test_facade_input_properties_and_conditioning(facade, controlled):
-    kwargs = {'emission_covariance': jnp.eye(1)} if facade is GaussianLDS else {}
+    kwargs = {'covariance': jnp.eye(1)} if facade is GaussianLDS else {}
     model = facade.from_params(
         initial_mean=jnp.zeros(1),
         initial_covariance=jnp.eye(1),
         dynamics_coefficients=jnp.eye(1),
         dynamics_bias=jnp.zeros(1),
         dynamics_covariance=jnp.eye(1),
-        emission_coefficients=jnp.eye(1),
-        emission_bias=jnp.zeros(1),
+        emissions=(
+            {
+                'coefficients': jnp.eye(1),
+                'bias': jnp.zeros(1),
+                **kwargs,
+            },
+        ),
         dynamics_input_coefficients=jnp.full((1, 1), 2.0) if controlled else None,
-        **kwargs,
     )
     assert model.input_dim == int(controlled)
     assert model.input_coefficients.shape == (1, int(controlled))

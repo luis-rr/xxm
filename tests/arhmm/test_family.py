@@ -16,14 +16,17 @@ def core(family):
     params = {
         'initial_probs': jnp.array([0.6, 0.4]),
         'transition_probs': jnp.array([[0.8, 0.2], [0.3, 0.7]]),
-        'emission_coefficients': jnp.array([[[[0.2], [-0.1]]], [[[0.1], [0.15]]]]),
-        'emission_bias': jnp.array([[0.1], [-0.2]]),
+    }
+    emission = {
+        'coefficients': jnp.array([[[[0.2], [-0.1]]], [[[0.1], [0.15]]]]),
+        'bias': jnp.array([[0.1], [-0.2]]),
     }
     if family == 'gaussian':
         return arhmm.GaussianARHMM.from_params(
-            **params, emission_covariances=jnp.array([[[0.7]], [[1.2]]])
+            **params,
+            emissions=({**emission, 'covariance': jnp.array([[[0.7]], [[1.2]]])},),
         )
-    return arhmm.PoissonARHMM.from_params(**params)
+    return arhmm.PoissonARHMM.from_params(**params, emissions=(emission,))
 
 
 @pytest.mark.parametrize('family', ['gaussian', 'poisson'])

@@ -15,11 +15,14 @@ from xxm.core.dists.discrete import Categorical
 from xxm.core.dists.gaussian import LinearGaussian, TemporalGaussian
 from xxm.core.dists.poisson import LinearPoisson, TemporalPoisson
 from xxm.core.facade import Fit
+from xxm.core.io import chains, hdf5
+from xxm.core.io.hdf5 import PathLike, load_model_params
 from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
 )
 from xxm.core.lengths import Lengths, LengthsLike, LengthsSpec
+from xxm.hmm.io import HMMParams
 
 from .core import Model, Posterior, Sample
 from .data import ARDataset, ARDatasetCollection
@@ -177,15 +180,34 @@ class GaussianARHMM(_facade.PermutableFacade[Model[LinearGaussian]]):
             axis=-1,
         )
 
+    def to_params(self) -> HMMParams:
+        """Return stored parameters, with one dictionary per emission session."""
+        return {
+            'initial_probs': self.core.initial.dist.probs,
+            'transition_probs': self.core.transitions.dist.probs,
+            'emissions': tuple(
+                {
+                    'coefficients': e.dist.affine.coefficients,
+                    'bias': e.dist.affine.bias,
+                    'covariance': e.dist.covariance,
+                }
+                for e in self.core.emissions.emissions
+            ),
+        }
+
+    @classmethod
+    def from_hdf5(cls, path: PathLike) -> typing.Self:
+        """Restore the model or result without running inference."""
+        params = load_model_params(path)
+        return cls.from_params(**typing.cast(HMMParams, params))
+
     @classmethod
     def from_params(
         cls,
         *,
         initial_probs: jax.Array,
         transition_probs: jax.Array,
-        emission_coefficients: jax.Array,  # (K, N, L, N)
-        emission_bias: jax.Array,  # (K, N)
-        emission_covariances: jax.Array,  # (K, N, N)
+        emissions: tuple[dict[str, jax.Array], ...],
     ) -> typing.Self:
         r"""Construct a Gaussian AR-HMM from state, transition, and AR parameters.
 
@@ -202,16 +224,14 @@ class GaussianARHMM(_facade.PermutableFacade[Model[LinearGaussian]]):
                 initial=initial,
                 transitions=transitions,
                 emissions=AREmissionsCollection(
-                    (
+                    tuple(
                         AREmissions(
-                            dist=LinearGaussian(
-                                affine=Affine(
-                                    coefficients=emission_coefficients,
-                                    bias=emission_bias,
-                                ),
-                                covariance=emission_covariances,
+                            LinearGaussian(
+                                affine=Affine(item['coefficients'], item['bias']),
+                                covariance=item['covariance'],
                             )
-                        ),
+                        )
+                        for item in emissions
                     )
                 ),
             ),
@@ -418,14 +438,33 @@ class PoissonARHMM(_facade.PermutableFacade[Model[LinearPoisson]]):
             axis=-1,
         )
 
+    def to_params(self) -> HMMParams:
+        """Return stored parameters, with one dictionary per emission session."""
+        return {
+            'initial_probs': self.core.initial.dist.probs,
+            'transition_probs': self.core.transitions.dist.probs,
+            'emissions': tuple(
+                {
+                    'coefficients': e.dist.affine.coefficients,
+                    'bias': e.dist.affine.bias,
+                }
+                for e in self.core.emissions.emissions
+            ),
+        }
+
+    @classmethod
+    def from_hdf5(cls, path: PathLike) -> typing.Self:
+        """Restore the model or result without running inference."""
+        params = load_model_params(path)
+        return cls.from_params(**typing.cast(HMMParams, params))
+
     @classmethod
     def from_params(
         cls,
         *,
         initial_probs: jax.Array,
         transition_probs: jax.Array,
-        emission_coefficients: jax.Array,  # (K, N, L, N)
-        emission_bias: jax.Array,  # (K, N)
+        emissions: tuple[dict[str, jax.Array], ...],
     ) -> typing.Self:
         r"""Construct a Poisson AR-HMM from state, transition, and log-rate parameters.
 
@@ -442,15 +481,13 @@ class PoissonARHMM(_facade.PermutableFacade[Model[LinearPoisson]]):
                 initial=initial,
                 transitions=transitions,
                 emissions=AREmissionsCollection(
-                    (
+                    tuple(
                         AREmissions(
-                            dist=LinearPoisson(
-                                affine=Affine(
-                                    coefficients=emission_coefficients,
-                                    bias=emission_bias,
-                                )
+                            LinearPoisson(
+                                affine=Affine(item['coefficients'], item['bias']),
                             )
-                        ),
+                        )
+                        for item in emissions
                     )
                 ),
             ),
@@ -566,6 +603,34 @@ class Inferred(
     typing.Generic[ARHMMFacadeT],
 ):
     """AR-HMM, pooled posterior, and source session collection."""
+
+    def to_hdf5(self, path: PathLike, *, overwrite: bool = False) -> None:
+        hdf5.save_inferred(
+            path,
+            family='arhmm',
+            model_type=f'xxm.arhmm.{type(self.model).__name__}',
+            params=self.model.to_params(),
+            posterior=chains.discrete_to_storage(self.posterior),
+            data=self.data._to_storage(),
+            overwrite=overwrite,
+        )
+
+    @classmethod
+    def from_hdf5(cls, path: PathLike) -> typing.Self:
+        """Restore the model or result without running inference."""
+        model_type, raw, stored_posterior, stored_data = hdf5.load_inferred(path)
+        data = DatasetCollection._from_storage(stored_data)
+        params = typing.cast(HMMParams, raw)
+        if model_type == 'xxm.arhmm.GaussianARHMM':
+            model = GaussianARHMM.from_params(**params)
+        elif model_type == 'xxm.arhmm.PoissonARHMM':
+            model = PoissonARHMM.from_params(**params)
+        else:
+            raise ValueError(f'Unsupported AR-HMM facade: {model_type!r}')
+        posterior = chains.discrete_from_storage(stored_posterior)
+        return cls(
+            model=typing.cast(ARHMMFacadeT, model), posterior=posterior, data=data
+        )
 
     def __post_init__(self) -> None:
         super().__post_init__()

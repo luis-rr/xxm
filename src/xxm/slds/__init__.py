@@ -13,6 +13,7 @@ from .learning import (
     fit_variational_em,
 )
 from .model import Fit, GaussianSLDS, Inferred, PoissonSLDS
+from .serialization import load_posterior, save_posterior
 
 __all__ = [
     'Fit',
@@ -29,4 +30,6 @@ __all__ = [
     'init_gaussian_via_pca',
     'init_poisson_via_arhmm',
     'init_poisson_via_pca',
+    'load_posterior',
+    'save_posterior',
 ]

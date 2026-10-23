@@ -19,6 +19,8 @@ from xxm.core.emissions.discrete import (
     PoissonEmissions,
 )
 from xxm.core.facade import Fit
+from xxm.core.io import chains, hdf5
+from xxm.core.io.hdf5 import PathLike, load_model_params
 from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
@@ -33,6 +35,7 @@ from .init import (
     init_gaussian_via_kmeans,
     init_poisson_via_kmeans,
 )
+from .io import HMMParams
 from .learning import fit_em
 
 _infer_exact_jit = jax.jit(infer_exact)
@@ -94,14 +97,30 @@ class GaussianHMM(_facade.PermutableFacade[Model[GaussianEmissions]]):
         """Return the marginally most likely state at each time point."""
         return jnp.argmax(posterior.state_probs, axis=-1)
 
+    def to_params(self) -> HMMParams:
+        """Return stored parameters, with one dictionary per emission session."""
+        return {
+            'initial_probs': self.core.initial.dist.probs,
+            'transition_probs': self.core.transitions.dist.probs,
+            'emissions': tuple(
+                {'mean': e.dist.mean, 'covariance': e.dist.covariance}
+                for e in self.core.emissions.emissions
+            ),
+        }
+
+    @classmethod
+    def from_hdf5(cls, path: PathLike) -> typing.Self:
+        """Restore the model or result without running inference."""
+        params = load_model_params(path)
+        return cls.from_params(**typing.cast(HMMParams, params))
+
     @classmethod
     def from_params(
         cls,
         *,
         initial_probs: jax.Array,
         transition_probs: jax.Array,
-        emission_means: jax.Array,
-        emission_covariances: jax.Array,
+        emissions: tuple[dict[str, jax.Array], ...],
     ) -> typing.Self:
         r"""Construct a model from its parameters."""
         initial, transitions = _categorical_components_from_params(
@@ -114,14 +133,7 @@ class GaussianHMM(_facade.PermutableFacade[Model[GaussianEmissions]]):
                 initial=initial,
                 transitions=transitions,
                 emissions=DiscreteEmissionsCollection(
-                    (
-                        GaussianEmissions(
-                            dist=Gaussian(
-                                mean=emission_means,
-                                covariance=emission_covariances,
-                            )
-                        ),
-                    )
+                    tuple(GaussianEmissions(Gaussian(**item)) for item in emissions)
                 ),
             ),
         )
@@ -228,13 +240,29 @@ class PoissonHMM(_facade.PermutableFacade[Model[PoissonEmissions]]):
         """State-conditional Poisson emission distributions."""
         return self.core.emissions.get(session).dist
 
+    def to_params(self) -> HMMParams:
+        """Return stored parameters, with one dictionary per emission session."""
+        return {
+            'initial_probs': self.core.initial.dist.probs,
+            'transition_probs': self.core.transitions.dist.probs,
+            'emissions': tuple(
+                {'log_rates': e.dist.log_rates} for e in self.core.emissions.emissions
+            ),
+        }
+
+    @classmethod
+    def from_hdf5(cls, path: PathLike) -> typing.Self:
+        """Restore the model or result without running inference."""
+        params = load_model_params(path)
+        return cls.from_params(**typing.cast(HMMParams, params))
+
     @classmethod
     def from_params(
         cls,
         *,
         initial_probs: jax.Array,
         transition_probs: jax.Array,
-        emission_log_rates: jax.Array,
+        emissions: tuple[dict[str, jax.Array], ...],
     ) -> typing.Self:
         r"""Construct a model from categorical and log-rate parameters."""
         initial, transitions = _categorical_components_from_params(
@@ -247,13 +275,7 @@ class PoissonHMM(_facade.PermutableFacade[Model[PoissonEmissions]]):
                 initial=initial,
                 transitions=transitions,
                 emissions=DiscreteEmissionsCollection(
-                    (
-                        PoissonEmissions(
-                            dist=Poisson(
-                                log_rates=emission_log_rates,
-                            )
-                        ),
-                    )
+                    tuple(PoissonEmissions(Poisson(**item)) for item in emissions)
                 ),
             ),
         )
@@ -344,6 +366,32 @@ class Inferred(
     typing.Generic[HMMFacadeT],
 ):
     """HMM, pooled posterior, and source session collection."""
+
+    def to_hdf5(self, path: PathLike, *, overwrite: bool = False) -> None:
+        hdf5.save_inferred(
+            path,
+            family='hmm',
+            model_type=f'xxm.hmm.{type(self.model).__name__}',
+            params=self.model.to_params(),
+            posterior=chains.discrete_to_storage(self.posterior),
+            data=self.data._to_storage(),
+            overwrite=overwrite,
+        )
+
+    @classmethod
+    def from_hdf5(cls, path: PathLike) -> typing.Self:
+        """Restore the model or result without running inference."""
+        model_type, raw, stored_posterior, stored_data = hdf5.load_inferred(path)
+        data = DatasetCollection._from_storage(stored_data)
+        params = typing.cast(HMMParams, raw)
+        if model_type == 'xxm.hmm.GaussianHMM':
+            model = GaussianHMM.from_params(**params)
+        elif model_type == 'xxm.hmm.PoissonHMM':
+            model = PoissonHMM.from_params(**params)
+        else:
+            raise ValueError(f'Unsupported HMM facade: {model_type!r}')
+        posterior = chains.discrete_from_storage(stored_posterior)
+        return cls(model=typing.cast(HMMFacadeT, model), posterior=posterior, data=data)
 
     def __post_init__(self) -> None:
         super().__post_init__()

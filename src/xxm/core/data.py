@@ -8,6 +8,7 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core import batch
+from xxm.core.io import hdf5
 from xxm.core.lengths import FillT, Lengths, LengthsSpec
 from xxm.core.mask import ArbitraryMask
 
@@ -798,6 +799,49 @@ class DatasetCollection(typing.NamedTuple):
     """
 
     datasets: tuple[Dataset, ...]
+
+    def _to_storage(self) -> tuple[dict[str, object], ...]:
+        return tuple(
+            {
+                'observations': dataset.observations.values,
+                'inputs': dataset.inputs.values,
+                'lengths': dataset.lengths.values,
+                'input_lengths': dataset.inputs.lengths.values,
+                'visible': dataset.visible.values,
+            }
+            for dataset in self.datasets
+        )
+
+    @classmethod
+    def _from_storage(cls, value: object) -> typing.Self:
+        datasets = []
+        for params in typing.cast(tuple[dict[str, jax.Array], ...], value):
+            lengths = Lengths(params['lengths'])
+            input_lengths = Lengths(params['input_lengths'])
+            observations = params['observations']
+            inputs = params['inputs']
+            datasets.append(
+                Dataset(
+                    observations=Sequences(observations, lengths),
+                    inputs=Sequences(inputs, input_lengths),
+                    visible=ArbitraryMask(params['visible']),
+                )
+            )
+        return cls(tuple(datasets))
+
+    def to_hdf5(self, path: hdf5.PathLike, *, overwrite: bool = False) -> None:
+        """Store complete padded sessions in their original order."""
+        hdf5.save(
+            path,
+            {'data': self._to_storage()},
+            object_type='xxm.DatasetCollection',
+            overwrite=overwrite,
+        )
+
+    @classmethod
+    def from_hdf5(cls, path: hdf5.PathLike) -> typing.Self:
+        payload = hdf5.load(path)
+        return cls._from_storage(payload['data'])
 
     @classmethod
     def from_array(

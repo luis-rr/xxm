@@ -5,6 +5,7 @@ from __future__ import annotations
 import concurrent.futures
 import dataclasses
 import typing
+from collections.abc import Mapping
 
 import jax
 import jax.numpy as jnp
@@ -13,6 +14,7 @@ from xxm.core import batch
 from xxm.core.affine import Affine
 from xxm.core.batch import Batchable
 from xxm.core.data import Dataset, DatasetCollection
+from xxm.core.io.hdf5 import PathLike, save_model_params
 
 Progress = bool | str
 
@@ -44,6 +46,20 @@ class Facade(typing.Generic[CoreT]):
 
     def _with_core(self, core: CoreT) -> typing.Self:
         return dataclasses.replace(self, core=core)
+
+    def to_params(self) -> Mapping[str, object]:
+        """Return canonical parameters; concrete facades define the schema."""
+        raise NotImplementedError
+
+    def to_hdf5(self, path: PathLike, *, overwrite: bool = False) -> None:
+        """Store this concrete facade's canonical parameters on the host."""
+        family = type(self).__module__.removesuffix('.model')
+        save_model_params(
+            path,
+            self.to_params(),
+            model_type=f'{family}.{type(self).__name__}',
+            overwrite=overwrite,
+        )
 
 
 class Permutable(Batchable, typing.Protocol):

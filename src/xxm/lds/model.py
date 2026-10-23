@@ -17,6 +17,8 @@ from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
 from xxm.core.facade import Fit
+from xxm.core.io import chains, hdf5
+from xxm.core.io.hdf5 import PathLike, load_model_params
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
 from xxm.core.lengths import LengthsLike, LengthsSpec
 from xxm.core.optim import gaussian as gaussian_fit
@@ -26,6 +28,7 @@ from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
 from .core import Model, Sample
 from .inference import elbo, infer_exact, infer_laplace
 from .init import init_gaussian_via_pca, init_poisson_via_pca
+from .io import LDSParams
 from .learning import fit_em, fit_laplace_em
 
 _infer_exact_jit = jax.jit(infer_exact)
@@ -132,6 +135,31 @@ class GaussianLDS(_facade.AlignableFacade[Model[GaussianEmissions]]):
         """Linear-Gaussian observation distribution."""
         return self.core.emissions.get(session).dist
 
+    def to_params(self) -> LDSParams:
+        """Return stored parameters, with one dictionary per emission session."""
+        return {
+            'initial_mean': self.core.initial.dist.mean,
+            'initial_covariance': self.core.initial.dist.covariance,
+            'dynamics_coefficients': self.core.dynamics.latent_coefficients,
+            'dynamics_input_coefficients': self.core.dynamics.input_coefficients,
+            'dynamics_bias': self.core.dynamics.dist.affine.bias,
+            'dynamics_covariance': self.core.dynamics.dist.covariance,
+            'emissions': tuple(
+                {
+                    'coefficients': e.dist.affine.coefficients,
+                    'bias': e.dist.affine.bias,
+                    'covariance': e.dist.covariance,
+                }
+                for e in self.core.emissions.emissions
+            ),
+        }
+
+    @classmethod
+    def from_hdf5(cls, path: PathLike) -> typing.Self:
+        """Restore the model or result without running inference."""
+        params = load_model_params(path)
+        return cls.from_params(**typing.cast(LDSParams, params))
+
     @classmethod
     def from_params(
         cls,
@@ -141,9 +169,7 @@ class GaussianLDS(_facade.AlignableFacade[Model[GaussianEmissions]]):
         dynamics_coefficients: jax.Array,
         dynamics_bias: jax.Array,
         dynamics_covariance: jax.Array,
-        emission_coefficients: jax.Array,
-        emission_bias: jax.Array,
-        emission_covariance: jax.Array,
+        emissions: tuple[dict[str, jax.Array], ...],
         dynamics_input_coefficients: jax.Array | None = None,
     ) -> typing.Self:
         """Construct a Gaussian LDS from explicit parameters."""
@@ -162,16 +188,14 @@ class GaussianLDS(_facade.AlignableFacade[Model[GaussianEmissions]]):
                 initial=initial,
                 dynamics=dynamics,
                 emissions=ContinuousEmissionsCollection(
-                    (
+                    tuple(
                         GaussianEmissions(
-                            dist=LinearGaussian(
-                                affine=Affine(
-                                    coefficients=emission_coefficients,
-                                    bias=emission_bias,
-                                ),
-                                covariance=emission_covariance,
+                            LinearGaussian(
+                                affine=Affine(item['coefficients'], item['bias']),
+                                covariance=item['covariance'],
                             )
-                        ),
+                        )
+                        for item in emissions
                     )
                 ),
             ),
@@ -298,6 +322,30 @@ class PoissonLDS(_facade.AlignableFacade[Model[PoissonEmissions]]):
         """Linear-Poisson observation distribution in log-rate form."""
         return self.core.emissions.get(session).dist
 
+    def to_params(self) -> LDSParams:
+        """Return stored parameters, with one dictionary per emission session."""
+        return {
+            'initial_mean': self.core.initial.dist.mean,
+            'initial_covariance': self.core.initial.dist.covariance,
+            'dynamics_coefficients': self.core.dynamics.latent_coefficients,
+            'dynamics_input_coefficients': self.core.dynamics.input_coefficients,
+            'dynamics_bias': self.core.dynamics.dist.affine.bias,
+            'dynamics_covariance': self.core.dynamics.dist.covariance,
+            'emissions': tuple(
+                {
+                    'coefficients': e.dist.affine.coefficients,
+                    'bias': e.dist.affine.bias,
+                }
+                for e in self.core.emissions.emissions
+            ),
+        }
+
+    @classmethod
+    def from_hdf5(cls, path: PathLike) -> typing.Self:
+        """Restore the model or result without running inference."""
+        params = load_model_params(path)
+        return cls.from_params(**typing.cast(LDSParams, params))
+
     @classmethod
     def from_params(
         cls,
@@ -307,8 +355,7 @@ class PoissonLDS(_facade.AlignableFacade[Model[PoissonEmissions]]):
         dynamics_coefficients: jax.Array,
         dynamics_bias: jax.Array,
         dynamics_covariance: jax.Array,
-        emission_coefficients: jax.Array,
-        emission_bias: jax.Array,
+        emissions: tuple[dict[str, jax.Array], ...],
         dynamics_input_coefficients: jax.Array | None = None,
     ) -> typing.Self:
         """Construct a Poisson LDS from explicit parameters."""
@@ -327,15 +374,13 @@ class PoissonLDS(_facade.AlignableFacade[Model[PoissonEmissions]]):
                 initial=initial,
                 dynamics=dynamics,
                 emissions=ContinuousEmissionsCollection(
-                    (
+                    tuple(
                         PoissonEmissions(
-                            dist=LinearPoisson(
-                                affine=Affine(
-                                    coefficients=emission_coefficients,
-                                    bias=emission_bias,
-                                )
+                            LinearPoisson(
+                                affine=Affine(item['coefficients'], item['bias']),
                             )
-                        ),
+                        )
+                        for item in emissions
                     )
                 ),
             ),
@@ -447,6 +492,32 @@ class Inferred(
     Use `get(index)` to retrieve one unpadded trajectory on the host.
     Masked observations within each sequence's length retain their timesteps.
     """
+
+    def to_hdf5(self, path: PathLike, *, overwrite: bool = False) -> None:
+        hdf5.save_inferred(
+            path,
+            family='lds',
+            model_type=f'xxm.lds.{type(self.model).__name__}',
+            params=self.model.to_params(),
+            posterior=chains.gaussian_to_storage(self.posterior),
+            data=self.data._to_storage(),
+            overwrite=overwrite,
+        )
+
+    @classmethod
+    def from_hdf5(cls, path: PathLike) -> typing.Self:
+        """Restore the model or result without running inference."""
+        model_type, raw, stored_posterior, stored_data = hdf5.load_inferred(path)
+        data = DatasetCollection._from_storage(stored_data)
+        params = typing.cast(LDSParams, raw)
+        if model_type == 'xxm.lds.GaussianLDS':
+            model = GaussianLDS.from_params(**params)
+        elif model_type == 'xxm.lds.PoissonLDS':
+            model = PoissonLDS.from_params(**params)
+        else:
+            raise ValueError(f'Unsupported LDS facade: {model_type!r}')
+        posterior = chains.gaussian_from_storage(stored_posterior)
+        return cls(model=typing.cast(LDSFacadeT, model), posterior=posterior, data=data)
 
     def __post_init__(self) -> None:
         super().__post_init__()

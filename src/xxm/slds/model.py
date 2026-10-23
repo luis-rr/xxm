@@ -18,6 +18,8 @@ from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
 from xxm.core.emissions.initialization import initial_latent_trajectory
 from xxm.core.facade import Fit
+from xxm.core.io import hdf5
+from xxm.core.io.hdf5 import PathLike, load_model_params
 from xxm.core.latents.discrete import (
     CategoricalInitial,
     CategoricalTransitions,
@@ -41,10 +43,12 @@ from .init import (
     init_poisson_via_arhmm,
     init_poisson_via_pca,
 )
+from .io import SLDSParams
 from .learning import (
     fit_laplace_em,
     fit_variational_em,
 )
+from .serialization import posterior_from_storage, posterior_to_storage
 
 _infer_variational_jit = jax.jit(
     infer_variational,
@@ -200,6 +204,33 @@ class GaussianSLDS(
         """Return the posterior mean continuous latent trajectory."""
         return posterior.continuous.means
 
+    def to_params(self) -> SLDSParams:
+        """Return stored parameters, with one dictionary per emission session."""
+        return {
+            'initial_probs': self.core.state_initial.dist.probs,
+            'transition_probs': self.core.transitions.dist.probs,
+            'latent_initial_means': self.core.latent_initial.dist.mean,
+            'latent_initial_covariances': self.core.latent_initial.dist.covariance,
+            'dynamics_coefficients': self.core.dynamics.latent_coefficients,
+            'dynamics_input_coefficients': self.core.dynamics.input_coefficients,
+            'dynamics_bias': self.core.dynamics.dist.affine.bias,
+            'dynamics_covariances': self.core.dynamics.dist.covariance,
+            'emissions': tuple(
+                {
+                    'coefficients': e.dist.affine.coefficients,
+                    'bias': e.dist.affine.bias,
+                    'covariance': e.dist.covariance,
+                }
+                for e in self.core.emissions.emissions
+            ),
+        }
+
+    @classmethod
+    def from_hdf5(cls, path: PathLike) -> typing.Self:
+        """Restore the model or result without running inference."""
+        params = load_model_params(path)
+        return cls.from_params(**typing.cast(SLDSParams, params))
+
     @classmethod
     def from_params(
         cls,
@@ -211,9 +242,7 @@ class GaussianSLDS(
         dynamics_coefficients: jax.Array,  # (K, D, D)
         dynamics_bias: jax.Array,  # (K, D)
         dynamics_covariances: jax.Array,  # (K, D, D)
-        emission_coefficients: jax.Array,  # (N, D)
-        emission_bias: jax.Array,  # (N,)
-        emission_covariance: jax.Array,  # (N, N)
+        emissions: tuple[dict[str, jax.Array], ...],
         dynamics_input_coefficients: jax.Array | None = None,
     ) -> typing.Self:
         """Construct a Gaussian SLDS from discrete, latent, and emission parameters."""
@@ -242,16 +271,14 @@ class GaussianSLDS(
                     covariance=dynamics_covariances,
                 ),
                 emissions=ContinuousEmissionsCollection(
-                    (
+                    tuple(
                         GaussianEmissions(
-                            dist=LinearGaussian(
-                                affine=Affine(
-                                    coefficients=emission_coefficients,
-                                    bias=emission_bias,
-                                ),
-                                covariance=emission_covariance,
+                            LinearGaussian(
+                                affine=Affine(item['coefficients'], item['bias']),
+                                covariance=item['covariance'],
                             )
-                        ),
+                        )
+                        for item in emissions
                     )
                 ),
             )
@@ -449,6 +476,32 @@ class PoissonSLDS(
         """Return the posterior mean continuous latent trajectory."""
         return posterior.continuous.means
 
+    def to_params(self) -> SLDSParams:
+        """Return stored parameters, with one dictionary per emission session."""
+        return {
+            'initial_probs': self.core.state_initial.dist.probs,
+            'transition_probs': self.core.transitions.dist.probs,
+            'latent_initial_means': self.core.latent_initial.dist.mean,
+            'latent_initial_covariances': self.core.latent_initial.dist.covariance,
+            'dynamics_coefficients': self.core.dynamics.latent_coefficients,
+            'dynamics_input_coefficients': self.core.dynamics.input_coefficients,
+            'dynamics_bias': self.core.dynamics.dist.affine.bias,
+            'dynamics_covariances': self.core.dynamics.dist.covariance,
+            'emissions': tuple(
+                {
+                    'coefficients': e.dist.affine.coefficients,
+                    'bias': e.dist.affine.bias,
+                }
+                for e in self.core.emissions.emissions
+            ),
+        }
+
+    @classmethod
+    def from_hdf5(cls, path: PathLike) -> typing.Self:
+        """Restore the model or result without running inference."""
+        params = load_model_params(path)
+        return cls.from_params(**typing.cast(SLDSParams, params))
+
     @classmethod
     def from_params(
         cls,
@@ -460,8 +513,7 @@ class PoissonSLDS(
         dynamics_coefficients: jax.Array,  # (K, D, D)
         dynamics_bias: jax.Array,  # (K, D)
         dynamics_covariances: jax.Array,  # (K, D, D)
-        emission_coefficients: jax.Array,  # (N, D)
-        emission_bias: jax.Array,  # (N,)
+        emissions: tuple[dict[str, jax.Array], ...],
         dynamics_input_coefficients: jax.Array | None = None,
     ) -> typing.Self:
         """Construct a Poisson SLDS from discrete, latent, and emission parameters."""
@@ -490,15 +542,13 @@ class PoissonSLDS(
                     covariance=dynamics_covariances,
                 ),
                 emissions=ContinuousEmissionsCollection(
-                    (
+                    tuple(
                         PoissonEmissions(
-                            dist=LinearPoisson(
-                                affine=Affine(
-                                    coefficients=emission_coefficients,
-                                    bias=emission_bias,
-                                ),
+                            LinearPoisson(
+                                affine=Affine(item['coefficients'], item['bias']),
                             )
-                        ),
+                        )
+                        for item in emissions
                     )
                 ),
             )
@@ -649,6 +699,34 @@ class Inferred(
     typing.Generic[SLDSFacadeT],
 ):
     """Singular SLDS, structured posterior, and the exact source data."""
+
+    def to_hdf5(self, path: PathLike, *, overwrite: bool = False) -> None:
+        hdf5.save_inferred(
+            path,
+            family='slds',
+            model_type=f'xxm.slds.{type(self.model).__name__}',
+            params=self.model.to_params(),
+            posterior=posterior_to_storage(self.posterior),
+            data=self.data._to_storage(),
+            overwrite=overwrite,
+        )
+
+    @classmethod
+    def from_hdf5(cls, path: PathLike) -> typing.Self:
+        """Restore the model or result without running inference."""
+        model_type, raw, stored_posterior, stored_data = hdf5.load_inferred(path)
+        data = DatasetCollection._from_storage(stored_data)
+        params = typing.cast(SLDSParams, raw)
+        if model_type == 'xxm.slds.GaussianSLDS':
+            model = GaussianSLDS.from_params(**params)
+        elif model_type == 'xxm.slds.PoissonSLDS':
+            model = PoissonSLDS.from_params(**params)
+        else:
+            raise ValueError(f'Unsupported SLDS facade: {model_type!r}')
+        posterior = posterior_from_storage(stored_posterior)
+        return cls(
+            model=typing.cast(SLDSFacadeT, model), posterior=posterior, data=data
+        )
 
     def __post_init__(self) -> None:
         super().__post_init__()
