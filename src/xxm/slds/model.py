@@ -200,10 +200,6 @@ class GaussianSLDS(
             axis=-1,
         )
 
-    def latent_mean(self, posterior: Posterior) -> jax.Array:
-        """Return the posterior mean continuous latent trajectory."""
-        return posterior.continuous.means
-
     def to_params(self) -> SLDSParams:
         """Return stored parameters, with one dictionary per emission session."""
         return {
@@ -472,10 +468,6 @@ class PoissonSLDS(
             axis=-1,
         )
 
-    def latent_mean(self, posterior: Posterior) -> jax.Array:
-        """Return the posterior mean continuous latent trajectory."""
-        return posterior.continuous.means
-
     def to_params(self) -> SLDSParams:
         """Return stored parameters, with one dictionary per emission session."""
         return {
@@ -740,17 +732,8 @@ class Inferred(
         if self.posterior.discrete.num_states != self.model.num_states:
             raise ValueError('posterior must match the model number of states')
 
-    def latent_mean(self, session: int | None = None) -> Sequences:
-        """Return posterior continuous latent means."""
-        posterior, dataset = self._session(session)
-
-        return Sequences.from_padded(
-            posterior.continuous.means,
-            dataset.lengths,
-        )
-
     def latent_posterior(self, session: int | None = None) -> TemporalGaussian:
-        """Return marginal continuous latent posteriors."""
+        """Return marginal continuous latent posteriors with batch (N_s,)."""
         posterior, _ = self._session(session)
         continuous = posterior.continuous
 

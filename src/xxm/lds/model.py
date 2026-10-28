@@ -528,26 +528,12 @@ class Inferred(
         if self.posterior.variable_dim != self.model.latent_dim:
             raise ValueError('posterior variable dimension must match model latent_dim')
 
-    def latent_mean(self, session: int | None = None) -> Sequences:
-        """Return latent means with the source batch shape and lengths."""
-        posterior, dataset = self._session(session)
-        return Sequences.from_padded(
-            values=posterior.means,
-            lengths=dataset.lengths,
-        )
-
-    def latent_std(self, session: int | None = None) -> Sequences:
-        """Return latent standard deviations with the source batch shape and lengths."""
-        posterior, dataset = self._session(session)
-        stds = jnp.sqrt(jnp.diagonal(posterior.covariances, axis1=-2, axis2=-1))
-
-        return Sequences.from_padded(
-            values=stds,
-            lengths=dataset.lengths,
-        )
-
     def latent_posterior(self, session: int | None = None) -> TemporalGaussian:
-        """Return marginal latent posteriors with the posterior lengths."""
+        """Return marginal latent posteriors with batch (N_s,).
+
+        Summaries such as `.mean` and `.std` are `Sequences` with padded
+        timesteps cleared.
+        """
         posterior, _ = self._session(session)
 
         return TemporalGaussian(

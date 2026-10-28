@@ -838,6 +838,14 @@ class TemporalGaussian(typing.NamedTuple):
             self.lengths,
         )
 
+    @property
+    def std(self) -> Sequences:
+        """Marginal standard deviations, with padded timesteps cleared."""
+        return Sequences.from_padded(
+            jnp.sqrt(self.dist.variance),
+            self.lengths,
+        )
+
     def select(self, index: batch.SelT) -> typing.Self:
         """Select only structural batch dimensions."""
         return batch.select(self, index)

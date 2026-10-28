@@ -341,7 +341,7 @@ model = xxm.GaussianLDS.via_pca(key, data, latent_dim=3).get()
 
 fit = model.fit(data, num_iters=50)
 
-latent = fit.inferred.latent_mean()
+latent = fit.inferred.latent_posterior().mean
 predicted = fit.inferred.observation_mean().get()
 ```
 
