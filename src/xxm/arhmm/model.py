@@ -718,6 +718,10 @@ class ARHMMCollection(
     ) -> type[ARHMMInferredCollection[ARHMMFacadeT]]:
         return ARHMMInferredCollection
 
+    @classmethod
+    def _inferred_cls(cls, model: ARHMMFacadeT) -> type[Inferred[ARHMMFacadeT]]:
+        return Inferred
+
 
 GaussianARHMMCollection = ARHMMCollection[GaussianARHMM]
 PoissonARHMMCollection = ARHMMCollection[PoissonARHMM]

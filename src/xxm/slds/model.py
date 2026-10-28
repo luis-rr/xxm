@@ -827,6 +827,10 @@ class SLDSCollection(
     ) -> type[SLDSInferredCollection[SLDSFacadeT]]:
         return SLDSInferredCollection
 
+    @classmethod
+    def _inferred_cls(cls, model: SLDSFacadeT) -> type[Inferred[SLDSFacadeT]]:
+        return Inferred
+
 
 GaussianSLDSCollection = SLDSCollection[GaussianSLDS]
 PoissonSLDSCollection = SLDSCollection[PoissonSLDS]

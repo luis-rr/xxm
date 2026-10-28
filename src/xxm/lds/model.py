@@ -609,6 +609,10 @@ class LDSCollection(
     ) -> type[LDSInferredCollection[LDSFacadeT]]:
         return LDSInferredCollection
 
+    @classmethod
+    def _inferred_cls(cls, model: LDSFacadeT) -> type[Inferred[LDSFacadeT]]:
+        return Inferred
+
 
 GaussianLDSCollection = LDSCollection[GaussianLDS]
 PoissonLDSCollection = LDSCollection[PoissonLDS]

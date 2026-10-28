@@ -524,6 +524,10 @@ class HMMCollection(
     ) -> type[HMMInferredCollection[HMMFacadeT]]:
         return HMMInferredCollection
 
+    @classmethod
+    def _inferred_cls(cls, model: HMMFacadeT) -> type[Inferred[HMMFacadeT]]:
+        return Inferred
+
 
 GaussianHMMCollection = HMMCollection[GaussianHMM]
 PoissonHMMCollection = HMMCollection[PoissonHMM]

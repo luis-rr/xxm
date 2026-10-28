@@ -207,6 +207,21 @@ class InferredCollection(typing.Generic[FacadeCollectionT, PosteriorT]):
                 'Models, posteriors, and datasets must have the same number of sessions'
             )
 
+    def get(self, session: int | None = None) -> Inferred[typing.Any, PosteriorT]:
+        """Return one session as the family's single-session result.
+
+        If `session` is omitted, require a singleton collection.
+        """
+        model = self.models.get(session)
+        index = 0 if session is None else session
+        result_cls = self.models._inferred_cls(model)
+
+        return result_cls(
+            model=model,
+            posterior=self.posteriors[index],
+            data=DatasetCollection((self.data.datasets[index],)),
+        )
+
 
 # ---------------------------------------------------------------------
 # Capability-based inferred collection mixins
@@ -340,6 +355,16 @@ class FitCollection(typing.Generic[InferredCollectionT]):
     inferred: InferredCollectionT
     objective_traces: jax.Array
 
+    def get(self, session: int | None = None) -> Fit[typing.Any]:
+        """Return one session's fit; omit `session` for a singleton collection."""
+        inferred = self.inferred.get(session)
+        index = 0 if session is None else session
+
+        return Fit(
+            inferred=inferred,
+            objective_trace=self.objective_traces[index],
+        )
+
 
 # ---------------------------------------------------------------------
 # Session orchestration
@@ -397,6 +422,11 @@ class FacadeCollection(typing.Generic[FacadeT, InferredT, InferredCollectionT]):
         raise NotImplementedError(
             'Family collections must define _inferred_collection_cls()'
         )
+
+    @classmethod
+    def _inferred_cls(cls, model: FacadeT) -> type[InferredT]:
+        """Select the single-session result type; override once per family."""
+        raise NotImplementedError('Family collections must define _inferred_cls()')
 
     def _wrap_inferred(
         self,
