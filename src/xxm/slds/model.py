@@ -12,7 +12,7 @@ from xxm.core import facade as _facade
 from xxm.core.affine import Affine
 from xxm.core.data import DatasetCollection, Sequences
 from xxm.core.dists.discrete import Categorical
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.dists.gaussian import Gaussian, LinearGaussian, TemporalGaussian
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
@@ -747,6 +747,16 @@ class Inferred(
         return Sequences.from_padded(
             posterior.continuous.means,
             dataset.lengths,
+        )
+
+    def latent_posterior(self, session: int | None = None) -> TemporalGaussian:
+        """Return marginal continuous latent posteriors."""
+        posterior, _ = self._session(session)
+        continuous = posterior.continuous
+
+        return TemporalGaussian(
+            Gaussian(continuous.means, continuous.covariances),
+            continuous.lengths,
         )
 
     def state_probs(self, session: int | None = None) -> Sequences:

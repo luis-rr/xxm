@@ -251,6 +251,12 @@ class Gaussian(typing.NamedTuple):
 
         chol = jnp.linalg.cholesky(covariance)  # (..., N, N)
 
+        # TODO assess if worth improving: the factor is broadcast to every
+        # query point and one small triangular system is solved per point.
+        # With many queries per Gaussian (e.g. grid quadrature) it is much
+        # cheaper to invert the factor once per Gaussian and apply it by a
+        # matrix product; see `_gaussian_log_prob` in `gridded.py`. Measure
+        # on current callers before changing, since this is used widely.
         # ``solve_triangular`` requires explicit matching batch dimensions.
         chol = jnp.broadcast_to(
             chol,

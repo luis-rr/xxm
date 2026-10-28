@@ -11,7 +11,7 @@ from jax import numpy as jnp
 from xxm.core import facade as _facade
 from xxm.core.affine import Affine
 from xxm.core.data import DatasetCollection, Sequences
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.dists.gaussian import Gaussian, LinearGaussian, TemporalGaussian
 from xxm.core.dists.gaussian import GaussianChainMarginals as Posterior
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.collection import ContinuousEmissionsCollection
@@ -544,6 +544,15 @@ class Inferred(
         return Sequences.from_padded(
             values=stds,
             lengths=dataset.lengths,
+        )
+
+    def latent_posterior(self, session: int | None = None) -> TemporalGaussian:
+        """Return marginal latent posteriors with the posterior lengths."""
+        posterior, _ = self._session(session)
+
+        return TemporalGaussian(
+            Gaussian(posterior.means, posterior.covariances),
+            posterior.lengths,
         )
 
     def observation_mean(self, session: int | None = None) -> Sequences:
