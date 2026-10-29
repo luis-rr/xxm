@@ -228,7 +228,7 @@ class GaussianEmissions(typing.NamedTuple):
         batch.require_same_shape(self.batch_shape, observations.batch_shape)
 
         latents = observations.safe_aligned(latents)
-        log_probs = self.conditional(latents).log_prob(observations.safe_values())
+        log_probs = self.dist.log_prob(latents, observations.safe_values())
 
         return observations.weighted_sum(log_probs)
 
@@ -291,7 +291,7 @@ class GaussianEmissions(typing.NamedTuple):
         latents: Sequences,  # (*B, *Q, D)
     ) -> Sequences:  # (*B, *Q, O)
         """Sample observations conditional on latent values."""
-        samples = self.conditional(latents.values).sample(key)
+        samples = self.dist.sample(key, latents.values)
         return Sequences.from_padded(samples, latents.lengths)
 
     def fit_params(

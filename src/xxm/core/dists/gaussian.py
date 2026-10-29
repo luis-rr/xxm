@@ -474,13 +474,37 @@ class LinearGaussian(typing.NamedTuple):
             covariance=covariance,
         )
 
+    def noise(self) -> Gaussian:
+        r"""Zero-mean residual distribution $\mathcal{N}(0, \Sigma)$."""
+        return Gaussian(
+            mean=jnp.zeros(
+                self.batch_shape + (self.output_dim,),
+                dtype=self.covariance.dtype,
+            ),
+            covariance=self.covariance,
+        )
+
+    def log_prob(
+        self,
+        inputs: jax.Array,  # (*B, *Q, *input_shape)
+        values: jax.Array,  # (*B, *Q, O)
+    ) -> jax.Array:  # (*B, *Q)
+        r"""Log density of `values` at deterministic `inputs`.
+
+        Prefer this over `conditional(inputs).log_prob(values)`, which
+        broadcasts $\Sigma$ to every query point and factors each copy.
+        """
+        return self.noise().log_prob(values - self.conditional_mean(inputs))
+
     def sample(
         self,
         key: jax.Array,
         values: jax.Array,
     ) -> jax.Array:
         """Sample from conditional distribution at deterministic input."""
-        return self.conditional(values).sample(key)
+        mean = self.conditional_mean(values)  # (*B, *Q, O)
+        query_shape = mean.shape[len(self.batch_shape) : -1]
+        return mean + self.noise().sample(key, query_shape)
 
     def compose_input(
         self,

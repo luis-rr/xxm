@@ -180,6 +180,10 @@ class LinearPoisson(typing.NamedTuple):
         """Conditional distribution at deterministic input."""
         return Poisson(log_rates=self.log_rates(values))
 
+    def log_prob(self, inputs: jax.Array, values: jax.Array) -> jax.Array:
+        """Log probability of `values` at deterministic `inputs`."""
+        return self.conditional(inputs).log_prob(values)
+
     def log_rate_moments(self, values: Gaussian) -> tuple[jax.Array, jax.Array]:
         """Mean and variance of log rates under Gaussian input."""
         return (values.affine_mean(self.affine), values.affine_variance(self.affine))

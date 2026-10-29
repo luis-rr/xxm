@@ -186,17 +186,18 @@ class AREmissions(
         """Evaluate complete-window AR likelihoods for every state."""
 
         observations = data.observations
+        state_axis = len(self.batch_shape)
 
-        conditional = self.conditional(
-            data.safe_predictors(),
-        )
+        predictors = batch.broadcast_array(
+            data.safe_predictors(), (self.num_states,), axis=state_axis
+        )  # (*B, K, T-L, L, D_y)
+        values = batch.broadcast_array(
+            observations.safe_values(), (self.num_states,), axis=state_axis
+        )  # (*B, K, T-L, D_y)
 
-        values = jnp.broadcast_to(
-            observations.safe_values()[..., None, :],
-            conditional.batch_shape + (self.observation_dim,),
-        )
-
-        log_probs = conditional.log_prob(values)
+        log_probs = jnp.moveaxis(
+            self.dist.log_prob(predictors, values), state_axis, -1
+        )  # (*B, T-L, K)
 
         return observations.safe_aligned(log_probs)
 
