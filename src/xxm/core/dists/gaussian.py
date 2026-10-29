@@ -236,44 +236,49 @@ class Gaussian(typing.NamedTuple):
             covariance=self.affine_covariance(affine),
         )
 
+    def whiten(
+        self,
+        values: jax.Array,  # (*B, *Q, N)
+    ) -> jax.Array:  # (*B, *Q, N)
+        r"""Map values to $L^{-1}(u - \mu)$, where $LL^\top = \Sigma$.
+
+        Query axes `*Q` follow the receiver batch. Each batch entry is factored
+        once and its query points are solved as columns of one system, so $L$
+        is never broadcast to every point.
+        """
+        if values.shape[-1:] != (self.variable_dim,):
+            raise ValueError('values must match the Gaussian variable dimension')
+        mean = batch.align_array(self.mean, self.batch_shape, values.shape[:-1])
+
+        chol = jnp.linalg.cholesky(self.covariance)  # (*B, N, N)
+
+        columns = jnp.swapaxes(
+            batch.flatten_query(values - mean, self.batch_shape),
+            -1,
+            -2,
+        )  # (*B, N, Q)
+
+        solved = jsp_linalg.solve_triangular(chol, columns, lower=True)
+
+        return jnp.swapaxes(solved, -1, -2).reshape(values.shape)
+
     def log_prob(
         self,
         values: jax.Array,  # (..., N)
     ) -> jax.Array:  # (...)
         """Evaluate aligned values, with query axes following the receiver batch."""
-        if values.shape[-1:] != (self.variable_dim,):
-            raise ValueError('values must match the Gaussian variable dimension')
-        mean = batch.align_array(self.mean, self.batch_shape, values.shape[:-1])
-        covariance = batch.align_array(
-            self.covariance, self.batch_shape, values.shape[:-1]
-        )
-        residuals = values - mean  # (..., N)
+        mahalanobis = jnp.sum(self.whiten(values) ** 2, axis=-1)  # (...)
 
-        chol = jnp.linalg.cholesky(covariance)  # (..., N, N)
+        chol = jnp.linalg.cholesky(self.covariance)  # (*B, N, N)
 
-        # TODO assess if worth improving: the factor is broadcast to every
-        # query point and one small triangular system is solved per point.
-        # With many queries per Gaussian (e.g. grid quadrature) it is much
-        # cheaper to invert the factor once per Gaussian and apply it by a
-        # matrix product; see `_gaussian_log_prob` in `gridded.py`. Measure
-        # on current callers before changing, since this is used widely.
-        # ``solve_triangular`` requires explicit matching batch dimensions.
-        chol = jnp.broadcast_to(
-            chol,
-            residuals.shape[:-1] + (self.variable_dim, self.variable_dim),
-        )
-
-        solved = jsp.linalg.solve_triangular(
-            chol,
-            residuals[..., None],
-            lower=True,
-        )[..., 0]  # (..., N)
-
-        mahalanobis = jnp.sum(solved**2, axis=-1)  # (...)
-
-        log_det = 2.0 * jnp.sum(
-            jnp.log(jnp.diagonal(chol, axis1=-2, axis2=-1)),
-            axis=-1,
+        log_det = batch.align_array(
+            2.0
+            * jnp.sum(
+                jnp.log(jnp.diagonal(chol, axis1=-2, axis2=-1)),
+                axis=-1,
+            ),
+            self.batch_shape,
+            values.shape[:-1],
         )  # (...)
 
         return -0.5 * (

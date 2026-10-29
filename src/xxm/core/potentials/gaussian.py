@@ -153,12 +153,6 @@ class GaussianPotential(typing.NamedTuple):
 
         coefficients = model.affine.coefficients_flat
 
-        residuals = observations - batch.align_array(
-            model.affine.bias,
-            batch_shape,
-            query_shape,
-        )
-
         cholesky = jnp.linalg.cholesky(model.covariance)
 
         whitened_coefficients = jsp_linalg.solve_triangular(
@@ -173,15 +167,10 @@ class GaussianPotential(typing.NamedTuple):
             whitened_coefficients,
         )
 
-        whitened_residuals = jsp_linalg.solve_triangular(
-            batch.align_array(
-                cholesky,
-                batch_shape,
-                query_shape,
-            ),
-            residuals[..., None],
-            lower=True,
-        )[..., 0]
+        whitened_residuals = Gaussian(
+            mean=model.affine.bias,
+            covariance=model.covariance,
+        ).whiten(observations)
 
         information_vectors = jnp.einsum(
             '...nd,...n->...d',

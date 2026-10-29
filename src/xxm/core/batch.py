@@ -475,6 +475,15 @@ def align_array(
     return broadcast_array(values, query_shape, len(batch_shape))
 
 
+def flatten_query(
+    values: jax.Array,  # (*B, *Q, N)
+    batch_shape: ShapeT,
+) -> jax.Array:  # (*B, Q, N)
+    """Merge the query axes between a batch prefix and one trailing event axis."""
+    query_shape = split_prefix(values.shape[:-1], batch_shape, name='values shape')
+    return values.reshape(batch_shape + (math.prod(query_shape), values.shape[-1]))
+
+
 def weighted_sum(
     values: jax.Array,
     weights: jax.Array,

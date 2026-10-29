@@ -75,29 +75,6 @@ def _quadrature(order: int, dim: int, dtype) -> tuple[jax.Array, jax.Array]:
     return jnp.asarray(points, dtype=dtype), jnp.asarray(products, dtype=dtype)
 
 
-def _gaussian_log_prob(dist: Gaussian, points: jax.Array) -> jax.Array:
-    """Log density at points (*B, ..., D), factorizing each Gaussian once.
-
-    `Gaussian.log_prob` broadcasts the Cholesky factor to every point and
-    solves one small triangular system per point. Here the inverse factor is
-    computed once per batch element and applied by a matrix product.
-    """
-    dim = dist.variable_dim
-    query = points.ndim - 1 - len(dist.batch_shape)
-    chol = jnp.linalg.cholesky(dist.covariance)  # (*B, D, D)
-    identity = jnp.broadcast_to(jnp.eye(dim, dtype=chol.dtype), chol.shape)
-    inverse = jsp.linalg.solve_triangular(chol, identity, lower=True)
-    log_det = 2.0 * jnp.sum(jnp.log(jnp.diagonal(chol, axis1=-2, axis2=-1)), axis=-1)
-
-    mean = dist.mean.reshape((*dist.batch_shape, *(1,) * query, dim))
-    inverse = inverse.reshape((*dist.batch_shape, *(1,) * query, dim, dim))
-    log_det = log_det.reshape((*dist.batch_shape, *(1,) * query))
-    solved = (inverse @ (points - mean)[..., None])[..., 0]
-    mahalanobis = jnp.sum(solved**2, axis=-1)
-
-    return -0.5 * (dim * jnp.log(2.0 * jnp.pi) + log_det + mahalanobis)
-
-
 def _gaussian_masses(
     dist: Gaussian,
     edges: tuple[jax.Array, ...],
@@ -128,7 +105,7 @@ def _gaussian_masses(
         log_volume = log_volume + jnp.log(width)
 
     points = jnp.stack(jnp.broadcast_arrays(*coordinates), axis=-1)
-    log_prob = _gaussian_log_prob(dist, points)  # (*B, *G, num_nodes)
+    log_prob = dist.log_prob(points)  # (*B, *G, num_nodes)
     log_weights = jnp.log(weights).reshape((1,) * (log_prob.ndim - 1) + (num_nodes,))
     log_mass = jsp.special.logsumexp(log_prob + log_weights, axis=-1)
     log_mass = log_mass + log_volume - dim * jnp.log(2.0)
