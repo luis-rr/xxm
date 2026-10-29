@@ -8,6 +8,7 @@ import typing
 import jax
 import jax.numpy as jnp
 
+from xxm.core import batch
 from xxm.core import facade as _facade
 from xxm.core.affine import Affine
 from xxm.core.data import DatasetCollection, Sequences
@@ -661,10 +662,10 @@ class Inferred(
         emissions = self.model.core.emissions.get(session)
         emissions = emissions.broadcast(posterior.batch_shape)
 
-        conditional = emissions.conditional(ar_data.safe_predictors())
-
-        means = conditional.mixture_mean(
+        means = batch.weighted_sum(
+            emissions.conditional_mean(ar_data.safe_predictors()),  # (..., T-L, K, D_y)
             posterior.state_probs,
+            posterior.state_probs.shape,
             axis=-1,
         )
 

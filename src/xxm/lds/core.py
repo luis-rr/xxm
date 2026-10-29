@@ -163,9 +163,8 @@ class Model(typing.NamedTuple, typing.Generic[EmissionsT]):
         safe_next = valid_transitions.clear(latents[..., 1:, :])
 
         dynamics = working_model.dynamics.conditional(safe_inputs)
-        dynamics = dynamics.conditional(safe_previous)
 
-        transition_log_probs = dynamics.log_prob(safe_next)
+        transition_log_probs = dynamics.log_prob(safe_previous, safe_next)
         transition_log_probs = valid_transitions.clear(transition_log_probs)
 
         dynamics_log_prob = jnp.sum(transition_log_probs, axis=-1)

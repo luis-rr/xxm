@@ -234,7 +234,7 @@ def test_poisson_rates_match_known_values():
         ),
     )
 
-    rates = emissions.rates(jnp.array([[0.0], [1.0], [2.0]]))
+    rates = emissions.conditional_mean(jnp.array([[0.0], [1.0], [2.0]]))
 
     np.testing.assert_allclose(
         rates,
@@ -334,7 +334,7 @@ def test_poisson_fit_recovers_known_parameters():
         ),
     )
 
-    observations = true_emissions.rates(latents)
+    observations = true_emissions.conditional_mean(latents)
 
     posterior = GaussianChainMarginals(
         means=latents,
@@ -432,7 +432,7 @@ def test_poisson_methods_are_jittable():
         cross_covariances=jnp.zeros((2, 2, 2)),
     )
 
-    jax.jit(emissions.rates)(latents)
+    jax.jit(emissions.conditional_mean)(latents)
     jax.jit(emissions.log_likelihood)(observations, latents)
     jax.jit(emissions.compute_local_potential)(observations, latents)
     latent_sequences = Sequences.from_padded(latents, posterior.lengths)

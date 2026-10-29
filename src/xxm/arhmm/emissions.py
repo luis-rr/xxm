@@ -179,6 +179,20 @@ class AREmissions(
         conditional = self.dist.conditional(values)
         return conditional.move_axis(len(self.batch_shape), -1)  # (*B, T-L, K)
 
+    def conditional_mean(
+        self,
+        predictors: jax.Array,  # (*B, T-L, L, D_y)
+    ) -> jax.Array:  # (*B, T-L, K, D_y)
+        """Conditional mean for each modeled time point and state.
+
+        Unlike `conditional(...).mean`, this never builds per-step covariances.
+        """
+        state_axis = len(self.batch_shape)
+        values = batch.broadcast_array(
+            predictors, (self.num_states,), axis=state_axis
+        )  # (*B, K, T-L, L, D_y)
+        return jnp.moveaxis(self.dist.conditional_mean(values), state_axis, -2)
+
     def log_likelihoods(
         self,
         data: ARWeightedObservations,
@@ -350,11 +364,7 @@ class AREmissions(
             selected = batch.take_along_last_batch(
                 self.dist, self.dist.batch_shape, state
             )
-            conditional = selected.conditional(history)
-
-            observation = conditional.sample(
-                key_observation,
-            )
+            observation = selected.sample(key_observation, history)
 
             history = jnp.concatenate(
                 [

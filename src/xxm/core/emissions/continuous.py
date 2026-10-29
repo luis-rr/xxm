@@ -457,13 +457,6 @@ class PoissonEmissions(typing.NamedTuple):
         """Conditional observation distribution given latent values."""
         return self.dist.conditional(latents)
 
-    def rates(
-        self,
-        latents: jax.Array,  # (*B, *Q, D)
-    ) -> jax.Array:  # (*B, *Q, O)
-        """Compute conditional Poisson rates."""
-        return self.conditional(latents).rates
-
     def log_likelihood(
         self,
         observations: WeightedObservations,
@@ -476,7 +469,7 @@ class PoissonEmissions(typing.NamedTuple):
         )
 
         latents = observations.safe_aligned(latents)
-        log_probs = self.conditional(latents).log_prob(observations.safe_values())
+        log_probs = self.dist.log_prob(latents, observations.safe_values())
 
         return observations.weighted_sum(log_probs)
 
@@ -524,8 +517,7 @@ class PoissonEmissions(typing.NamedTuple):
         values = observations.safe_values()
         latents = observations.safe_aligned(latents)
 
-        conditional = self.conditional(latents)
-        rates = conditional.rates
+        rates = self.dist.conditional_mean(latents)
 
         coefficients = batch.align_array(
             self.dist.affine.coefficients_flat,
@@ -548,7 +540,7 @@ class PoissonEmissions(typing.NamedTuple):
 
         potential = GaussianPotential.from_local_quadratic(
             point=latents,
-            log_value=conditional.log_prob(values),
+            log_value=self.dist.log_prob(latents, values),
             gradient=gradient,
             precision=precision,
         )
@@ -561,7 +553,7 @@ class PoissonEmissions(typing.NamedTuple):
         latents: Sequences,  # (*B, *Q, D)
     ) -> Sequences:  # (*B, *Q, O)
         """Sample observations conditional on latent values."""
-        samples = self.conditional(latents.values).sample(key)
+        samples = self.dist.sample(key, latents.values)
         return Sequences.from_padded(samples, latents.lengths)
 
     def fit_params(
@@ -642,7 +634,7 @@ class PoissonEmissions(typing.NamedTuple):
 
     def conditional_mean(self, latents: jax.Array) -> jax.Array:
         """Expected counts at deterministic latent values."""
-        return self.dist.conditional(latents).rates
+        return self.dist.conditional_mean(latents)
 
     def compose_input(
         self,
