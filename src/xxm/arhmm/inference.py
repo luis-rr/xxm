@@ -30,6 +30,8 @@ class Potentials(typing.NamedTuple):
     ) -> typing.Self:
         """Construct latent and observation factors on the compact AR timeline."""
 
+        # TODO: Consider supporting known external inputs as additional regressors in the
+        # AR emission means.
         if data.input_dim != 0:
             raise ValueError('AR-HMM does not currently support known external inputs')
 
