@@ -24,7 +24,7 @@ from xxm.hmm.io import HMMParams
 from .core import Model, Posterior, Sample
 from .data import ARDataset, ARDatasetCollection
 from .emissions import AREmissions, AREmissionsCollection, ConditionalDistT
-from .inference import infer_exact
+from .inference import elbo, infer_exact
 from .init import (
     DEFAULT_SELF_TRANSITION_PROB,
     init_gaussian_via_kmeans,
@@ -33,6 +33,7 @@ from .init import (
 from .learning import fit_em
 
 _infer_exact_jit = jax.jit(infer_exact)
+_elbo_jit = jax.jit(elbo)
 
 _fit_em_jit = jax.jit(
     fit_em,
@@ -488,6 +489,16 @@ class Inferred(
             posterior.state_probs,
             dataset.lengths.shift(-self.model.num_lags),
         )
+
+    def elbo(self) -> jax.Array:
+        r"""Conditional log-likelihood, the ELBO at the exact posterior
+        $q(z) = p(z \mid y)$ given the first $L$ observations:
+
+        $$\log p(y_{L+1:T} \mid y_{1:L})
+        = \mathbb{E}_{q(z)}[\log p(y_{L+1:T}, z \mid y_{1:L})] + \mathbb{H}[q(z)].$$
+        """
+        prepared = ARDatasetCollection.from_datasets(self.data, self.model.num_lags)
+        return _elbo_jit(self.model.core, prepared, self.posterior)
 
     def observation_mean(self, session: int | None = None) -> Sequences:
         posterior, dataset = self._session(session)

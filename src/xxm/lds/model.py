@@ -489,6 +489,13 @@ class Inferred(
         )
 
     def elbo(self) -> jax.Array:
+        r"""Evidence lower bound at the posterior $q(x)$:
+
+        $$\mathcal{L} = \mathbb{E}_{q(x)}[\log p(y, x)] + \mathbb{H}[q(x)] \le \log p(y).$$
+
+        Gaussian emissions use exact inference, so $q(x) = p(x \mid y)$ and
+        $\mathcal{L} = \log p(y)$; Poisson emissions use the Laplace $q(x)$.
+        """
         return _elbo_jit(
             self.model.core,
             self.data,

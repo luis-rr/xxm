@@ -26,7 +26,7 @@ from xxm.core.lengths import LengthsLike, LengthsSpec
 
 from .collection import collection_align, collection_compose
 from .core import Model, Posterior, Sample
-from .inference import infer_exact
+from .inference import elbo, infer_exact
 from .init import (
     DEFAULT_SELF_TRANSITION_PROB,
     EmissionT,
@@ -37,6 +37,7 @@ from .io import HMMParams
 from .learning import fit_em
 
 _infer_exact_jit = jax.jit(infer_exact)
+_elbo_jit = jax.jit(elbo)
 
 _fit_em_jit = jax.jit(
     fit_em,
@@ -315,6 +316,13 @@ class Inferred(
             posterior.state_probs,
             dataset.lengths,
         )
+
+    def elbo(self) -> jax.Array:
+        r"""Log-likelihood, the ELBO at the exact posterior $q(z) = p(z \mid y)$:
+
+        $$\log p(y) = \mathbb{E}_{q(z)}[\log p(y, z)] + \mathbb{H}[q(z)].$$
+        """
+        return _elbo_jit(self.model.core, self.data, self.posterior)
 
     def observation_mean(self, session: int | None = None) -> Sequences:
         """Return posterior mean observations for one session."""

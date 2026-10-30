@@ -42,7 +42,7 @@ from .core import (
     Posterior,
     Sample,
 )
-from .inference import infer_laplace, infer_variational
+from .inference import elbo, infer_laplace, infer_variational
 from .init import (
     DEFAULT_SELF_TRANSITION_PROB,
     init_gaussian_via_arhmm,
@@ -57,6 +57,7 @@ from .learning import (
 )
 from .serialization import posterior_from_storage, posterior_to_storage
 
+_elbo_jit = jax.jit(elbo)
 _infer_variational_jit = jax.jit(
     infer_variational,
     static_argnames=('num_iters',),
@@ -654,6 +655,14 @@ class Inferred(
             posterior.discrete.state_probs,
             dataset.lengths,
         )
+
+    def elbo(self) -> jax.Array:
+        r"""Evidence lower bound at the structured posterior $q(z)\,q(x)$:
+
+        $$\mathcal{L} = \mathbb{E}_{q(z)\,q(x)}[\log p(y, z, x)]
+        + \mathbb{H}[q(z)] + \mathbb{H}[q(x)] \le \log p(y).$$
+        """
+        return _elbo_jit(self.model.core, self.data, self.posterior)
 
     def observation_mean(self, session: int | None = None) -> Sequences:
         """Return posterior mean observations."""

@@ -113,6 +113,10 @@ class Inferred(typing.Generic[Facade_co, Posterior_co]):
         )
         return posterior, dataset
 
+    def elbo(self) -> jax.Array:
+        """Evidence lower bound of `data` under `model` at `posterior`, summed over sessions and sequences."""
+        raise NotImplementedError
+
 
 PermutableFacadeT = typing.TypeVar(
     'PermutableFacadeT', bound='PermutableFacade[typing.Any]'
@@ -210,6 +214,13 @@ class InferredCollection(typing.Generic[FacadeCollectionT, PosteriorT]):
             model=model,
             posterior=self.posteriors[index],
             data=DatasetCollection((self.data.datasets[index],)),
+        )
+
+    def elbo(self) -> jax.Array:
+        """Sum of the per-session ELBOs; see `Inferred.elbo`."""
+        return sum(
+            (self.get(i).elbo() for i in range(len(self.posteriors))),
+            start=jnp.zeros(()),
         )
 
 
