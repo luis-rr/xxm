@@ -551,7 +551,7 @@ class ExactLDSCollection(
         """Infer every session independently."""
         return self._infer_each(
             data,
-            lambda model, subset: model.infer(subset),
+            lambda session_idx, model, subset: model.infer(subset),
             max_workers=max_workers,
         )
 
@@ -566,7 +566,7 @@ class ExactLDSCollection(
         """Fit every session independently by EM."""
         return self._fit_each(
             data,
-            lambda model, subset: model.fit(
+            lambda session_idx, model, subset: model.fit(
                 subset, num_iters=num_iters, progress=progress
             ),
             max_workers=max_workers,
@@ -583,13 +583,20 @@ class LaplaceLDSCollection(
         self,
         data: DatasetCollection,
         *,
+        initial_latents: tuple[jax.Array, ...] | None = None,
         laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
         max_workers: int = 1,
     ) -> LDSInferredCollection[LaplaceLDSFacadeT]:
-        """Infer every session independently."""
+        """Infer every session independently, optionally from per-session warm starts."""
         return self._infer_each(
             data,
-            lambda model, subset: model.infer(subset, laplace_params=laplace_params),
+            lambda session_idx, model, subset: model.infer(
+                subset,
+                initial_latents=None
+                if initial_latents is None
+                else initial_latents[session_idx],
+                laplace_params=laplace_params,
+            ),
             max_workers=max_workers,
         )
 
@@ -605,7 +612,7 @@ class LaplaceLDSCollection(
         """Fit every session independently by Laplace EM."""
         return self._fit_each(
             data,
-            lambda model, subset: model.fit(
+            lambda session_idx, model, subset: model.fit(
                 subset,
                 num_iters=num_iters,
                 progress=progress,

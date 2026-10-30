@@ -739,12 +739,19 @@ class VariationalSLDSCollection(
         data: DatasetCollection,
         *,
         num_iters: int,
+        initial_latents: tuple[jax.Array, ...] | None = None,
         max_workers: int = 1,
     ) -> SLDSInferredCollection[VariationalSLDSFacadeT]:
-        """Infer every session independently."""
+        """Infer every session independently, optionally from per-session warm starts."""
         return self._infer_each(
             data,
-            lambda model, subset: model.infer(subset, num_iters=num_iters),
+            lambda session_idx, model, subset: model.infer(
+                subset,
+                num_iters=num_iters,
+                initial_latents=None
+                if initial_latents is None
+                else initial_latents[session_idx],
+            ),
             max_workers=max_workers,
         )
 
@@ -754,16 +761,20 @@ class VariationalSLDSCollection(
         *,
         num_iters: int,
         num_inference_iters: int,
+        initial_latents: tuple[jax.Array, ...] | None = None,
         progress: bool | str = False,
         max_workers: int = 1,
     ) -> _facade.FitCollection[SLDSInferredCollection[VariationalSLDSFacadeT]]:
-        """Fit every session independently by variational EM."""
+        """Fit every session independently by variational EM, optionally from per-session warm starts."""
         return self._fit_each(
             data,
-            lambda model, subset: model.fit(
+            lambda session_idx, model, subset: model.fit(
                 subset,
                 num_iters=num_iters,
                 num_inference_iters=num_inference_iters,
+                initial_latents=None
+                if initial_latents is None
+                else initial_latents[session_idx],
                 progress=progress,
             ),
             max_workers=max_workers,
@@ -781,15 +792,19 @@ class LaplaceSLDSCollection(
         data: DatasetCollection,
         *,
         num_iters: int,
+        initial_latents: tuple[jax.Array, ...] | None = None,
         laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
         max_workers: int = 1,
     ) -> SLDSInferredCollection[LaplaceSLDSFacadeT]:
-        """Infer every session independently."""
+        """Infer every session independently, optionally from per-session warm starts."""
         return self._infer_each(
             data,
-            lambda model, subset: model.infer(
+            lambda session_idx, model, subset: model.infer(
                 subset,
                 num_iters=num_iters,
+                initial_latents=None
+                if initial_latents is None
+                else initial_latents[session_idx],
                 laplace_params=laplace_params,
             ),
             max_workers=max_workers,
@@ -801,17 +816,21 @@ class LaplaceSLDSCollection(
         *,
         num_iters: int,
         num_inference_iters: int,
+        initial_latents: tuple[jax.Array, ...] | None = None,
         laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
         progress: bool | str = False,
         max_workers: int = 1,
     ) -> _facade.FitCollection[SLDSInferredCollection[LaplaceSLDSFacadeT]]:
-        """Fit every session independently by Laplace EM."""
+        """Fit every session independently by Laplace EM, optionally from per-session warm starts."""
         return self._fit_each(
             data,
-            lambda model, subset: model.fit(
+            lambda session_idx, model, subset: model.fit(
                 subset,
                 num_iters=num_iters,
                 num_inference_iters=num_inference_iters,
+                initial_latents=None
+                if initial_latents is None
+                else initial_latents[session_idx],
                 progress=progress,
                 laplace_params=laplace_params,
             ),

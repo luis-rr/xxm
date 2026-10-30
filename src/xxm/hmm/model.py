@@ -431,7 +431,7 @@ class HMMCollection(
         """Infer every session independently."""
         return self._infer_each(
             data,
-            lambda model, subset: model.infer(subset),
+            lambda session_idx, model, subset: model.infer(subset),
             max_workers=max_workers,
         )
 
@@ -446,8 +446,10 @@ class HMMCollection(
         """Fit every session independently by EM."""
         return self._fit_each(
             data,
-            lambda model, subset: model.fit(
-                subset, num_iters=num_iters, progress=progress
+            lambda session_idx, model, subset: model.fit(
+                subset,
+                num_iters=num_iters,
+                progress=progress,
             ),
             max_workers=max_workers,
         )

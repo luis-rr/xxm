@@ -464,12 +464,15 @@ class FacadeCollection(typing.Generic[FacadeT, InferredT, InferredCollectionT]):
     def map(
         self,
         data: DatasetCollection,
-        function: typing.Callable[[FacadeT, DatasetCollection], ResultT],
+        function: typing.Callable[[int, FacadeT, DatasetCollection], ResultT],
         *,
         map_progress: Progress = False,
         max_workers: int = 1,
     ) -> tuple[ResultT, ...]:
         """Map a session operation, returning results in session order.
+
+        `function` receives the session index, its facade, and its
+        single-session data.
 
         Progress measures host completion, not JAX device completion.
         """
@@ -478,21 +481,21 @@ class FacadeCollection(typing.Generic[FacadeT, InferredT, InferredCollectionT]):
 
         pairs = tuple(zip(self.models, data.datasets, strict=True))
 
-        def apply(pair: tuple[FacadeT, Dataset]) -> ResultT:
-            model, dataset = pair
-            return function(model, DatasetCollection((dataset,)))
+        def apply(session_idx: int) -> ResultT:
+            model, dataset = pairs[session_idx]
+            return function(session_idx, model, DatasetCollection((dataset,)))
 
         if max_workers == 1:
             return tuple(
                 _with_progress(
-                    (apply(pair) for pair in pairs),
+                    (apply(session_idx) for session_idx in range(len(pairs))),
                     total=len(pairs),
                     progress=map_progress,
                 )
             )
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(apply, pair): i for i, pair in enumerate(pairs)}
+            futures = {executor.submit(apply, i): i for i in range(len(pairs))}
             completed: dict[int, ResultT] = {}
             for future in _with_progress(
                 concurrent.futures.as_completed(futures),
@@ -506,7 +509,7 @@ class FacadeCollection(typing.Generic[FacadeT, InferredT, InferredCollectionT]):
     def _infer_each(
         self,
         data: DatasetCollection,
-        infer: typing.Callable[[FacadeT, DatasetCollection], InferredT],
+        infer: typing.Callable[[int, FacadeT, DatasetCollection], InferredT],
         *,
         max_workers: int,
     ) -> InferredCollectionT:
@@ -523,7 +526,7 @@ class FacadeCollection(typing.Generic[FacadeT, InferredT, InferredCollectionT]):
     def _fit_each(
         self,
         data: DatasetCollection,
-        fit: typing.Callable[[FacadeT, DatasetCollection], Fit[InferredT]],
+        fit: typing.Callable[[int, FacadeT, DatasetCollection], Fit[InferredT]],
         *,
         max_workers: int,
     ) -> FitCollection[InferredCollectionT]:
