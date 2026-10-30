@@ -67,7 +67,7 @@ class GaussianNoise(typing.NamedTuple):
         cls,
         dim: int,
         batch_shape: tuple[int, ...] = (),
-        dtype: jax.typing.DTypeLike = jnp.float32,
+        dtype: jax.typing.DTypeLike | None = None,
     ) -> typing.Self:
         """Unit noise with identity covariance and batch `batch_shape`."""
         return cls(
