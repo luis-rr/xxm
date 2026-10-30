@@ -1,10 +1,14 @@
 import jax.numpy as jnp
 import numpy as np
 
-from xxm.core.affine import Affine
 from xxm.core.data import Dataset, DatasetCollection, Sequences
 from xxm.core.dists.discrete import Categorical, DiscreteChainMarginals
-from xxm.core.dists.gaussian import Gaussian, GaussianChainMarginals, LinearGaussian
+from xxm.core.dists.gaussian import (
+    Gaussian,
+    GaussianChainMarginals,
+    GaussianNoise,
+    LinearGaussian,
+)
 from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import GaussianEmissions
 from xxm.core.inference import InferenceState
@@ -71,12 +75,8 @@ def _posterior() -> Posterior:
 
 def _dynamics() -> GaussianLinearSwitchingDynamics:
     return GaussianLinearSwitchingDynamics(
-        dist=LinearGaussian(
-            affine=Affine(
-                coefficients=jnp.zeros((1, 1, 1)),
-                bias=jnp.zeros((1, 1)),
-            ),
-            covariance=jnp.ones((1, 1, 1)),
+        dist=LinearGaussian.from_components(
+            jnp.zeros((1, 1, 1)), jnp.zeros((1, 1)), jnp.ones((1, 1, 1))
         ),
     )
 
@@ -94,21 +94,14 @@ def _model() -> Model:
             )
         ),
         latent_initial=StateConditionedGaussian(
-            dist=Gaussian(
-                mean=jnp.array([[7.0]]),
-                covariance=jnp.array([[[2.0]]]),
-            )
+            dist=Gaussian.from_moments(jnp.array([[7.0]]), jnp.array([[[2.0]]]))
         ),
         dynamics=_dynamics(),
         emissions=ContinuousEmissionsCollection(
             (
                 GaussianEmissions(
-                    dist=LinearGaussian(
-                        affine=Affine(
-                            coefficients=jnp.array([[1.0]]),
-                            bias=jnp.array([0.0]),
-                        ),
-                        covariance=jnp.array([[1.0]]),
+                    dist=LinearGaussian.from_components(
+                        jnp.array([[1.0]]), jnp.array([0.0]), jnp.array([[1.0]])
                     )
                 ),
             ),
@@ -157,10 +150,10 @@ def test_model_fit_params_updates_latent_initial_from_posterior():
     np.testing.assert_allclose(fitted.latent_initial.dist.mean, posterior.means[0:1])
     initial_covariance = posterior.covariances[0:1]
 
-    expected_covariance = gaussian_fit.add_covariance_floor(
-        initial_covariance,
-        reference_covariance=initial_covariance,
-        covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
+    expected_covariance = (
+        GaussianNoise(initial_covariance)
+        .with_floor(gaussian_fit.DEFAULT_COV_FLOOR)
+        .covariance
     )
 
     np.testing.assert_allclose(
@@ -194,10 +187,10 @@ def test_variational_em_step_returns_finite_objective():
     )
     initial_covariance = posterior.covariances[0:1]
 
-    expected_covariance = gaussian_fit.add_covariance_floor(
-        initial_covariance,
-        reference_covariance=initial_covariance,
-        covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR,
+    expected_covariance = (
+        GaussianNoise(initial_covariance)
+        .with_floor(gaussian_fit.DEFAULT_COV_FLOOR)
+        .covariance
     )
 
     np.testing.assert_allclose(

@@ -6,7 +6,6 @@ import typing
 
 import jax
 import jax.numpy as jnp
-import jax.scipy.linalg as jsp_linalg
 
 from xxm.core import batch
 from xxm.core.dists.gaussian import (
@@ -16,36 +15,6 @@ from xxm.core.dists.gaussian import (
     PairedGaussian,
 )
 from xxm.core.lengths import Lengths
-
-
-def _precision_and_log_det(
-    covariance: jax.Array,  # (..., N, N)
-) -> tuple[jax.Array, jax.Array]:
-    """Convert covariance to precision and log determinant."""
-
-    if covariance.shape[-2] != covariance.shape[-1]:
-        raise ValueError('covariance must have shape (..., N, N)')
-
-    variable_dim = covariance.shape[-1]
-
-    cholesky = jnp.linalg.cholesky(covariance)
-
-    identity = jnp.broadcast_to(
-        jnp.eye(variable_dim, dtype=covariance.dtype),
-        covariance.shape,
-    )
-
-    precision = jsp_linalg.cho_solve(
-        (cholesky, True),
-        identity,
-    )
-
-    log_det = 2.0 * jnp.sum(
-        jnp.log(jnp.diagonal(cholesky, axis1=-2, axis2=-1)),
-        axis=-1,
-    )
-
-    return precision, log_det
 
 
 class GaussianPotential(typing.NamedTuple):
@@ -109,7 +78,8 @@ class GaussianPotential(typing.NamedTuple):
                 'with matching leading dimensions'
             )
 
-        precision, log_det_covariance = _precision_and_log_det(gaussian.covariance)
+        precision = gaussian.noise.precision()
+        log_det_covariance = gaussian.noise.log_det()
 
         information = jnp.einsum(
             '...ij,...j->...i',
@@ -151,14 +121,13 @@ class GaussianPotential(typing.NamedTuple):
         batch_shape = model.batch_shape
         query_shape = observations.shape[:-1]
 
-        coefficients = model.affine.coefficients_flat
+        coefficients = model.affine.coefficients_flat  # (*B, O, D)
 
-        cholesky = jnp.linalg.cholesky(model.covariance)
-
-        whitened_coefficients = jsp_linalg.solve_triangular(
-            cholesky,
-            coefficients,
-            lower=True,
+        # L^{-1} C: whiten each input direction, a column of C, as a query vector.
+        whitened_coefficients = jnp.swapaxes(
+            model.noise.whiten(jnp.swapaxes(coefficients, -1, -2)),
+            -1,
+            -2,
         )
 
         precision_block = jnp.einsum(
@@ -167,10 +136,10 @@ class GaussianPotential(typing.NamedTuple):
             whitened_coefficients,
         )
 
-        whitened_residuals = Gaussian(
-            mean=model.affine.bias,
-            covariance=model.covariance,
-        ).whiten(observations)
+        whitened_residuals = model.noise.whiten(
+            observations
+            - batch.align_array(model.affine.bias, batch_shape, query_shape)
+        )
 
         information_vectors = jnp.einsum(
             '...nd,...n->...d',
@@ -187,19 +156,8 @@ class GaussianPotential(typing.NamedTuple):
             axis=-1,
         )
 
-        log_det_covariance = 2.0 * jnp.sum(
-            jnp.log(
-                jnp.diagonal(
-                    cholesky,
-                    axis1=-2,
-                    axis2=-1,
-                )
-            ),
-            axis=-1,
-        )
-
         log_det_covariance = batch.align_array(
-            log_det_covariance,
+            model.noise.log_det(),
             batch_shape,
             query_shape,
         )
@@ -500,7 +458,8 @@ class GaussianPairPotential(typing.NamedTuple):
                 'with matching leading dimensions'
             )
 
-        precision, log_det_covariance = _precision_and_log_det(lin_gaussian.covariance)
+        precision = lin_gaussian.noise.precision()
+        log_det_covariance = lin_gaussian.noise.log_det()
 
         matrix_t = jnp.swapaxes(
             lin_gaussian.affine.coefficients,

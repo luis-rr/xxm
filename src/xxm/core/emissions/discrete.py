@@ -280,7 +280,7 @@ class GaussianEmissions(typing.NamedTuple):
     @classmethod
     def from_params(cls, *, mean: jax.Array, covariance: jax.Array) -> typing.Self:
         """Construct emissions from canonical stored parameters."""
-        return cls(Gaussian(mean=mean, covariance=covariance))
+        return cls(Gaussian.from_moments(mean, covariance))
 
     @classmethod
     def from_assignments(
@@ -310,13 +310,13 @@ class GaussianEmissions(typing.NamedTuple):
         empty = _empty_groups(observations, assignments, sample_weights, num_states)
 
         return cls(
-            gaussian._replace(
-                mean=jnp.where(
+            Gaussian.from_moments(
+                jnp.where(
                     empty[:, None],
                     pooled.mean[None, :],
                     gaussian.mean,
                 ),
-                covariance=jnp.where(
+                jnp.where(
                     empty[:, None, None],
                     pooled.covariance[None, :, :],
                     gaussian.covariance,

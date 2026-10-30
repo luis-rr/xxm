@@ -171,7 +171,7 @@ class LDS(_facade.AlignableFacade[Model[EmissionsT]], typing.Generic[EmissionsT]
     ) -> typing.Self:
         """Construct an LDS from explicit parameters."""
         initial = GaussianInitial(
-            dist=Gaussian(mean=initial_mean, covariance=initial_covariance)
+            dist=Gaussian.from_moments(initial_mean, initial_covariance)
         )
         dynamics = GaussianLinearDynamics.from_params(
             latent_coefficients=dynamics_coefficients,
@@ -448,7 +448,7 @@ class Inferred(
         posterior, _ = self._session(session)
 
         return TemporalGaussian(
-            Gaussian(posterior.means, posterior.covariances),
+            Gaussian.from_moments(posterior.means, posterior.covariances),
             posterior.lengths,
         )
 

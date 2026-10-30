@@ -22,14 +22,9 @@ from .lds_helpers import make_model, make_observations
 
 def make_scalar_poisson_model() -> Model[PoissonEmissions]:
     return Model(
-        initial=GaussianInitial(
-            dist=Gaussian(mean=jnp.zeros(1), covariance=jnp.eye(1))
-        ),
+        initial=GaussianInitial(dist=Gaussian.from_moments(jnp.zeros(1), jnp.eye(1))),
         dynamics=GaussianLinearDynamics(
-            dist=LinearGaussian(
-                affine=Affine(coefficients=jnp.eye(1), bias=jnp.zeros(1)),
-                covariance=jnp.eye(1),
-            ),
+            dist=LinearGaussian.from_components(jnp.eye(1), jnp.zeros(1), jnp.eye(1)),
         ),
         emissions=ContinuousEmissionsCollection(
             (
@@ -103,7 +98,7 @@ def test_withheld_observations_do_not_change_inference(make, infer):
 
 def test_hidden_timesteps_keep_known_inputs_and_padding_excludes_transitions():
     model = Model(
-        initial=GaussianInitial(Gaussian(jnp.zeros(1), jnp.eye(1))),
+        initial=GaussianInitial(Gaussian.from_moments(jnp.zeros(1), jnp.eye(1))),
         dynamics=GaussianLinearDynamics.from_params(
             latent_coefficients=jnp.eye(1),
             input_coefficients=jnp.array([[2.0]]),
@@ -113,7 +108,7 @@ def test_hidden_timesteps_keep_known_inputs_and_padding_excludes_transitions():
         emissions=ContinuousEmissionsCollection(
             (
                 GaussianEmissions(
-                    LinearGaussian(Affine(jnp.eye(1), jnp.zeros(1)), jnp.eye(1))
+                    LinearGaussian.from_components(jnp.eye(1), jnp.zeros(1), jnp.eye(1))
                 ),
             ),
         ),

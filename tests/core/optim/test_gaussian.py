@@ -116,9 +116,9 @@ def test_public_routines_are_jittable():
 
     @jax.jit
     def run(observations, means, covariances, weights, inputs, outputs):
-        log_likelihoods = Gaussian(
-            mean=means, covariance=covariances
-        ).log_prob_broadcast(observations)
+        log_likelihoods = Gaussian.from_moments(means, covariances).log_prob_broadcast(
+            observations
+        )
         weighted_fit = gaussian_fit.from_samples_weighted(
             observations,
             weights,

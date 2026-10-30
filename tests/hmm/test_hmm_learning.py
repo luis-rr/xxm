@@ -209,14 +209,14 @@ def test_poisson_m_step():
 
 def test_gaussian_log_likelihoods():
     emissions = GaussianEmissions(
-        dist=Gaussian(
-            mean=jnp.array(
+        dist=Gaussian.from_moments(
+            jnp.array(
                 [
                     [0.0],
                     [2.0],
                 ]
             ),
-            covariance=jnp.array(
+            jnp.array(
                 [
                     [[1.0]],
                     [[1.0]],
@@ -267,7 +267,7 @@ def test_gaussian_m_step():
     )
 
     emissions = GaussianEmissions(
-        dist=Gaussian(mean=jnp.zeros((2, 1)), covariance=jnp.ones((2, 1, 1))),
+        dist=Gaussian.from_moments(jnp.zeros((2, 1)), jnp.ones((2, 1, 1))),
     )
 
     result = emissions.fit_params(

@@ -11,7 +11,7 @@ from xxm.core.dists.poisson import Poisson
 
 
 def gaussian(batch=(2, 3), dim=2):
-    return Gaussian(
+    return Gaussian.from_moments(
         jnp.arange(np.prod(batch) * dim, dtype=float).reshape(batch + (dim,)),
         jnp.broadcast_to(jnp.eye(dim), batch + (dim, dim)),
     )

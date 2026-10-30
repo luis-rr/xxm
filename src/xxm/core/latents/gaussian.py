@@ -73,9 +73,9 @@ class GaussianInitial(typing.NamedTuple):
 
         initial_marginals, initial_weights = batch.pool_samples(
             (
-                Gaussian(
-                    mean=means[..., 0, :],
-                    covariance=covariances[..., 0, :, :],
+                Gaussian.from_moments(
+                    means[..., 0, :],
+                    covariances[..., 0, :, :],
                 ),
                 weights[..., 0],
             ),
@@ -88,10 +88,7 @@ class GaussianInitial(typing.NamedTuple):
 
         reference_marginals, reference_weights = batch.pool_samples(
             (
-                Gaussian(
-                    mean=means,
-                    covariance=covariances,
-                ),
+                Gaussian.from_moments(means, covariances),
                 weights,
             ),
             self.batch_shape,
@@ -101,13 +98,9 @@ class GaussianInitial(typing.NamedTuple):
             reference_marginals, weights=reference_weights
         )
 
-        covariance = gaussian_fit.add_covariance_floor(
-            initial.covariance,
-            reference_covariance=reference.covariance,
-            covariance_floor=covariance_floor,
+        fitted = initial._replace(
+            noise=initial.noise.with_floor(covariance_floor, reference=reference.noise)
         )
-
-        fitted = initial._replace(covariance=covariance)
         return self._replace(
             dist=filter_valid_batches(fitted, self.dist, initial_weights)
         )
@@ -146,12 +139,7 @@ class GaussianInitial(typing.NamedTuple):
             batch_shape=batch_shape,
         )
 
-        return cls(
-            Gaussian(
-                mean=latents[..., 0, :],
-                covariance=reference.covariance,
-            )
-        )
+        return cls(Gaussian.from_moments(latents[..., 0, :], reference.covariance))
 
 
 class GaussianLinearDynamics(typing.NamedTuple):
@@ -188,14 +176,10 @@ class GaussianLinearDynamics(typing.NamedTuple):
             input_coefficients = jnp.asarray(input_coefficients)
 
         return cls(
-            dist=LinearGaussian(
-                affine=Affine(
-                    coefficients=jnp.concatenate(
-                        [latent_coefficients, input_coefficients], axis=-1
-                    ),
-                    bias=bias,
-                ),
-                covariance=covariance,
+            dist=LinearGaussian.from_components(
+                jnp.concatenate([latent_coefficients, input_coefficients], axis=-1),
+                bias,
+                covariance,
             )
         )
 
@@ -283,13 +267,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
             self.dist.covariance, self.batch_shape, inputs.shape[:-1]
         )
 
-        return LinearGaussian(
-            affine=Affine(
-                coefficients=coefficients,
-                bias=bias,
-            ),
-            covariance=covariance,
-        )
+        return LinearGaussian.from_components(coefficients, bias, covariance)
 
     def fit_params(
         self,
@@ -539,16 +517,6 @@ class GaussianLinearDynamics(typing.NamedTuple):
 
         input_coefficients = alignment.coefficients @ self.input_coefficients
 
-        covariance = (
-            alignment.coefficients
-            @ self.dist.covariance
-            @ jnp.swapaxes(
-                alignment.coefficients,
-                -1,
-                -2,
-            )
-        )
-
         coefficients = jnp.concatenate(
             [
                 aligned_latent.coefficients,
@@ -563,7 +531,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
                     coefficients=coefficients,
                     bias=aligned_latent.bias,
                 ),
-                covariance=covariance,
+                noise=self.dist.noise.congruence(alignment.coefficients),
             )
         )
 
@@ -694,7 +662,7 @@ class StateConditionedGaussian(typing.NamedTuple):
 
         starts, weights = batch.pool_samples(
             (
-                Gaussian(
+                Gaussian.from_moments(
                     continuous.lengths.clear(continuous.means)[..., 0, :],
                     continuous.lengths.clear(continuous.covariances)[..., 0, :, :],
                 ),
@@ -709,13 +677,7 @@ class StateConditionedGaussian(typing.NamedTuple):
         )
         weights = jnp.moveaxis(weights, -1, -2)  # (*B_model, K, S)
         fitted = gaussian_fit.from_moment_match(starts, weights=weights)
-        fitted = fitted._replace(
-            covariance=gaussian_fit.add_covariance_floor(
-                fitted.covariance,
-                reference_covariance=fitted.covariance,
-                covariance_floor=covariance_floor,
-            )
-        )
+        fitted = fitted._replace(noise=fitted.noise.with_floor(covariance_floor))
         return self._replace(
             dist=filter_valid_batches(
                 fitted, self.dist, weights, min_expected_count=1.0

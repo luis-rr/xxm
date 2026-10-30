@@ -236,7 +236,9 @@ def test_gaussian_chain_add_time_indexed_local_potential():
     )
     covariances = jnp.broadcast_to(jnp.eye(2), (3, 2, 2))
 
-    potential = GaussianPotential.from_moments(Gaussian(means, covariances))
+    potential = GaussianPotential.from_moments(
+        Gaussian.from_moments(means, covariances)
+    )
 
     result = chain.add_local_potential(potential)
 
@@ -262,8 +264,8 @@ def test_gaussian_chain_add_local_potential_jit():
     chain = make_chain()
 
     potential = GaussianPotential.from_moments(
-        Gaussian(
-            mean=jnp.zeros((3, 2)), covariance=jnp.broadcast_to(jnp.eye(2), (3, 2, 2))
+        Gaussian.from_moments(
+            jnp.zeros((3, 2)), jnp.broadcast_to(jnp.eye(2), (3, 2, 2))
         ),
     )
 

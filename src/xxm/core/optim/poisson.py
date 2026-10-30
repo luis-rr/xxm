@@ -98,10 +98,7 @@ class _NewtonSearchModel(typing.NamedTuple):
 
         linear_model = linear_model.broadcast((self.input_means.shape[0],))
         return linear_model.expected_rates(
-            Gaussian(
-                mean=self.input_means,
-                covariance=self.input_covariances,
-            )
+            Gaussian.from_moments(self.input_means, self.input_covariances)
         )
 
     def objective(self, params: _NewtonSearchParams) -> jax.Array:
@@ -117,10 +114,7 @@ class _NewtonSearchModel(typing.NamedTuple):
             linear_model = linear_model.broadcast((self.input_means.shape[0],))
             log_probs = linear_model.expected_log_prob_each(
                 values=self.values,
-                inputs=Gaussian(
-                    mean=self.input_means,
-                    covariance=self.input_covariances,
-                ),
+                inputs=Gaussian.from_moments(self.input_means, self.input_covariances),
             )
 
         log_likelihood = jnp.sum(

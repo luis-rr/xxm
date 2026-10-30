@@ -191,7 +191,7 @@ class GaussianEmissions(typing.NamedTuple):
     $$y_t|x_t \sim \mathcal{N}(Cx_t + d, R).$$
 
     `dist.affine.coefficients` stores $C$, `dist.affine.bias` stores $d$,
-    and `dist.covariance` stores $R$.
+    and `dist.noise` is $\mathcal{N}(0, R)$.
     """
 
     dist: LinearGaussian  # structural batch *B
@@ -338,10 +338,7 @@ class GaussianEmissions(typing.NamedTuple):
             covariances_i: jax.Array,
         ) -> LinearGaussian:
             return gaussian_fit.linear_from_marginals(
-                inputs=Gaussian(
-                    mean=means_i,
-                    covariance=covariances_i,
-                ),
+                inputs=Gaussian.from_moments(means_i, covariances_i),
                 outputs=values_i,
                 weights=weights_i,
                 ridge=ridge,
@@ -527,10 +524,7 @@ class PoissonEmissions(typing.NamedTuple):
 
         log_probs = dist.expected_log_prob(
             observations.safe_values(),
-            Gaussian(
-                mean=safe_mean,
-                covariance=safe_covariance,
-            ),
+            Gaussian.from_moments(safe_mean, safe_covariance),
         )
 
         return observations.weighted_sum(log_probs)
@@ -619,10 +613,7 @@ class PoissonEmissions(typing.NamedTuple):
             dist_i: LinearPoisson,
         ) -> LinearPoisson:
             return poisson_fit.linear_from_marginals(
-                inputs=Gaussian(
-                    mean=means_i,
-                    covariance=covariances_i,
-                ),
+                inputs=Gaussian.from_moments(means_i, covariances_i),
                 outputs=values_i,
                 weights=weights_i,
                 initial_affine=dist_i.affine,
@@ -658,10 +649,7 @@ class PoissonEmissions(typing.NamedTuple):
         )
 
         return dist.expected_rates(
-            Gaussian(
-                mean=posterior.means,
-                covariance=posterior.covariances,
-            )
+            Gaussian.from_moments(posterior.means, posterior.covariances)
         )
 
     def conditional_mean(self, latents: jax.Array) -> jax.Array:

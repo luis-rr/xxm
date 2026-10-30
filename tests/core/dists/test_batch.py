@@ -6,9 +6,8 @@ from xxm.core.dists.gaussian import Gaussian, PairedGaussian
 
 
 def _gaussian():
-    return Gaussian(
-        mean=jnp.arange(12.0).reshape(2, 3, 2),
-        covariance=jnp.broadcast_to(jnp.eye(2), (2, 3, 2, 2)),
+    return Gaussian.from_moments(
+        jnp.arange(12.0).reshape(2, 3, 2), jnp.broadcast_to(jnp.eye(2), (2, 3, 2, 2))
     )
 
 
@@ -43,7 +42,7 @@ def test_select_integer_arrays_is_jittable():
 
 def test_paired_batch_operations_preserve_all_components():
     left = _gaussian()
-    right = left._replace(mean=left.mean + 20.0)
+    right = left._replace(loc=left.mean + 20.0)
     cross = jnp.arange(24.0).reshape(2, 3, 2, 2)
     paired = PairedGaussian(left, right, cross)
 

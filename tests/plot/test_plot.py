@@ -56,7 +56,9 @@ def test_sequence_2d(ax, states):
 
 
 def test_gaussian_geometry(ax):
-    gaussian = Gaussian(jnp.array([1.0, 2.0]), jnp.diag(jnp.array([4.0, 1.0])))
+    gaussian = Gaussian.from_moments(
+        jnp.array([1.0, 2.0]), jnp.diag(jnp.array([4.0, 1.0]))
+    )
     ellipse = core.plot_gaussian_2d(ax, gaussian, scale=2)
     np.testing.assert_allclose(ellipse.center, [1, 2])
     assert ellipse.width == 8

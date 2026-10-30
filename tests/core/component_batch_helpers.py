@@ -7,7 +7,12 @@ import numpy as np
 from xxm.arhmm.emissions import AREmissions
 from xxm.core.affine import Affine
 from xxm.core.dists.discrete import Categorical, DiscreteChainMarginals
-from xxm.core.dists.gaussian import Gaussian, GaussianChainMarginals, LinearGaussian
+from xxm.core.dists.gaussian import (
+    Gaussian,
+    GaussianChainMarginals,
+    GaussianNoise,
+    LinearGaussian,
+)
 from xxm.core.dists.poisson import LinearPoisson, Poisson
 from xxm.core.emissions import continuous, discrete
 from xxm.core.latents.discrete import (
@@ -36,10 +41,7 @@ def _values(shape):
 
 def _gaussian(batch, dim=D):
     mean = _values(batch + (dim,))
-    return Gaussian(
-        mean,
-        jnp.broadcast_to(jnp.eye(dim, dtype=mean.dtype), batch + (dim, dim)),
-    )
+    return Gaussian(mean, GaussianNoise.identity(dim, batch, dtype=mean.dtype))
 
 
 def _linear(batch, output_dim=D, input_shape=(D,)):
@@ -48,10 +50,7 @@ def _linear(batch, output_dim=D, input_shape=(D,)):
         0.2 * _values(batch + (output_dim,)),
     )
     return LinearGaussian(
-        affine,
-        jnp.broadcast_to(
-            jnp.eye(output_dim, dtype=affine.dtype), batch + (output_dim, output_dim)
-        ),
+        affine, GaussianNoise.identity(output_dim, batch, dtype=affine.dtype)
     )
 
 

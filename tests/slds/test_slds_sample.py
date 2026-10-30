@@ -2,7 +2,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from xxm.core.affine import Affine
 from xxm.core.data import Sequences
 from xxm.core.dists.discrete import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
@@ -63,14 +62,14 @@ def _make_model() -> Model:
     )
 
     latent_initial = StateConditionedGaussian(
-        dist=Gaussian(
-            mean=jnp.array(
+        dist=Gaussian.from_moments(
+            jnp.array(
                 [
                     [5.0],
                     [-5.0],
                 ]
             ),
-            covariance=jnp.array(
+            jnp.array(
                 [
                     [[1e-8]],
                     [[1e-8]],
@@ -80,22 +79,20 @@ def _make_model() -> Model:
     )
 
     dynamics = GaussianLinearSwitchingDynamics(
-        dist=LinearGaussian(
-            affine=Affine(
-                coefficients=jnp.array(
-                    [
-                        [[0.0]],
-                        [[0.0]],
-                    ]
-                ),
-                bias=jnp.array(
-                    [
-                        [10.0],
-                        [-10.0],
-                    ]
-                ),
+        dist=LinearGaussian.from_components(
+            jnp.array(
+                [
+                    [[0.0]],
+                    [[0.0]],
+                ]
             ),
-            covariance=jnp.array(
+            jnp.array(
+                [
+                    [10.0],
+                    [-10.0],
+                ]
+            ),
+            jnp.array(
                 [
                     [[1e-8]],
                     [[1e-8]],
@@ -105,12 +102,8 @@ def _make_model() -> Model:
     )
 
     emissions = GaussianEmissions(
-        dist=LinearGaussian(
-            affine=Affine(
-                coefficients=jnp.array([[1.0]]),
-                bias=jnp.array([3.0]),
-            ),
-            covariance=jnp.array([[1e-8]]),
+        dist=LinearGaussian.from_components(
+            jnp.array([[1.0]]), jnp.array([3.0]), jnp.array([[1e-8]])
         )
     )
 

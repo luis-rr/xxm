@@ -32,14 +32,14 @@ def _make_model() -> Model:
             )
         ),
         latent_initial=StateConditionedGaussian(
-            dist=Gaussian(
-                mean=jnp.array(
+            dist=Gaussian.from_moments(
+                jnp.array(
                     [
                         [1.0, 2.0],
                         [-1.0, 0.5],
                     ]
                 ),
-                covariance=jnp.array(
+                jnp.array(
                     [
                         [[1.0, 0.2], [0.2, 0.5]],
                         [[0.7, 0.1], [0.1, 1.2]],
@@ -48,22 +48,20 @@ def _make_model() -> Model:
             )
         ),
         dynamics=GaussianLinearSwitchingDynamics(
-            dist=LinearGaussian(
-                affine=Affine(
-                    coefficients=jnp.array(
-                        [
-                            [[0.8, 0.1], [0.0, 0.9]],
-                            [[-0.4, 0.2], [0.1, 0.5]],
-                        ]
-                    ),
-                    bias=jnp.array(
-                        [
-                            [0.2, -0.1],
-                            [1.0, 0.5],
-                        ]
-                    ),
+            dist=LinearGaussian.from_components(
+                jnp.array(
+                    [
+                        [[0.8, 0.1], [0.0, 0.9]],
+                        [[-0.4, 0.2], [0.1, 0.5]],
+                    ]
                 ),
-                covariance=jnp.array(
+                jnp.array(
+                    [
+                        [0.2, -0.1],
+                        [1.0, 0.5],
+                    ]
+                ),
+                jnp.array(
                     [
                         [[0.4, 0.1], [0.1, 0.3]],
                         [[0.3, 0.0], [0.0, 0.2]],
@@ -74,18 +72,16 @@ def _make_model() -> Model:
         emissions=ContinuousEmissionsCollection(
             (
                 GaussianEmissions(
-                    dist=LinearGaussian(
-                        affine=Affine(
-                            coefficients=jnp.array(
-                                [
-                                    [1.0, 0.2],
-                                    [-0.3, 0.8],
-                                    [0.5, -0.4],
-                                ]
-                            ),
-                            bias=jnp.array([0.1, -0.2, 0.3]),
+                    dist=LinearGaussian.from_components(
+                        jnp.array(
+                            [
+                                [1.0, 0.2],
+                                [-0.3, 0.8],
+                                [0.5, -0.4],
+                            ]
                         ),
-                        covariance=jnp.diag(jnp.array([0.2, 0.3, 0.4])),
+                        jnp.array([0.1, -0.2, 0.3]),
+                        jnp.diag(jnp.array([0.2, 0.3, 0.4])),
                     )
                 ),
             ),

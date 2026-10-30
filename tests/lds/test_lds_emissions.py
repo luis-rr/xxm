@@ -4,7 +4,10 @@ from jax import numpy as jnp
 
 from xxm.core.affine import Affine
 from xxm.core.data import Sequences, WeightedObservations
-from xxm.core.dists.gaussian import GaussianChainMarginals, LinearGaussian
+from xxm.core.dists.gaussian import (
+    GaussianChainMarginals,
+    LinearGaussian,
+)
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
 from xxm.core.lengths import Lengths
@@ -17,17 +20,15 @@ from xxm.core.optim import gaussian as gaussian_fit
 
 def test_gaussian_potential_matches_known_value():
     emissions = GaussianEmissions(
-        dist=LinearGaussian(
-            affine=Affine(
-                coefficients=jnp.array(
-                    [
-                        [1.0, 2.0],
-                        [0.0, 1.0],
-                    ]
-                ),
-                bias=jnp.array([1.0, -1.0]),
+        dist=LinearGaussian.from_components(
+            jnp.array(
+                [
+                    [1.0, 2.0],
+                    [0.0, 1.0],
+                ]
             ),
-            covariance=jnp.diag(jnp.array([1.0, 4.0])),
+            jnp.array([1.0, -1.0]),
+            jnp.diag(jnp.array([1.0, 4.0])),
         ),
     )
 
@@ -59,17 +60,15 @@ def test_gaussian_potential_matches_known_value():
 
 def test_gaussian_log_likelihood_matches_known_value():
     emissions = GaussianEmissions(
-        dist=LinearGaussian(
-            affine=Affine(
-                coefficients=jnp.array(
-                    [
-                        [1.0, 2.0],
-                        [0.0, 1.0],
-                    ]
-                ),
-                bias=jnp.array([1.0, -1.0]),
+        dist=LinearGaussian.from_components(
+            jnp.array(
+                [
+                    [1.0, 2.0],
+                    [0.0, 1.0],
+                ]
             ),
-            covariance=jnp.diag(jnp.array([1.0, 4.0])),
+            jnp.array([1.0, -1.0]),
+            jnp.diag(jnp.array([1.0, 4.0])),
         ),
     )
 
@@ -116,9 +115,8 @@ def test_gaussian_fit_recovers_known_parameters():
     )
 
     emissions = GaussianEmissions(
-        dist=LinearGaussian(
-            affine=Affine(coefficients=jnp.zeros((1, 1)), bias=jnp.zeros(1)),
-            covariance=jnp.eye(1),
+        dist=LinearGaussian.from_components(
+            jnp.zeros((1, 1)), jnp.zeros(1), jnp.eye(1)
         ),
     )
 
@@ -149,10 +147,7 @@ def test_gaussian_fit_recovers_known_parameters():
 
 def test_gaussian_sample_has_expected_shape():
     emissions = GaussianEmissions(
-        dist=LinearGaussian(
-            affine=Affine(coefficients=jnp.ones((3, 2)), bias=jnp.zeros(3)),
-            covariance=jnp.eye(3),
-        ),
+        dist=LinearGaussian.from_components(jnp.ones((3, 2)), jnp.zeros(3), jnp.eye(3)),
     )
 
     sample = emissions.sample(
@@ -169,9 +164,8 @@ def test_gaussian_sample_has_expected_shape():
 def test_gaussian_emissions_potential_has_one_factor_per_observation():
     # y_t | x_t ~ N(2 x_t + 1, 4)
     emissions = GaussianEmissions(
-        dist=LinearGaussian(
-            affine=Affine(coefficients=jnp.array([[2.0]]), bias=jnp.array([1.0])),
-            covariance=jnp.array([[4.0]]),
+        dist=LinearGaussian.from_components(
+            jnp.array([[2.0]]), jnp.array([1.0]), jnp.array([[4.0]])
         ),
     )
 
@@ -392,10 +386,7 @@ def test_poisson_sample_has_expected_shape_and_values():
 
 def test_gaussian_methods_are_jittable():
     emissions = GaussianEmissions(
-        dist=LinearGaussian(
-            affine=Affine(coefficients=jnp.eye(2), bias=jnp.zeros(2)),
-            covariance=jnp.eye(2),
-        ),
+        dist=LinearGaussian.from_components(jnp.eye(2), jnp.zeros(2), jnp.eye(2)),
     )
 
     observations = WeightedObservations.from_array(jnp.ones((3, 2)))

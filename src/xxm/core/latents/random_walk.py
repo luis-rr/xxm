@@ -6,7 +6,6 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core import batch
-from xxm.core.affine import Affine
 from xxm.core.data import Sequences
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.lengths import LengthsSpec
@@ -49,12 +48,8 @@ def _random_walk_transition(
         innovation.batch_shape + (variable_dim, variable_dim),
     )
 
-    return LinearGaussian(
-        affine=Affine(
-            coefficients=coefficients,
-            bias=innovation.mean,
-        ),
-        covariance=innovation.covariance,
+    return LinearGaussian.from_components(
+        coefficients, innovation.mean, innovation.covariance
     )
 
 
@@ -93,13 +88,11 @@ class GaussianRandomWalk(typing.NamedTuple):
     ) -> typing.Self:
         """Construct a zero-mean random walk from `(*B, D, D)` covariances."""
         return cls(
-            initial=Gaussian(
-                mean=_zero_mean_from_covariance(initial_covariance),
-                covariance=initial_covariance,
+            initial=Gaussian.from_moments(
+                _zero_mean_from_covariance(initial_covariance), initial_covariance
             ),
-            innovation=Gaussian(
-                mean=_zero_mean_from_covariance(innovation_covariance),
-                covariance=innovation_covariance,
+            innovation=Gaussian.from_moments(
+                _zero_mean_from_covariance(innovation_covariance), innovation_covariance
             ),
         )
 
@@ -317,17 +310,14 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
     ) -> typing.Self:
         """Construct a zero-mean gated walk from `(*B, K, D, D)` covariances."""
         return cls(
-            initial=Gaussian(
-                mean=_zero_mean_from_covariance(initial_covariance),
-                covariance=initial_covariance,
+            initial=Gaussian.from_moments(
+                _zero_mean_from_covariance(initial_covariance), initial_covariance
             ),
-            active_innovation=Gaussian(
-                mean=_zero_mean_from_covariance(active_covariance),
-                covariance=active_covariance,
+            active_innovation=Gaussian.from_moments(
+                _zero_mean_from_covariance(active_covariance), active_covariance
             ),
-            inactive_innovation=Gaussian(
-                mean=_zero_mean_from_covariance(inactive_covariance),
-                covariance=inactive_covariance,
+            inactive_innovation=Gaussian.from_moments(
+                _zero_mean_from_covariance(inactive_covariance), inactive_covariance
             ),
         )
 
@@ -440,17 +430,12 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
 
                 active = gates.values[..., None, :] == gate_indices
 
-                innovation = Gaussian(
-                    mean=jnp.where(
-                        active[..., None],
-                        self.active_innovation.mean[..., None, :],
-                        self.inactive_innovation.mean[..., None, :],
-                    ),
-                    covariance=jnp.where(
-                        active[..., None, None],
-                        self.active_innovation.covariance[..., None, :, :],
-                        self.inactive_innovation.covariance[..., None, :, :],
-                    ),
+                # Broadcast each innovation over transitions, then select per step.
+                time_shape, time_axis = active.shape[-1:], active.ndim - 1
+                innovation = batch.where(
+                    active,
+                    self.active_innovation.broadcast(time_shape, axis=time_axis),
+                    self.inactive_innovation.broadcast(time_shape, axis=time_axis),
                 )
 
                 increments = innovation.sample(key_innovation)

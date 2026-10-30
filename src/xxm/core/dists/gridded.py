@@ -286,7 +286,9 @@ class GriddedDistribution(typing.NamedTuple):
                 covariances, t, axis=time_axis, keepdims=False
             )
             at_t = cls.from_gaussian(
-                Gaussian(mean, cov), edges, quadrature_order=quadrature_order
+                Gaussian.from_moments(mean, cov),
+                edges,
+                quadrature_order=quadrature_order,
             ).mass
             active = jax.lax.dynamic_index_in_dim(
                 valid, t, axis=time_axis, keepdims=False
@@ -409,7 +411,9 @@ class TemporalGriddedDistribution(typing.NamedTuple):
                 covariances, t, axis=time_axis, keepdims=False
             )
             mass = GriddedDistribution.from_gaussian(
-                Gaussian(mean, cov), edges, quadrature_order=quadrature_order
+                Gaussian.from_moments(mean, cov),
+                edges,
+                quadrature_order=quadrature_order,
             ).mass
             active = jax.lax.dynamic_index_in_dim(
                 valid, t, axis=time_axis, keepdims=False

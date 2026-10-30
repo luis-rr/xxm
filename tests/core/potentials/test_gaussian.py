@@ -2,7 +2,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.potentials.gaussian import GaussianPairPotential, GaussianPotential
 
@@ -17,7 +16,7 @@ def test_gaussian_potential_from_moments_fields():
     mean = jnp.array([1.0, -0.5])
     covariance = jnp.array([[2.0, 0.3], [0.3, 1.5]])
 
-    potential = GaussianPotential.from_moments(Gaussian(mean, covariance))
+    potential = GaussianPotential.from_moments(Gaussian.from_moments(mean, covariance))
 
     expected_precision = np.linalg.inv(np.array(covariance))
     expected_information = expected_precision @ np.array(mean)
@@ -36,7 +35,7 @@ def test_gaussian_potential_from_moments_log_density():
     covariance = jnp.array([[2.0, 0.3], [0.3, 1.5]])
     x = jnp.array([0.5, 0.2])
 
-    potential = GaussianPotential.from_moments(Gaussian(mean, covariance))
+    potential = GaussianPotential.from_moments(Gaussian.from_moments(mean, covariance))
 
     log_f = (
         -0.5 * x @ potential.precision_blocks @ x
@@ -60,7 +59,7 @@ def test_gaussian_potential_from_moments_is_normalized():
     mean = jnp.array([1.0, -0.5])
     covariance = jnp.array([[2.0, 0.3], [0.3, 1.5]])
 
-    potential = GaussianPotential.from_moments(Gaussian(mean, covariance))
+    potential = GaussianPotential.from_moments(Gaussian.from_moments(mean, covariance))
 
     J = np.array(potential.precision_blocks)
     h = np.array(potential.information_vectors)
@@ -83,7 +82,7 @@ def test_gaussian_pair_potential_from_linear_conditional_fields():
     Q = jnp.array([[1.5, 0.2], [0.2, 1.0]])
 
     potential = GaussianPairPotential.from_linear_conditional(
-        LinearGaussian(affine=Affine(coefficients=A, bias=b), covariance=Q)
+        LinearGaussian.from_components(A, b, Q)
     )
 
     Q_inv = np.linalg.inv(np.array(Q))
@@ -115,7 +114,7 @@ def test_gaussian_pair_potential_log_constant():
     Q = jnp.array([[1.5, 0.2], [0.2, 1.0]])
 
     potential = GaussianPairPotential.from_linear_conditional(
-        LinearGaussian(affine=Affine(coefficients=A, bias=b), covariance=Q)
+        LinearGaussian.from_components(A, b, Q)
     )
 
     Q_inv = np.linalg.inv(np.array(Q))
@@ -138,7 +137,7 @@ def test_gaussian_pair_potential_log_density():
     x1 = jnp.array([0.2, 0.8])
 
     potential = GaussianPairPotential.from_linear_conditional(
-        LinearGaussian(affine=Affine(coefficients=A, bias=b), covariance=Q)
+        LinearGaussian.from_components(A, b, Q)
     )
 
     log_f = (
@@ -184,12 +183,12 @@ def test_gaussian_potential_from_moments_batched():
         ]
     )  # (2, 2, D, D)
 
-    result = GaussianPotential.from_moments(Gaussian(means, covariances))
+    result = GaussianPotential.from_moments(Gaussian.from_moments(means, covariances))
 
     expected = jax.vmap(
         jax.vmap(
             lambda mean, covariance: GaussianPotential.from_moments(
-                Gaussian(mean, covariance)
+                Gaussian.from_moments(mean, covariance)
             )
         )
     )(means, covariances)
@@ -217,7 +216,9 @@ def test_gaussian_potential_from_moments_batched():
     assert result.information_vectors.shape == (2, 2, 2)
     assert result.log_constant.shape == (2, 2)
 
-    jitted = jax.jit(GaussianPotential.from_moments)(Gaussian(means, covariances))
+    jitted = jax.jit(GaussianPotential.from_moments)(
+        Gaussian.from_moments(means, covariances)
+    )
     for eager_field, jitted_field in zip(result, jitted, strict=True):
         np.testing.assert_allclose(jitted_field, eager_field)
 
@@ -246,16 +247,12 @@ def test_gaussian_pair_potential_from_linear_conditional_batched():
     )
 
     result = GaussianPairPotential.from_linear_conditional(
-        LinearGaussian(
-            affine=Affine(coefficients=matrices, bias=biases), covariance=covariances
-        )
+        LinearGaussian.from_components(matrices, biases, covariances)
     )
 
     expected = jax.vmap(
         lambda matrix, bias, covariance: GaussianPairPotential.from_linear_conditional(
-            LinearGaussian(
-                affine=Affine(coefficients=matrix, bias=bias), covariance=covariance
-            )
+            LinearGaussian.from_components(matrix, bias, covariance)
         )
     )(matrices, biases, covariances)
 
@@ -283,7 +280,7 @@ def test_gaussian_pair_potential_from_linear_conditional_batched():
     assert result.log_constant.shape == (3,)
 
     jitted = jax.jit(GaussianPairPotential.from_linear_conditional)(
-        LinearGaussian(Affine(matrices, biases), covariances)
+        LinearGaussian.from_components(matrices, biases, covariances)
     )
     for eager_field, jitted_field in zip(result, jitted, strict=True):
         np.testing.assert_allclose(jitted_field, eager_field, atol=ATOL, rtol=RTOL)

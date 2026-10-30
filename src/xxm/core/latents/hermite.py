@@ -364,10 +364,7 @@ class HermiteGaussian:
             temporal_covariance + jnp.swapaxes(temporal_covariance, -1, -2)
         )
 
-        return Gaussian(
-            mean=temporal_mean,
-            covariance=temporal_covariance,
-        )
+        return Gaussian.from_moments(temporal_mean, temporal_covariance)
 
     def log_prob(
         self,

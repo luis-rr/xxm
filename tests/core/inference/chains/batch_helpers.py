@@ -2,9 +2,13 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from xxm.core.affine import Affine
 from xxm.core.dists.discrete import DiscreteChainMarginals
-from xxm.core.dists.gaussian import Gaussian, GaussianChainMarginals, LinearGaussian
+from xxm.core.dists.gaussian import (
+    Gaussian,
+    GaussianChainMarginals,
+    GaussianNoise,
+    LinearGaussian,
+)
 from xxm.core.inference.chains.discrete import DiscreteChain
 from xxm.core.inference.chains.gaussian import GaussianChain
 from xxm.core.lengths import Lengths
@@ -33,14 +37,11 @@ def gaussian_chain(batch, steps):
     d = 2
     rng = np.random.default_rng(32)
     initial = Gaussian(
-        jnp.asarray(rng.normal(size=batch + (d,))),
-        jnp.broadcast_to(jnp.eye(d), batch + (d, d)),
+        jnp.asarray(rng.normal(size=batch + (d,))), GaussianNoise.identity(d, batch)
     )
-    pairs = LinearGaussian(
-        Affine(
-            jnp.asarray(rng.normal(scale=0.1, size=batch + (steps - 1, d, d))),
-            jnp.asarray(rng.normal(size=batch + (steps - 1, d))),
-        ),
+    pairs = LinearGaussian.from_components(
+        jnp.asarray(rng.normal(scale=0.1, size=batch + (steps - 1, d, d))),
+        jnp.asarray(rng.normal(size=batch + (steps - 1, d))),
         jnp.broadcast_to(jnp.eye(d), batch + (steps - 1, d, d)),
     )
     chain = GaussianChain.from_pair_potentials(
@@ -49,7 +50,7 @@ def gaussian_chain(batch, steps):
         Lengths(jnp.full(batch, steps)),
     )
     local = GaussianPotential.from_moments(
-        Gaussian(
+        Gaussian.from_moments(
             jnp.asarray(rng.normal(size=batch + (steps, d))),
             jnp.broadcast_to(jnp.eye(d), batch + (steps, d, d)),
         )

@@ -4,73 +4,82 @@ import typing
 
 import jax
 import jax.numpy as jnp
-import jax.scipy as jsp
 import jax.scipy.linalg as jsp_linalg
 
 from xxm.core import batch
 from xxm.core.affine import Affine
 from xxm.core.data import Sequences
+from xxm.core.dists.additive import AffineDist, LocDist
 from xxm.core.lengths import Lengths
 
 
-class Gaussian(typing.NamedTuple):
-    r"""Multivariate Gaussian distribution in moment form.
+class GaussianNoise(typing.NamedTuple):
+    r"""Zero-mean Gaussian noise.
 
-    $$u \sim \mathcal{N}(\mu, \Sigma).$$
+    $$\epsilon \sim \mathcal{N}(0, \Sigma).$$
 
-    `mean` stores $\mu$ and `covariance` stores $\Sigma$. Leading dimensions
-    are batch dimensions, shared across all attributes.
+    `covariance` stores $\Sigma$. Leading dimensions are batch dimensions.
     """
 
-    mean: jax.Array  # (..., N)
     covariance: jax.Array  # (..., N, N)
-
-    @classmethod
-    def from_canonical(
-        cls, precision: jax.Array, information: jax.Array
-    ) -> typing.Self:
-        """Normalize canonical parameters with matching leading batch dimensions."""
-        if precision.shape != information.shape + (information.shape[-1],):
-            raise ValueError(
-                'precision and information must have matching batch and variable dimensions'
-            )
-        precision = 0.5 * (precision + jnp.swapaxes(precision, -1, -2))
-        cholesky = jnp.linalg.cholesky(precision)
-        identity = jnp.broadcast_to(
-            jnp.eye(precision.shape[-1], dtype=precision.dtype), precision.shape
-        )
-        mean = jsp_linalg.cho_solve((cholesky, True), information[..., None])[..., 0]
-        covariance = jsp_linalg.cho_solve((cholesky, True), identity)
-        covariance = 0.5 * (covariance + jnp.swapaxes(covariance, -1, -2))
-        return cls(mean=mean, covariance=covariance)
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
         """Batch shape."""
-        mean_shape = self.mean.shape[:-1]
-        covariance_shape = self.covariance.shape[:-2]
-        batch.require_same_shape(mean_shape, covariance_shape)
-        return mean_shape
+        return self.covariance.shape[:-2]
+
+    @property
+    def variable_dim(self) -> int:
+        """Dimension of the noise variable."""
+        return self.covariance.shape[-1]
+
+    @property
+    def dtype(self) -> jnp.dtype:
+        """Data type."""
+        return self.covariance.dtype
+
+    def select(self, index: batch.SelT) -> typing.Self:
+        """Index only batch dimensions, retaining this object type."""
+        return batch.select(self, index)
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        """Insert replicated batch dimensions at `axis`."""
+        return batch.broadcast(self, shape, axis=axis)
+
+    def squeeze(self, axis=None) -> typing.Self:
+        """Remove singleton batch dimensions."""
+        return batch.squeeze(self, axis=axis)
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        """Reorder entries along a batch axis."""
+        return batch.permute(self, permutation, axis=axis)
 
     def move_axis(self, source: int, destination: int) -> typing.Self:
         """Move one batch axis to another position."""
         return batch.move_axis(self, source, destination)
 
-    def permute_variables(
-        self,
-        permutation: jax.Array,
+    def astype(self, dtype: jax.typing.DTypeLike) -> typing.Self:
+        """Convert to a different data type."""
+        return self._replace(covariance=self.covariance.astype(dtype))
+
+    @classmethod
+    def identity(
+        cls,
+        dim: int,
+        batch_shape: tuple[int, ...] = (),
+        dtype: jax.typing.DTypeLike = jnp.float32,
     ) -> typing.Self:
+        """Unit noise with identity covariance and batch `batch_shape`."""
+        return cls(
+            jnp.broadcast_to(jnp.eye(dim, dtype=dtype), batch_shape + (dim, dim))
+        )
+
+    def permute_variables(self, permutation: jax.Array) -> typing.Self:
         """Reorder variable dimensions globally or independently by batch."""
         permutation = batch.broadcast_trailing(
             permutation,
             self.batch_shape,
             (self.variable_dim,),
-        )
-
-        mean = jnp.take_along_axis(
-            self.mean,
-            permutation,
-            axis=-1,
         )
 
         row_indices = jnp.broadcast_to(
@@ -89,92 +98,195 @@ class Gaussian(typing.NamedTuple):
             self.covariance.shape,
         )
 
-        covariance = jnp.take_along_axis(
-            covariance,
-            column_indices,
-            axis=-1,
-        )
-
         return self._replace(
-            mean=mean,
-            covariance=covariance,
+            covariance=jnp.take_along_axis(covariance, column_indices, axis=-1)
         )
 
-    def reorient_variables(
-        self,
-        signs: jax.Array,
-    ) -> typing.Self:
+    def reorient_variables(self, signs: jax.Array) -> typing.Self:
         """Flip variable signs globally or independently by batch."""
         signs = batch.broadcast_trailing(
             signs,
             self.batch_shape,
             (self.variable_dim,),
         )
-
         return self._replace(
-            mean=self.mean * signs,
-            covariance=(signs[..., :, None] * self.covariance * signs[..., None, :]),
+            covariance=signs[..., :, None] * self.covariance * signs[..., None, :]
         )
 
-    def shift_variables(
+    def with_floor(
         self,
-        offset: jax.Array,
+        floor: float,
+        reference: 'GaussianNoise | None' = None,
     ) -> typing.Self:
-        """Shift variable coordinates as x' = x - offset."""
-        offset = batch.broadcast_trailing(
-            offset,
-            self.batch_shape,
-            (self.variable_dim,),
-        )
+        """Symmetrize and add an isotropic floor relative to a reference scale.
+
+        `floor` is a dimensionless fraction of the average marginal variance of
+        `reference`, which defaults to this noise.
+        """
+        reference = self if reference is None else reference
+
+        covariance = 0.5 * (self.covariance + jnp.swapaxes(self.covariance, -2, -1))
+
+        scale = jnp.mean(reference.variance, axis=-1)
+        scale = jnp.where(scale > 0.0, scale, 1.0)
+
+        identity = jnp.eye(self.variable_dim, dtype=covariance.dtype)
 
         return self._replace(
-            mean=self.mean - offset,
+            covariance=covariance + floor * scale[..., None, None] * identity
         )
 
-    @property
-    def variable_dim(self) -> int:
-        """Dimension of the Gaussian variable."""
-        return self.mean.shape[-1]
+    def whiten(
+        self,
+        values: jax.Array,  # (*B, *Q, N)
+    ) -> jax.Array:  # (*B, *Q, N)
+        r"""Map values to $L^{-1}\epsilon$, where $LL^\top = \Sigma$.
+
+        Query axes `*Q` follow the receiver batch. Each batch entry is factored
+        once and its query points are solved as columns of one system, so $L$
+        is never broadcast to every point.
+        """
+        if values.shape[-1:] != (self.variable_dim,):
+            raise ValueError('values must match the noise variable dimension')
+
+        chol = jnp.linalg.cholesky(self.covariance)  # (*B, N, N)
+
+        columns = jnp.swapaxes(
+            batch.flatten_query(values, self.batch_shape),
+            -1,
+            -2,
+        )  # (*B, N, Q)
+
+        solved = jsp_linalg.solve_triangular(chol, columns, lower=True)
+
+        return jnp.swapaxes(solved, -1, -2).reshape(values.shape)
+
+    def log_det(self) -> jax.Array:  # (*B,)
+        r"""Log determinant $\log|\Sigma|$."""
+        chol = jnp.linalg.cholesky(self.covariance)
+        return 2.0 * jnp.sum(jnp.log(jnp.diagonal(chol, axis1=-2, axis2=-1)), axis=-1)
 
     @property
-    def dtype(self) -> jnp.dtype:
-        """Data type."""
-        return jnp.result_type(self.mean, self.covariance)
+    def variance(self) -> jax.Array:  # (*B, N)
+        r"""Marginal variances, the diagonal of $\Sigma$."""
+        return jnp.diagonal(self.covariance, axis1=-2, axis2=-1)
 
-    def select(self, index: batch.SelT) -> typing.Self:
-        """Index only batch dimensions, retaining this object type."""
-        return batch.select(self, index)
-
-    def astype(self, dtype: jax.typing.DTypeLike) -> 'Gaussian':
-        """Convert to a different data type."""
-        return self._replace(
-            mean=self.mean.astype(dtype),
-            covariance=self.covariance.astype(dtype),
+    def precision(self) -> jax.Array:  # (*B, N, N)
+        r"""Precision $\Sigma^{-1}$."""
+        chol = jnp.linalg.cholesky(self.covariance)
+        identity = jnp.broadcast_to(
+            jnp.eye(self.variable_dim, dtype=self.covariance.dtype),
+            self.covariance.shape,
         )
+        return jsp_linalg.cho_solve((chol, True), identity)
+
+    def entropy(self) -> jax.Array:  # (*B,)
+        """Differential entropy."""
+        return 0.5 * (
+            self.variable_dim * (1.0 + jnp.log(2.0 * jnp.pi)) + self.log_det()
+        )
+
+    def log_prob(
+        self,
+        values: jax.Array,  # (*B, *Q, N)
+    ) -> jax.Array:  # (*B, *Q)
+        """Evaluate aligned values, with query axes following the receiver batch."""
+        mahalanobis = jnp.sum(self.whiten(values) ** 2, axis=-1)
+        log_det = batch.align_array(self.log_det(), self.batch_shape, values.shape[:-1])
+
+        return -0.5 * (
+            self.variable_dim * jnp.log(2.0 * jnp.pi) + log_det + mahalanobis
+        )
+
+    def sample(self, key: jax.Array, sample_shape: tuple[int, ...] = ()) -> jax.Array:
+        """Sample values with shape `(*batch_shape, *sample_shape, N)`."""
+        shape = self.batch_shape + (1,) * len(sample_shape)
+        return jax.random.multivariate_normal(
+            key,
+            mean=jnp.zeros(shape + (self.variable_dim,), dtype=self.dtype),
+            cov=self.covariance.reshape(shape + (self.variable_dim, self.variable_dim)),
+            shape=self.batch_shape + sample_shape,
+        )
+
+    def congruence(self, matrix: jax.Array) -> 'GaussianNoise':  # (..., M, N)
+        r"""Noise of $M\epsilon$, with covariance $M\Sigma M^\top$."""
+        return GaussianNoise(
+            jnp.einsum('...oi,...ij,...pj->...op', matrix, self.covariance, matrix)
+        )
+
+    def expected_log_prob(self, other: 'Gaussian') -> jax.Array:
+        r"""
+        Expected log density $\mathbb{E}_{\epsilon\sim\text{other}}[\log p(\epsilon)]$.
+
+        The two objects must have aligned batches.
+        """
+        mahalanobis = jnp.sum(self.whiten(other.mean) ** 2, axis=-1)
+
+        cholesky = jnp.linalg.cholesky(self.covariance)
+        trace = jnp.trace(
+            jsp_linalg.cho_solve((cholesky, True), other.covariance),
+            axis1=-2,
+            axis2=-1,
+        )
+
+        return -0.5 * (
+            self.variable_dim * jnp.log(2.0 * jnp.pi)
+            + self.log_det()
+            + mahalanobis
+            + trace
+        )
+
+
+class Gaussian(LocDist[GaussianNoise]):
+    r"""Multivariate Gaussian distribution in moment form.
+
+    $$u \sim \mathcal{N}(\mu, \Sigma).$$
+
+    `loc` stores $\mu$ and `noise` is $\mathcal{N}(0, \Sigma)$; `mean` and
+    `covariance` expose them. Leading dimensions are batch dimensions, shared
+    across all attributes.
+    """
+
+    __slots__ = ()
+
+    @classmethod
+    def from_moments(cls, mean: jax.Array, covariance: jax.Array) -> typing.Self:
+        """Construct from a mean `(..., N)` and a covariance `(..., N, N)`."""
+        return cls(mean, GaussianNoise(covariance))
+
+    @property
+    def mean(self) -> jax.Array:  # (..., N)
+        r"""Mean $\mu$."""
+        return self.loc
+
+    @property
+    def covariance(self) -> jax.Array:  # (..., N, N)
+        r"""Covariance $\Sigma$."""
+        return self.noise.covariance
+
+    @classmethod
+    def from_canonical(
+        cls, precision: jax.Array, information: jax.Array
+    ) -> typing.Self:
+        """Normalize canonical parameters with matching leading batch dimensions."""
+        if precision.shape != information.shape + (information.shape[-1],):
+            raise ValueError(
+                'precision and information must have matching batch and variable dimensions'
+            )
+        precision = 0.5 * (precision + jnp.swapaxes(precision, -1, -2))
+        cholesky = jnp.linalg.cholesky(precision)
+        identity = jnp.broadcast_to(
+            jnp.eye(precision.shape[-1], dtype=precision.dtype), precision.shape
+        )
+        mean = jsp_linalg.cho_solve((cholesky, True), information[..., None])[..., 0]
+        covariance = jsp_linalg.cho_solve((cholesky, True), identity)
+        covariance = 0.5 * (covariance + jnp.swapaxes(covariance, -1, -2))
+        return cls.from_moments(mean, covariance)
 
     @property
     def variance(self) -> jax.Array:
         """Marginal variances, diagonal of covariance."""
-        return jnp.diagonal(self.covariance, axis1=-2, axis2=-1)
-
-    def entropy(self) -> jax.Array:
-        """Differential entropy of the Gaussian distribution."""
-        cholesky = jnp.linalg.cholesky(self.covariance)
-        log_det = 2.0 * jnp.sum(
-            jnp.log(jnp.diagonal(cholesky, axis1=-2, axis2=-1)),
-            axis=-1,
-        )
-        return 0.5 * (self.variable_dim * (1.0 + jnp.log(2.0 * jnp.pi)) + log_det)
-
-    def sample(self, key: jax.Array, sample_shape: tuple[int, ...] = ()) -> jax.Array:
-        """Sample values with shape `(*batch_shape, *sample_shape, D)`."""
-        shape = self.batch_shape + (1,) * len(sample_shape)
-        return jax.random.multivariate_normal(
-            key,
-            mean=self.mean.reshape(shape + (self.variable_dim,)),
-            cov=self.covariance.reshape(shape + (self.variable_dim, self.variable_dim)),
-            shape=self.batch_shape + sample_shape,
-        )
+        return self.noise.variance
 
     def _validate_affine_input(
         self,
@@ -203,13 +315,7 @@ class Gaussian(typing.NamedTuple):
     ) -> jax.Array:
         r"""Compute covariance of $f(u)$ where $u \sim \text{self}$."""
         self._validate_affine_input(affine)
-
-        return jnp.einsum(
-            '...oi,...ij,...pj->...op',
-            affine.coefficients,
-            self.covariance,
-            affine.coefficients,
-        )
+        return self.noise.congruence(affine.coefficients).covariance
 
     def affine_variance(
         self,
@@ -230,69 +336,17 @@ class Gaussian(typing.NamedTuple):
         affine: Affine,
     ) -> 'Gaussian':
         r"""Distribution of $f(u)$ for $u \sim \text{self}$."""
-
-        return self.__class__(
-            mean=self.affine_mean(affine),
-            covariance=self.affine_covariance(affine),
+        return Gaussian(
+            self.affine_mean(affine),
+            self.noise.congruence(affine.coefficients),
         )
 
     def whiten(
         self,
         values: jax.Array,  # (*B, *Q, N)
     ) -> jax.Array:  # (*B, *Q, N)
-        r"""Map values to $L^{-1}(u - \mu)$, where $LL^\top = \Sigma$.
-
-        Query axes `*Q` follow the receiver batch. Each batch entry is factored
-        once and its query points are solved as columns of one system, so $L$
-        is never broadcast to every point.
-        """
-        if values.shape[-1:] != (self.variable_dim,):
-            raise ValueError('values must match the Gaussian variable dimension')
-        mean = batch.align_array(self.mean, self.batch_shape, values.shape[:-1])
-
-        chol = jnp.linalg.cholesky(self.covariance)  # (*B, N, N)
-
-        columns = jnp.swapaxes(
-            batch.flatten_query(values - mean, self.batch_shape),
-            -1,
-            -2,
-        )  # (*B, N, Q)
-
-        solved = jsp_linalg.solve_triangular(chol, columns, lower=True)
-
-        return jnp.swapaxes(solved, -1, -2).reshape(values.shape)
-
-    def log_prob(
-        self,
-        values: jax.Array,  # (..., N)
-    ) -> jax.Array:  # (...)
-        """Evaluate aligned values, with query axes following the receiver batch."""
-        mahalanobis = jnp.sum(self.whiten(values) ** 2, axis=-1)  # (...)
-
-        chol = jnp.linalg.cholesky(self.covariance)  # (*B, N, N)
-
-        log_det = batch.align_array(
-            2.0
-            * jnp.sum(
-                jnp.log(jnp.diagonal(chol, axis1=-2, axis2=-1)),
-                axis=-1,
-            ),
-            self.batch_shape,
-            values.shape[:-1],
-        )  # (...)
-
-        return -0.5 * (
-            self.variable_dim * jnp.log(2.0 * jnp.pi) + log_det + mahalanobis
-        )
-
-    def log_prob_broadcast(self, values: jax.Array) -> jax.Array:
-        """Evaluate all values with receiver batch axes first."""
-        values = jnp.broadcast_to(values, self.batch_shape + values.shape)
-        return self.log_prob(values)
-
-    def mixture_mean(self, weights: jax.Array, *, axis: int) -> jax.Array:
-        """Compute a mixture mean over an explicit, aligned batch axis."""
-        return batch.weighted_sum(self.mean, weights, self.batch_shape, axis)
+        r"""Map values to $L^{-1}(u - \mu)$, where $LL^\top = \Sigma$."""
+        return self.noise.whiten(self.residual(values))
 
     def expected_log_prob(
         self,
@@ -320,142 +374,35 @@ class Gaussian(typing.NamedTuple):
                 f'got {other.covariance.shape}'
             )
 
-        mean = other.mean
-        covariance = other.covariance
-        model_mean = self.mean
-        cholesky = jnp.linalg.cholesky(self.covariance)
-
-        residual = mean - model_mean
-
-        whitened_residual = jsp.linalg.solve_triangular(
-            cholesky,
-            residual[..., None],
-            lower=True,
-        )[..., 0]
-
-        mahalanobis = jnp.sum(
-            whitened_residual**2,
-            axis=-1,
-        )
-
-        precision_covariance = jsp.linalg.cho_solve(
-            (cholesky, True),
-            covariance,
-        )
-
-        trace = jnp.trace(
-            precision_covariance,
-            axis1=-2,
-            axis2=-1,
-        )
-
-        log_det = 2.0 * jnp.sum(
-            jnp.log(
-                jnp.diagonal(
-                    cholesky,
-                    axis1=-2,
-                    axis2=-1,
-                )
-            ),
-            axis=-1,
-        )
-
-        return -0.5 * (
-            self.variable_dim * jnp.log(2.0 * jnp.pi) + log_det + mahalanobis + trace
-        )
-
-    def broadcast(self, shape, axis: int = 0) -> typing.Self:
-        """Insert replicated batch dimensions at `axis`."""
-        return batch.broadcast(self, shape, axis=axis)
-
-    def squeeze(self, axis=None) -> typing.Self:
-        """Remove singleton batch dimensions."""
-        return batch.squeeze(self, axis=axis)
-
-    def permute(self, permutation, axis: int = 0) -> typing.Self:
-        """Reorder entries along a batch axis."""
-        return batch.permute(self, permutation, axis=axis)
+        return self.noise.expected_log_prob(other._replace(loc=other.mean - self.mean))
 
 
-class LinearGaussian(typing.NamedTuple):
+class LinearGaussian(AffineDist[GaussianNoise]):
     r"""Linear-Gaussian conditional distribution.
 
     $$v \mid u \sim \mathcal{N}(Wu + b, \Sigma).$$
 
-    `affine` encodes $(W, b)$ and `covariance` stores $\Sigma$.
+    `affine` encodes $(W, b)$ and `noise` is $\mathcal{N}(0, \Sigma)$.
     Tensor-shaped inputs resolve as tensor contractions. Leading dimensions are
     batch dimensions, shared across all attributes.
     """
 
-    affine: Affine
-    covariance: jax.Array  # (..., O, O)
+    __slots__ = ()
 
-    @property
-    def batch_shape(self) -> tuple[int, ...]:
-        """Batch shape."""
-        covariance_shape = self.covariance.shape[:-2]
-        affine_shape = self.affine.batch_shape
-        batch.require_same_shape(covariance_shape, affine_shape)
-        return affine_shape
-
-    def broadcast(self, shape, axis: int = 0) -> typing.Self:
-        """Insert replicated batch dimensions at `axis`."""
-        return batch.broadcast(self, shape, axis=axis)
-
-    @property
-    def input_shape(self) -> tuple[int, ...]:
-        """Input shape of the affine map."""
-        return self.affine.input_shape
-
-    @property
-    def input_ndim(self) -> int:
-        """Number of input dimensions."""
-        return self.affine.input_ndim
-
-    @property
-    def input_size(self) -> int:
-        """Total size of input."""
-        return self.affine.input_size
-
-    @property
-    def output_dim(self) -> int:
-        """Output dimension."""
-        return self.affine.output_dim
-
-    @property
-    def dtype(self) -> jnp.dtype:
-        """Data type."""
-        return jnp.result_type(self.affine.dtype, self.covariance)
-
-    def reshape_input(
-        self,
-        input_shape: tuple[int, ...],
+    @classmethod
+    def from_components(
+        cls,
+        coefficients: jax.Array,  # (..., O, *input_shape)
+        bias: jax.Array,  # (..., O)
+        covariance: jax.Array,  # (..., O, O)
     ) -> typing.Self:
-        """Return same model with input shape reshaped."""
-        return self._replace(
-            affine=self.affine.reshape_input(input_shape),
-        )
+        """Construct from affine coefficients, bias, and a noise covariance."""
+        return cls(Affine(coefficients, bias), GaussianNoise(covariance))
 
-    def select(self, index: batch.SelT) -> typing.Self:
-        """Index only batch dimensions, retaining this object type."""
-        return batch.select(self, index)
-
-    def astype(
-        self,
-        dtype: jax.typing.DTypeLike,
-    ) -> typing.Self:
-        """Convert to a different data type."""
-        return self._replace(
-            affine=self.affine.astype(dtype),
-            covariance=self.covariance.astype(dtype),
-        )
-
-    def conditional_mean(
-        self,
-        values: jax.Array,
-    ) -> jax.Array:
-        """Mean of conditional distribution at deterministic input."""
-        return self.affine.apply(values)
+    @property
+    def covariance(self) -> jax.Array:  # (..., O, O)
+        r"""Noise covariance $\Sigma$."""
+        return self.noise.covariance
 
     def conditional(
         self,
@@ -469,53 +416,7 @@ class LinearGaussian(typing.NamedTuple):
             mean.shape[:-1] + (self.output_dim, self.output_dim),
         )  # (..., O, O)
 
-        return Gaussian(
-            mean=mean,
-            covariance=covariance,
-        )
-
-    def noise(self) -> Gaussian:
-        r"""Zero-mean residual distribution $\mathcal{N}(0, \Sigma)$."""
-        return Gaussian(
-            mean=jnp.zeros(
-                self.batch_shape + (self.output_dim,),
-                dtype=self.covariance.dtype,
-            ),
-            covariance=self.covariance,
-        )
-
-    def log_prob(
-        self,
-        inputs: jax.Array,  # (*B, *Q, *input_shape)
-        values: jax.Array,  # (*B, *Q, O)
-    ) -> jax.Array:  # (*B, *Q)
-        r"""Log density of `values` at deterministic `inputs`.
-
-        Prefer this over `conditional(inputs).log_prob(values)`, which
-        broadcasts $\Sigma$ to every query point and factors each copy.
-        """
-        return self.noise().log_prob(values - self.conditional_mean(inputs))
-
-    def sample(
-        self,
-        key: jax.Array,
-        values: jax.Array,
-    ) -> jax.Array:
-        """Sample from conditional distribution at deterministic input."""
-        mean = self.conditional_mean(values)  # (*B, *Q, O)
-        query_shape = mean.shape[len(self.batch_shape) : -1]
-        return mean + self.noise().sample(key, query_shape)
-
-    def compose_input(
-        self,
-        affine: Affine,
-    ) -> typing.Self:
-        """
-        Precompose with $u=W'u'+b'$.
-        """
-        return self._replace(
-            affine=self.affine.compose(affine),
-        )
+        return Gaussian.from_moments(mean, covariance)
 
     def compose_output(
         self,
@@ -530,16 +431,9 @@ class LinearGaussian(typing.NamedTuple):
                 f'expected {(self.output_dim,)}, got {affine.input_shape}'
             )
 
-        covariance = jnp.einsum(
-            '...oi,...ij,...pj->...op',
-            affine.coefficients_flat,
-            self.covariance,
-            affine.coefficients_flat,
-        )
-
         return self.__class__(
             affine=affine.compose(self.affine),
-            covariance=covariance,
+            noise=self.noise.congruence(affine.coefficients_flat),
         )
 
     def expected_log_prob(
@@ -624,16 +518,8 @@ class LinearGaussian(typing.NamedTuple):
             )
         )
 
-        noise = Gaussian(
-            mean=jnp.zeros_like(self.affine.bias),
-            covariance=self.covariance,
-        )
-
-        return noise.expected_log_prob(
-            Gaussian(
-                mean=residual_mean,
-                covariance=residual_covariance,
-            )
+        return self.noise.expected_log_prob(
+            Gaussian.from_moments(residual_mean, residual_covariance)
         )
 
     def expected_log_prob_broadcast(
@@ -647,7 +533,9 @@ class LinearGaussian(typing.NamedTuple):
         Cross covariance stores Cov(input, output), with trailing shape (I, O).
         """
         # Gaussian input means may retain the conditional's tensor input shape.
-        input = Gaussian(self.affine.flatten_input(input.mean), input.covariance)
+        input = Gaussian.from_moments(
+            self.affine.flatten_input(input.mean), input.covariance
+        )
         query_shape = input.batch_shape
         batch.require_same_shape(
             query_shape,
@@ -666,24 +554,12 @@ class LinearGaussian(typing.NamedTuple):
             self.batch_shape + input_output_covariance.shape,
         )
         if self.input_ndim != 1:
-            input = input._replace(mean=self.affine.unflatten_input(input.mean))
+            input = input._replace(loc=self.affine.unflatten_input(input.mean))
         return model.expected_log_prob(
             input,
             output,
             input_output_covariance,
         )
-
-    def squeeze(self, axis=None) -> typing.Self:
-        """Remove singleton batch dimensions."""
-        return batch.squeeze(self, axis=axis)
-
-    def permute(self, permutation, axis: int = 0) -> typing.Self:
-        """Reorder entries along a batch axis."""
-        return batch.permute(self, permutation, axis=axis)
-
-    def move_axis(self, source: int, destination: int) -> typing.Self:
-        """Move one batch axis to another position."""
-        return batch.move_axis(self, source, destination)
 
 
 class PairedGaussian(typing.NamedTuple):
@@ -785,6 +661,8 @@ class PairedGaussian(typing.NamedTuple):
         return batch.move_axis(self, source, destination)
 
 
+# TODO: Consider a generic `TemporalDist[D]` over any distribution, which would
+# also cover `TemporalPoisson`.
 class TemporalGaussian(typing.NamedTuple):
     """Time-indexed Gaussian distributions with contiguous valid prefixes.
 
@@ -1241,13 +1119,13 @@ class GaussianChainMarginals(typing.NamedTuple):
     def paired_marginals(self) -> PairedGaussian:
         """Return adjacent marginals $(x_t, x_{t+1})$."""
         return PairedGaussian(
-            left=Gaussian(
-                mean=self.means[..., :-1, :],
-                covariance=self.covariances[..., :-1, :, :],
+            left=Gaussian.from_moments(
+                self.means[..., :-1, :],
+                self.covariances[..., :-1, :, :],
             ),
-            right=Gaussian(
-                mean=self.means[..., 1:, :],
-                covariance=self.covariances[..., 1:, :, :],
+            right=Gaussian.from_moments(
+                self.means[..., 1:, :],
+                self.covariances[..., 1:, :, :],
             ),
             cross_covariance=jnp.swapaxes(
                 self.cross_covariances,

@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from xxm.core.data import Sequences
-from xxm.core.dists.gaussian import Gaussian
+from xxm.core.dists.gaussian import Gaussian, GaussianNoise
 from xxm.core.latents.hermite import HermiteGaussian
 from xxm.core.latents.random_walk import GatedGaussianRandomWalk, GaussianRandomWalk
 from xxm.core.lengths import Lengths, LengthsSpec
@@ -15,7 +15,7 @@ from xxm.core.lengths import Lengths, LengthsSpec
 def gaussian(batch=(2, 3), dim=2):
     return Gaussian(
         jnp.arange(np.prod(batch) * dim, dtype=float).reshape(batch + (dim,)),
-        jnp.broadcast_to(jnp.eye(dim), batch + (dim, dim)),
+        GaussianNoise.identity(dim, batch),
     )
 
 
@@ -23,13 +23,7 @@ def hermite():
     # The common-batch test is about structural operations, so construct a
     # valid Hermite Gaussian directly from its flattened coefficient Gaussian.
     return HermiteGaussian.from_coefficient_gaussian(
-        Gaussian(
-            mean=jnp.zeros((2, 3, 4)),
-            covariance=jnp.broadcast_to(
-                jnp.eye(4),
-                (2, 3, 4, 4),
-            ),
-        ),
+        Gaussian(jnp.zeros((2, 3, 4)), GaussianNoise.identity(4, (2, 3))),
         variable_dim=2,
     )
 
@@ -39,7 +33,7 @@ def test_random_walk_time_follows_batch(steps):
     rw = GaussianRandomWalk(
         gaussian(),
         gaussian()._replace(
-            mean=jnp.ones((2, 3, 2)),
+            loc=jnp.ones((2, 3, 2)),
         ),
     )
     key = jax.random.key(19)
@@ -85,8 +79,8 @@ def test_random_walk_time_follows_batch(steps):
 def test_gated_random_walk_aligns_gates_and_replicates(steps):
     # Structural batch B=(3,), intrinsic gates K=2.
     initial = gaussian(batch=(3, 2), dim=1)
-    active = initial._replace(mean=initial.mean + 10.0)
-    inactive = initial._replace(mean=initial.mean - 10.0)
+    active = initial._replace(loc=initial.mean + 10.0)
+    inactive = initial._replace(loc=initial.mean - 10.0)
 
     rw = GatedGaussianRandomWalk(
         initial,
@@ -142,13 +136,13 @@ def test_gated_random_walk_aligns_gates_and_replicates(steps):
 
         mask = gates[..., None, :] == jnp.arange(2).reshape(1, 2, 1)
 
-        increments = Gaussian(
-            mean=jnp.where(
+        increments = Gaussian.from_moments(
+            jnp.where(
                 mask[..., None],
                 active.mean[..., None, :],
                 inactive.mean[..., None, :],
             ),
-            covariance=jnp.broadcast_to(
+            jnp.broadcast_to(
                 initial.covariance[..., None, :, :],
                 (
                     3,

@@ -254,9 +254,8 @@ class SLDS(
                     )
                 ),
                 latent_initial=StateConditionedGaussian(
-                    dist=Gaussian(
-                        mean=latent_initial_means,
-                        covariance=latent_initial_covariances,
+                    dist=Gaussian.from_moments(
+                        latent_initial_means, latent_initial_covariances
                     )
                 ),
                 dynamics=GaussianLinearSwitchingDynamics.from_params(
@@ -628,7 +627,7 @@ class Inferred(
         continuous = posterior.continuous
 
         return TemporalGaussian(
-            Gaussian(continuous.means, continuous.covariances),
+            Gaussian.from_moments(continuous.means, continuous.covariances),
             continuous.lengths,
         )
 

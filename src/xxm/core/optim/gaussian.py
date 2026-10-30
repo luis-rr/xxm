@@ -6,6 +6,7 @@ import jax.numpy as jnp
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import (
     Gaussian,
+    GaussianNoise,
     LinearGaussian,
     PairedGaussian,
 )
@@ -18,49 +19,6 @@ DEFAULT_COV_FLOOR = 1e-6
 # package-wide default for relative covariance floor regularization at
 #  initialization, which is more conservative than the default for fitting
 DEFAULT_COV_FLOOR_INIT = 1e-2
-
-
-def add_covariance_floor(
-    covariance: jax.Array,
-    *,
-    reference_covariance: jax.Array,  # might be batched
-    covariance_floor: float,
-) -> jax.Array:
-    """
-    Add an isotropic covariance floor relative to a reference variance scale.
-
-    `covariance_floor` is a dimensionless fraction of the average marginal
-    variance of `reference_covariance`.
-    """
-    covariance = 0.5 * (
-        covariance
-        + jnp.swapaxes(
-            covariance,
-            -2,
-            -1,
-        )
-    )
-
-    scale = jnp.mean(
-        jnp.diagonal(
-            reference_covariance,
-            axis1=-2,
-            axis2=-1,
-        ),
-        axis=-1,
-    )
-    scale = jnp.where(
-        scale > 0.0,
-        scale,
-        1.0,
-    )
-
-    identity = jnp.eye(
-        covariance.shape[-1],
-        dtype=covariance.dtype,
-    )
-
-    return covariance + (covariance_floor * scale[..., None, None] * identity)
 
 
 def _normalize_weights(
@@ -142,10 +100,7 @@ def _from_samples_normalized(
         )
     )
 
-    return Gaussian(
-        mean=mean,
-        covariance=covariance,
-    )
+    return Gaussian.from_moments(mean, covariance)
 
 
 def from_samples(
@@ -171,13 +126,7 @@ def from_samples(
         weights=weights,
     )
 
-    return fitted._replace(
-        covariance=add_covariance_floor(
-            fitted.covariance,
-            reference_covariance=fitted.covariance,
-            covariance_floor=covariance_floor,
-        ),
-    )
+    return fitted._replace(noise=fitted.noise.with_floor(covariance_floor))
 
 
 def from_samples_weighted(
@@ -205,13 +154,7 @@ def from_samples_weighted(
         weights=weights,
     )
 
-    return fitted._replace(
-        covariance=add_covariance_floor(
-            fitted.covariance,
-            reference_covariance=fitted.covariance,
-            covariance_floor=covariance_floor,
-        ),
-    )
+    return fitted._replace(noise=fitted.noise.with_floor(covariance_floor))
 
 
 def from_samples_grouped(
@@ -282,7 +225,7 @@ def _from_moment_match_weighted(
         normalized_weights[..., :, None, None] * covariance, axis=-3
     ) + jnp.einsum('...s,...si,...sj->...ij', normalized_weights, residuals, residuals)
     covariance = 0.5 * (covariance + jnp.swapaxes(covariance, -2, -1))
-    return Gaussian(mean=matched_mean, covariance=covariance)
+    return Gaussian.from_moments(matched_mean, covariance)
 
 
 def from_moment_match(
@@ -349,10 +292,7 @@ def paired_from_paired_covariates(
         weights=weights,
     )
 
-    left = Gaussian(
-        mean=left_covariates.mean,
-        covariance=left_covariates.covariance,
-    )
+    left = Gaussian.from_moments(left_covariates.mean, left_covariates.covariance)
 
     cross_covariance = jnp.concatenate(
         [
@@ -425,9 +365,8 @@ def paired_from_moment_match(
     )
 
     joint = _from_moment_match_weighted(
-        distributions=Gaussian(
-            mean=distributions.mean,
-            covariance=distributions.covariance,
+        distributions=Gaussian.from_moments(
+            distributions.mean, distributions.covariance
         ),
         normalized_weights=normalized_weights,
     )
@@ -466,17 +405,17 @@ def paired_from_moment_match(
     left_dim = distributions.left_dim
 
     return PairedGaussian(
-        left=Gaussian(
-            mean=joint.mean[..., :left_dim],
-            covariance=covariance[
+        left=Gaussian.from_moments(
+            joint.mean[..., :left_dim],
+            covariance[
                 ...,
                 :left_dim,
                 :left_dim,
             ],
         ),
-        right=Gaussian(
-            mean=joint.mean[..., left_dim:],
-            covariance=covariance[
+        right=Gaussian.from_moments(
+            joint.mean[..., left_dim:],
+            covariance[
                 ...,
                 left_dim:,
                 left_dim:,
@@ -689,24 +628,18 @@ def affine_from_paired(
     )
 
 
-def linear_from_paired(
+def noise_from_paired(
     paired: PairedGaussian,
+    affine: Affine,
     *,
-    ridge: float,
     covariance_floor: float,
-) -> LinearGaussian:
+) -> GaussianNoise:
     r"""
-    Return the linear-Gaussian distribution of ``right | left``.
+    Return the residual noise of ``right | left`` under a fitted ``affine``.
 
-    ``ridge`` adds isotropic regularization to the left covariance relative
-    to its average marginal variance. With nonzero ridge, the result is a
-    regularized approximation to the exact Gaussian conditional.
+    The covariance is that of $v - Wu - b$ under the paired moments, with an
+    isotropic floor relative to the marginal output covariance.
     """
-    affine = affine_from_paired(
-        paired,
-        ridge=ridge,
-    )
-
     coefficients = affine.coefficients
 
     coefficients_t = jnp.swapaxes(
@@ -728,24 +661,32 @@ def linear_from_paired(
         + coefficients @ paired.left.covariance @ coefficients_t
     )
 
-    covariance = add_covariance_floor(
-        covariance,
-        reference_covariance=paired.right.covariance,
-        covariance_floor=covariance_floor,
+    return GaussianNoise(covariance).with_floor(
+        covariance_floor, reference=paired.right.noise
     )
 
-    covariance = 0.5 * (
-        covariance
-        + jnp.swapaxes(
-            covariance,
-            -2,
-            -1,
-        )
+
+def linear_from_paired(
+    paired: PairedGaussian,
+    *,
+    ridge: float,
+    covariance_floor: float,
+) -> LinearGaussian:
+    r"""
+    Return the linear-Gaussian distribution of ``right | left``.
+
+    ``ridge`` adds isotropic regularization to the left covariance relative
+    to its average marginal variance. With nonzero ridge, the result is a
+    regularized approximation to the exact Gaussian conditional.
+    """
+    affine = affine_from_paired(
+        paired,
+        ridge=ridge,
     )
 
     return LinearGaussian(
         affine=affine,
-        covariance=covariance,
+        noise=noise_from_paired(paired, affine, covariance_floor=covariance_floor),
     )
 
 

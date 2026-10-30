@@ -4,7 +4,6 @@ import numpy as np
 
 from xxm.arhmm.data import ARDataset, lagged_observations
 from xxm.arhmm.emissions import AREmissions
-from xxm.core.affine import Affine
 from xxm.core.data import Sequences
 from xxm.core.dists.discrete import DiscreteChainMarginals
 from xxm.core.dists.gaussian import LinearGaussian
@@ -35,13 +34,7 @@ def _make_emissions(
     covariances: jax.Array,  # (K, N_out, N_out)
 ) -> AREmissions[LinearGaussian]:
     return AREmissions(
-        dist=LinearGaussian(
-            affine=Affine(
-                coefficients=coefficients,
-                bias=biases,
-            ),
-            covariance=covariances,
-        ),
+        dist=LinearGaussian.from_components(coefficients, biases, covariances),
     )
 
 

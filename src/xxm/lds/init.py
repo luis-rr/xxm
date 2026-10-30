@@ -8,6 +8,7 @@ from jax import numpy as jnp
 
 from xxm.core.affine import Affine
 from xxm.core.data import Dataset, WeightedObservations
+from xxm.core.dists.gaussian import GaussianNoise
 from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import (
     EmissionsT,
@@ -155,15 +156,11 @@ def _init_initial(
         reference.covariance,
     )
 
-    covariance = gaussian_fit.add_covariance_floor(
-        base_covariance,
-        reference_covariance=reference.covariance,
-        covariance_floor=covariance_floor,
+    noise = GaussianNoise(base_covariance).with_floor(
+        covariance_floor, reference=reference.noise
     )
 
-    return GaussianInitial(
-        dist=initial._replace(covariance=covariance),
-    )
+    return GaussianInitial(dist=initial._replace(noise=noise))
 
 
 def _init_dynamics(

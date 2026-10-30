@@ -2,7 +2,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from xxm.core.affine import Affine
 from xxm.core.data import Dataset, DatasetCollection, WeightedObservations
 from xxm.core.dists.discrete import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
@@ -29,13 +28,7 @@ def _mock_gaussian_emissions(
     noise_covariance: jax.Array,
 ) -> GaussianEmissions:
     return GaussianEmissions(
-        dist=LinearGaussian(
-            affine=Affine(
-                coefficients=jnp.eye(1),
-                bias=jnp.zeros(1),
-            ),
-            covariance=noise_covariance,
-        ),
+        dist=LinearGaussian.from_components(jnp.eye(1), jnp.zeros(1), noise_covariance),
     )
 
 
@@ -52,18 +45,11 @@ def _single_state_model() -> Model:
             )
         ),
         latent_initial=StateConditionedGaussian(
-            dist=Gaussian(
-                mean=jnp.array([[0.0]]),
-                covariance=jnp.array([[[1.0]]]),
-            ),
+            dist=Gaussian.from_moments(jnp.array([[0.0]]), jnp.array([[[1.0]]])),
         ),
         dynamics=GaussianLinearSwitchingDynamics(
-            dist=LinearGaussian(
-                affine=Affine(
-                    coefficients=jnp.array([[[0.8]]]),
-                    bias=jnp.array([[0.2]]),
-                ),
-                covariance=jnp.array([[[0.5]]]),
+            dist=LinearGaussian.from_components(
+                jnp.array([[[0.8]]]), jnp.array([[0.2]]), jnp.array([[[0.5]]])
             ),
         ),
         emissions=ContinuousEmissionsCollection(
@@ -90,14 +76,14 @@ def _two_state_model() -> Model:
             )
         ),
         latent_initial=StateConditionedGaussian(
-            dist=Gaussian(
-                mean=jnp.array(
+            dist=Gaussian.from_moments(
+                jnp.array(
                     [
                         [0.0],
                         [0.0],
                     ]
                 ),
-                covariance=jnp.array(
+                jnp.array(
                     [
                         [[1.0]],
                         [[1.0]],
@@ -106,22 +92,20 @@ def _two_state_model() -> Model:
             ),
         ),
         dynamics=GaussianLinearSwitchingDynamics(
-            dist=LinearGaussian(
-                affine=Affine(
-                    coefficients=jnp.array(
-                        [
-                            [[0.8]],
-                            [[-0.5]],
-                        ]
-                    ),
-                    bias=jnp.array(
-                        [
-                            [0.0],
-                            [1.0],
-                        ]
-                    ),
+            dist=LinearGaussian.from_components(
+                jnp.array(
+                    [
+                        [[0.8]],
+                        [[-0.5]],
+                    ]
                 ),
-                covariance=jnp.array(
+                jnp.array(
+                    [
+                        [0.0],
+                        [1.0],
+                    ]
+                ),
+                jnp.array(
                     [
                         [[0.5]],
                         [[0.5]],

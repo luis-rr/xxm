@@ -23,7 +23,7 @@ def linear_gaussian_from_params(
     covariance: jax.Array,
 ) -> LinearGaussian:
     """Construct a linear-Gaussian conditional from stored parameters."""
-    return LinearGaussian(affine=Affine(coefficients, bias), covariance=covariance)
+    return LinearGaussian.from_components(coefficients, bias, covariance)
 
 
 def linear_poisson_to_params(dist: LinearPoisson) -> dict[str, jax.Array]:
