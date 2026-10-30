@@ -11,9 +11,11 @@ from xxm import lds, slds
 from xxm.core.data import Dataset, DatasetCollection
 from xxm.core.optim.newton import OptimParams
 from xxm.lds.inference import infer_laplace as infer_lds_laplace
+from xxm.lds.io import LDSParams
 from xxm.lds.learning import laplace_em_step as lds_laplace_em_step
 from xxm.slds.inference import infer_laplace as infer_slds_laplace
 from xxm.slds.inference import infer_variational as infer_slds
+from xxm.slds.io import SLDSParams
 from xxm.slds.learning import laplace_em_step as slds_laplace_em_step
 from xxm.slds.learning import variational_em_step as slds_variational_em_step
 
@@ -45,54 +47,60 @@ FAST_LAPLACE_PARAMS = OptimParams(
 
 def _lds_poisson():
     return lds.PoissonLDS.from_params(
-        initial_mean=jnp.array([0.0]),
-        initial_covariance=jnp.array([[1.0]]),
-        dynamics_coefficients=jnp.array([[0.8]]),
-        dynamics_bias=jnp.array([0.0]),
-        dynamics_covariance=jnp.array([[0.5]]),
-        emissions=(
-            {
-                'coefficients': jnp.zeros((1, 1)),
-                'bias': jnp.zeros(1),
-            },
-        ),
+        LDSParams(
+            initial_mean=jnp.array([0.0]),
+            initial_covariance=jnp.array([[1.0]]),
+            dynamics_coefficients=jnp.array([[0.8]]),
+            dynamics_bias=jnp.array([0.0]),
+            dynamics_covariance=jnp.array([[0.5]]),
+            emissions=(
+                {
+                    'coefficients': jnp.zeros((1, 1)),
+                    'bias': jnp.zeros(1),
+                },
+            ),
+        )
     ).core
 
 
 def _slds_gaussian():
     return slds.GaussianSLDS.from_params(
-        initial_probs=INITIAL_PROBS,
-        transition_probs=TRANSITION_PROBS,
-        latent_initial_means=jnp.array([[0.0], [0.5]]),
-        latent_initial_covariances=jnp.array([[[1.0]], [[1.0]]]),
-        dynamics_coefficients=jnp.array([[[0.8]], [[0.2]]]),
-        dynamics_bias=jnp.zeros((2, 1)),
-        dynamics_covariances=jnp.array([[[0.5]], [[0.5]]]),
-        emissions=(
-            {
-                'coefficients': jnp.array([[1.0]]),
-                'bias': jnp.zeros(1),
-                'covariance': jnp.array([[1.0]]),
-            },
-        ),
+        SLDSParams(
+            initial_probs=INITIAL_PROBS,
+            transition_probs=TRANSITION_PROBS,
+            latent_initial_means=jnp.array([[0.0], [0.5]]),
+            latent_initial_covariances=jnp.array([[[1.0]], [[1.0]]]),
+            dynamics_coefficients=jnp.array([[[0.8]], [[0.2]]]),
+            dynamics_bias=jnp.zeros((2, 1)),
+            dynamics_covariances=jnp.array([[[0.5]], [[0.5]]]),
+            emissions=(
+                {
+                    'coefficients': jnp.array([[1.0]]),
+                    'bias': jnp.zeros(1),
+                    'covariance': jnp.array([[1.0]]),
+                },
+            ),
+        )
     ).core
 
 
 def _slds_poisson():
     return slds.PoissonSLDS.from_params(
-        initial_probs=INITIAL_PROBS,
-        transition_probs=TRANSITION_PROBS,
-        latent_initial_means=jnp.array([[0.0], [0.5]]),
-        latent_initial_covariances=jnp.array([[[1.0]], [[1.0]]]),
-        dynamics_coefficients=jnp.array([[[0.8]], [[0.2]]]),
-        dynamics_bias=jnp.zeros((2, 1)),
-        dynamics_covariances=jnp.array([[[0.5]], [[0.5]]]),
-        emissions=(
-            {
-                'coefficients': jnp.zeros((1, 1)),
-                'bias': jnp.zeros(1),
-            },
-        ),
+        SLDSParams(
+            initial_probs=INITIAL_PROBS,
+            transition_probs=TRANSITION_PROBS,
+            latent_initial_means=jnp.array([[0.0], [0.5]]),
+            latent_initial_covariances=jnp.array([[[1.0]], [[1.0]]]),
+            dynamics_coefficients=jnp.array([[[0.8]], [[0.2]]]),
+            dynamics_bias=jnp.zeros((2, 1)),
+            dynamics_covariances=jnp.array([[[0.5]], [[0.5]]]),
+            emissions=(
+                {
+                    'coefficients': jnp.zeros((1, 1)),
+                    'bias': jnp.zeros(1),
+                },
+            ),
+        )
     ).core
 
 

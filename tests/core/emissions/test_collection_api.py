@@ -9,32 +9,37 @@ from xxm.arhmm.emissions import AREmissionsCollection
 from xxm.arhmm.model import GaussianARHMM
 from xxm.core.data import Dataset, DatasetCollection
 from xxm.core.dists.gaussian import LinearGaussian, TemporalGaussian
+from xxm.core.dists.io import LinearGaussianParams
 from xxm.core.emissions.collection import (
     ContinuousEmissionsCollection,
     DiscreteEmissionsCollection,
 )
 from xxm.core.emissions.continuous import GaussianEmissions
+from xxm.hmm.io import HMMParams
 from xxm.hmm.model import GaussianHMM
+from xxm.lds.io import LDSParams
 from xxm.lds.model import GaussianLDS
 
 
 def test_selected_session_density_preserves_sequence_sum_and_model_batch():
-    emission_params = {
-        'coefficients': jnp.ones((1, 1)),
-        'bias': jnp.zeros(1),
-        'covariance': jnp.eye(1),
-    }
+    emission_params = LinearGaussianParams(
+        coefficients=jnp.ones((1, 1)),
+        bias=jnp.zeros(1),
+        covariance=jnp.eye(1),
+    )
     initial_params = {
         'initial_mean': jnp.zeros(1),
         'initial_covariance': jnp.eye(1),
     }
 
     model = GaussianLDS.from_params(
-        **initial_params,
-        emissions=(emission_params,),
-        dynamics_coefficients=jnp.eye(1),
-        dynamics_bias=jnp.zeros(1),
-        dynamics_covariance=jnp.eye(1),
+        LDSParams(
+            **initial_params,
+            emissions=(emission_params,),
+            dynamics_coefficients=jnp.eye(1),
+            dynamics_bias=jnp.zeros(1),
+            dynamics_covariance=jnp.eye(1),
+        )
     ).core
 
     # Different observation dimensions and sequence shapes expose mismatched
@@ -82,14 +87,16 @@ def test_selected_session_density_preserves_sequence_sum_and_model_batch():
 
 def test_hmm_observation_mean_selects_matching_data_and_emission():
     model = GaussianHMM.from_params(
-        initial_probs=jnp.ones(1),
-        transition_probs=jnp.ones((1, 1)),
-        emissions=(
-            {
-                'mean': jnp.full((1, 1), 2.0),
-                'covariance': jnp.ones((1, 1, 1)),
-            },
-        ),
+        HMMParams(
+            initial_probs=jnp.ones(1),
+            transition_probs=jnp.ones((1, 1)),
+            emissions=(
+                {
+                    'mean': jnp.full((1, 1), 2.0),
+                    'covariance': jnp.ones((1, 1, 1)),
+                },
+            ),
+        )
     )
     data = DatasetCollection.from_datasets((Dataset.from_array(jnp.zeros((3, 1))),))
     inferred = model.infer(data)
@@ -109,15 +116,17 @@ def test_hmm_observation_mean_selects_matching_data_and_emission():
 
 def test_arhmm_inferred_conditionals_forward_session():
     model = GaussianARHMM.from_params(
-        initial_probs=jnp.ones(1),
-        transition_probs=jnp.ones((1, 1)),
-        emissions=(
-            {
-                'coefficients': jnp.ones((1, 1, 1, 1)),
-                'bias': jnp.full((1, 1), 2.0),
-                'covariance': jnp.ones((1, 1, 1)),
-            },
-        ),
+        HMMParams(
+            initial_probs=jnp.ones(1),
+            transition_probs=jnp.ones((1, 1)),
+            emissions=(
+                {
+                    'coefficients': jnp.ones((1, 1, 1, 1)),
+                    'bias': jnp.full((1, 1), 2.0),
+                    'covariance': jnp.ones((1, 1, 1)),
+                },
+            ),
+        )
     )
     data = DatasetCollection.from_datasets(
         (Dataset.from_array(jnp.array([[1.0], [2.0], [3.0]])),)

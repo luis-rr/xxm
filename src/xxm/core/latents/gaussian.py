@@ -157,7 +157,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
     dist: LinearGaussian
 
     @classmethod
-    def from_params(
+    def from_components(
         cls,
         *,
         latent_coefficients: jax.Array,

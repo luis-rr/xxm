@@ -13,6 +13,9 @@ from xxm.core.dists.gaussian import GaussianChainMarginals
 from xxm.core.io import hdf5
 from xxm.core.lengths import Lengths
 from xxm.core.mask import ArbitraryMask
+from xxm.hmm.io import HMMParams
+from xxm.lds.io import LDSParams
+from xxm.slds.io import SLDSParams
 
 FACADES = (
     xxm.GaussianHMM,
@@ -80,7 +83,7 @@ def make_model(facade, sessions=2, input_dim=1):
         'transition_probs': jnp.array([[0.75, 0.25], [0.5, 0.5]], dtype=jnp.float32),
     }
     if discrete or ar:
-        return facade.from_params(**categorical, emissions=tuple(emissions))
+        return facade.from_params(HMMParams(**categorical, emissions=tuple(emissions)))
     prefix = (2,) if switching else ()
     dynamics = {
         'dynamics_coefficients': jnp.full((*prefix, 1, 1), 0.75, dtype=jnp.float32),
@@ -91,19 +94,25 @@ def make_model(facade, sessions=2, input_dim=1):
     }
     if switching:
         return facade.from_params(
-            **categorical,
-            **dynamics,
-            latent_initial_means=jnp.array([[-0.25], [0.5]], dtype=jnp.float32),
-            latent_initial_covariances=jnp.array([[[0.5]], [[1.5]]], dtype=jnp.float32),
-            dynamics_covariances=jnp.array([[[0.75]], [[1.25]]], dtype=jnp.float32),
-            emissions=tuple(emissions),
+            SLDSParams(
+                **categorical,
+                **dynamics,
+                latent_initial_means=jnp.array([[-0.25], [0.5]], dtype=jnp.float32),
+                latent_initial_covariances=jnp.array(
+                    [[[0.5]], [[1.5]]], dtype=jnp.float32
+                ),
+                dynamics_covariances=jnp.array([[[0.75]], [[1.25]]], dtype=jnp.float32),
+                emissions=tuple(emissions),
+            )
         )
     return facade.from_params(
-        **dynamics,
-        initial_mean=jnp.array([-0.25], dtype=jnp.float32),
-        initial_covariance=jnp.array([[0.5]], dtype=jnp.float32),
-        dynamics_covariance=jnp.array([[0.75]], dtype=jnp.float32),
-        emissions=tuple(emissions),
+        LDSParams(
+            **dynamics,
+            initial_mean=jnp.array([-0.25], dtype=jnp.float32),
+            initial_covariance=jnp.array([[0.5]], dtype=jnp.float32),
+            dynamics_covariance=jnp.array([[0.75]], dtype=jnp.float32),
+            emissions=tuple(emissions),
+        )
     )
 
 
@@ -112,7 +121,7 @@ def make_model(facade, sessions=2, input_dim=1):
 def test_model_roundtrips(tmp_path, facade, sessions):
     model = make_model(facade, sessions=sessions, input_dim=sessions - 1)
     params = model.to_params()
-    restored = facade.from_params(**params)
+    restored = facade.from_params(params)
     assert type(restored) is facade
     assert_tree_equal(model.core, restored.core)
     assert_tree_equal(params, restored.to_params())

@@ -10,7 +10,6 @@ from jax import numpy as jnp
 from xxm.core import batch
 from xxm.core.affine import Affine
 from xxm.core.data import Sequences, WeightedObservations
-from xxm.core.dists import io as dists_io
 from xxm.core.dists.gaussian import Gaussian, GaussianMarginals, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
 from xxm.core.optim import gaussian as gaussian_fit
@@ -76,10 +75,6 @@ class Emissions(typing.Protocol):
         alignment: Affine,
     ) -> typing.Self:
         """Transform the latent input coordinates of the emission model."""
-        ...
-
-    def to_params(self) -> dict[str, jax.Array]:
-        """Return the canonical stored parameters."""
         ...
 
     def conditional_mean(self, latents: jax.Array) -> jax.Array:
@@ -370,25 +365,6 @@ class GaussianEmissions(typing.NamedTuple):
         """Expected observations at deterministic latent values."""
         return self.dist.conditional_mean(latents)
 
-    def to_params(self) -> dict[str, jax.Array]:
-        """Return the canonical stored parameters."""
-        return dists_io.linear_gaussian_to_params(self.dist)
-
-    @classmethod
-    def from_params(
-        cls,
-        *,
-        coefficients: jax.Array,
-        bias: jax.Array,
-        covariance: jax.Array,
-    ) -> typing.Self:
-        """Construct emissions from canonical stored parameters."""
-        return cls(
-            dists_io.linear_gaussian_from_params(
-                coefficients=coefficients, bias=bias, covariance=covariance
-            )
-        )
-
     def compose_input(
         self,
         alignment: Affine,
@@ -655,22 +631,6 @@ class PoissonEmissions(typing.NamedTuple):
     def conditional_mean(self, latents: jax.Array) -> jax.Array:
         """Expected counts at deterministic latent values."""
         return self.dist.conditional_mean(latents)
-
-    def to_params(self) -> dict[str, jax.Array]:
-        """Return the canonical stored parameters."""
-        return dists_io.linear_poisson_to_params(self.dist)
-
-    @classmethod
-    def from_params(
-        cls,
-        *,
-        coefficients: jax.Array,
-        bias: jax.Array,
-    ) -> typing.Self:
-        """Construct emissions from canonical stored parameters."""
-        return cls(
-            dists_io.linear_poisson_from_params(coefficients=coefficients, bias=bias)
-        )
 
     def compose_input(
         self,

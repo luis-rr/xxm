@@ -34,7 +34,7 @@ def test_categorical_transitions_sample_includes_initial():
     states = transitions.sample(
         jax.random.key(0),
         initial_state=jnp.array(0),
-        ls=LengthsSpec.from_params(4),
+        ls=LengthsSpec.from_steps(4),
     )
 
     np.testing.assert_array_equal(

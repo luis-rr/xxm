@@ -28,7 +28,7 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
     dist: LinearGaussian  # underlying batch (*B, K); K is the intrinsic state axis
 
     @classmethod
-    def from_params(
+    def from_components(
         cls,
         *,
         latent_coefficients: jax.Array,
@@ -37,7 +37,7 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         input_coefficients: jax.Array | None = None,
     ) -> typing.Self:
         """Construct state-specific controlled dynamics with predictors [x, u]."""
-        dynamics = GaussianLinearDynamics.from_params(
+        dynamics = GaussianLinearDynamics.from_components(
             latent_coefficients=latent_coefficients,
             input_coefficients=input_coefficients,
             bias=bias,

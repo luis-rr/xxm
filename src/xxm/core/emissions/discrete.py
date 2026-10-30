@@ -128,10 +128,6 @@ class Emissions(typing.Protocol):
         """Sample observations conditional on discrete states."""
         ...
 
-    def to_params(self) -> dict[str, jax.Array]:
-        """Return the canonical stored parameters."""
-        ...
-
 
 def _empty_groups(
     observations: jax.Array,
@@ -272,15 +268,6 @@ class GaussianEmissions(typing.NamedTuple):
         return self._replace(
             dist=self.dist.permute(permutation, axis=-1),
         )
-
-    def to_params(self) -> dict[str, jax.Array]:
-        """Return the canonical stored parameters."""
-        return {'mean': self.dist.mean, 'covariance': self.dist.covariance}
-
-    @classmethod
-    def from_params(cls, *, mean: jax.Array, covariance: jax.Array) -> typing.Self:
-        """Construct emissions from canonical stored parameters."""
-        return cls(Gaussian.from_moments(mean, covariance))
 
     @classmethod
     def from_assignments(
@@ -432,15 +419,6 @@ class PoissonEmissions(typing.NamedTuple):
         return self._replace(
             dist=self.dist.permute(permutation, axis=-1),
         )
-
-    def to_params(self) -> dict[str, jax.Array]:
-        """Return the canonical stored parameters."""
-        return {'log_rates': self.dist.log_rates}
-
-    @classmethod
-    def from_params(cls, *, log_rates: jax.Array) -> typing.Self:
-        """Construct emissions from canonical stored parameters."""
-        return cls(Poisson(log_rates=log_rates))
 
     @classmethod
     def from_assignments(

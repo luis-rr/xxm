@@ -10,6 +10,7 @@ import jax.numpy as jnp
 
 from xxm.core import facade as _facade
 from xxm.core.data import DatasetCollection, Sequences
+from xxm.core.dists import io as dists_io
 from xxm.core.dists.discrete import Categorical
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian, TemporalGaussian
 from xxm.core.dists.poisson import LinearPoisson
@@ -212,11 +213,18 @@ class SLDS(
             'dynamics_input_coefficients': self.core.dynamics.input_coefficients,
             'dynamics_bias': self.core.dynamics.dist.affine.bias,
             'dynamics_covariances': self.core.dynamics.dist.covariance,
-            'emissions': tuple(e.to_params() for e in self.core.emissions.emissions),
+            'emissions': tuple(
+                self._emissions_to_params(e) for e in self.core.emissions.emissions
+            ),
         }
 
     @classmethod
-    def _emissions_from_params(cls, params: dict[str, jax.Array]) -> EmissionsT:
+    def _emissions_to_params(cls, emissions: EmissionsT) -> typing.Any:
+        """Store one session's emissions; emission facades define this."""
+        raise NotImplementedError
+
+    @classmethod
+    def _emissions_from_params(cls, params: typing.Any) -> EmissionsT:
         """Construct one session's emissions; emission facades define this."""
         raise NotImplementedError
 
@@ -224,48 +232,39 @@ class SLDS(
     def from_hdf5(cls, path: PathLike) -> typing.Self:
         """Restore the model or result without running inference."""
         params = load_model_params(path)
-        return cls.from_params(**typing.cast(SLDSParams, params))
+        return cls.from_params(typing.cast(SLDSParams, params))
 
     @classmethod
-    def from_params(
-        cls,
-        *,
-        initial_probs: jax.Array,  # (K,)
-        transition_probs: jax.Array,  # (K, K)
-        latent_initial_means: jax.Array,  # (K, D)
-        latent_initial_covariances: jax.Array,  # (K, D, D)
-        dynamics_coefficients: jax.Array,  # (K, D, D)
-        dynamics_bias: jax.Array,  # (K, D)
-        dynamics_covariances: jax.Array,  # (K, D, D)
-        emissions: tuple[dict[str, jax.Array], ...],
-        dynamics_input_coefficients: jax.Array | None = None,
-    ) -> typing.Self:
-        """Construct an SLDS from discrete, latent, and emission parameters."""
+    def from_params(cls, params: SLDSParams) -> typing.Self:
+        """Construct an SLDS from its stored parameters."""
         return cls(
             core=Model(
                 state_initial=CategoricalInitial(
                     dist=Categorical(
-                        probs=initial_probs,
+                        probs=params['initial_probs'],
                     )
                 ),
                 transitions=CategoricalTransitions(
                     dist=Categorical(
-                        probs=transition_probs,
+                        probs=params['transition_probs'],
                     )
                 ),
                 latent_initial=StateConditionedGaussian(
                     dist=Gaussian.from_moments(
-                        latent_initial_means, latent_initial_covariances
+                        params['latent_initial_means'],
+                        params['latent_initial_covariances'],
                     )
                 ),
-                dynamics=GaussianLinearSwitchingDynamics.from_params(
-                    latent_coefficients=dynamics_coefficients,
-                    input_coefficients=dynamics_input_coefficients,
-                    bias=dynamics_bias,
-                    covariance=dynamics_covariances,
+                dynamics=GaussianLinearSwitchingDynamics.from_components(
+                    latent_coefficients=params['dynamics_coefficients'],
+                    input_coefficients=params.get('dynamics_input_coefficients'),
+                    bias=params['dynamics_bias'],
+                    covariance=params['dynamics_covariances'],
                 ),
                 emissions=ContinuousEmissionsCollection(
-                    tuple(cls._emissions_from_params(item) for item in emissions)
+                    tuple(
+                        cls._emissions_from_params(item) for item in params['emissions']
+                    )
                 ),
             )
         )
@@ -280,7 +279,7 @@ class SLDS(
     ) -> Sample:
         r"""Sample discrete states, continuous latents, and observations."""
 
-        ls = LengthsSpec.from_params(steps, min_length=1)
+        ls = LengthsSpec.from_steps(steps, min_length=1)
 
         return self.core.sample(
             key,
@@ -421,8 +420,16 @@ class GaussianSLDS(VariationalSLDS[GaussianEmissions]):
         return self.core.emissions.get(session).dist
 
     @classmethod
-    def _emissions_from_params(cls, params: dict[str, jax.Array]) -> GaussianEmissions:
-        return GaussianEmissions.from_params(**params)
+    def _emissions_to_params(
+        cls, emissions: GaussianEmissions
+    ) -> dists_io.LinearGaussianParams:
+        return dists_io.linear_gaussian_to_params(emissions.dist)
+
+    @classmethod
+    def _emissions_from_params(
+        cls, params: dists_io.LinearGaussianParams
+    ) -> GaussianEmissions:
+        return GaussianEmissions(dists_io.linear_gaussian_from_params(params))
 
     @classmethod
     def via_pca(
@@ -498,8 +505,16 @@ class PoissonSLDS(LaplaceSLDS[PoissonEmissions]):
         return self.core.emissions.get(session).dist
 
     @classmethod
-    def _emissions_from_params(cls, params: dict[str, jax.Array]) -> PoissonEmissions:
-        return PoissonEmissions.from_params(**params)
+    def _emissions_to_params(
+        cls, emissions: PoissonEmissions
+    ) -> dists_io.LinearPoissonParams:
+        return dists_io.linear_poisson_to_params(emissions.dist)
+
+    @classmethod
+    def _emissions_from_params(
+        cls, params: dists_io.LinearPoissonParams
+    ) -> PoissonEmissions:
+        return PoissonEmissions(dists_io.linear_poisson_from_params(params))
 
     @classmethod
     def via_pca(
@@ -603,7 +618,7 @@ class Inferred(
         facade_cls = _FACADES.get(model_type)
         if facade_cls is None:
             raise ValueError(f'Unsupported SLDS facade: {model_type!r}')
-        model = facade_cls.from_params(**params)
+        model = facade_cls.from_params(params)
         posterior = posterior_from_storage(stored_posterior)
         return cls(
             model=typing.cast(SLDSFacadeT, model), posterior=posterior, data=data

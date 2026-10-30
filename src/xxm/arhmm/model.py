@@ -152,12 +152,21 @@ class ARHMM(
         return {
             'initial_probs': self.core.initial.dist.probs,
             'transition_probs': self.core.transitions.dist.probs,
-            'emissions': tuple(e.to_params() for e in self.core.emissions.emissions),
+            'emissions': tuple(
+                self._emissions_to_params(e) for e in self.core.emissions.emissions
+            ),
         }
 
     @classmethod
+    def _emissions_to_params(
+        cls, emissions: AREmissions[ConditionalDistT]
+    ) -> typing.Any:
+        """Store one session's emissions; emission facades define this."""
+        raise NotImplementedError
+
+    @classmethod
     def _emissions_from_params(
-        cls, params: dict[str, jax.Array]
+        cls, params: typing.Any
     ) -> AREmissions[ConditionalDistT]:
         """Construct one session's emissions; emission facades define this."""
         raise NotImplementedError
@@ -166,24 +175,17 @@ class ARHMM(
     def from_hdf5(cls, path: PathLike) -> typing.Self:
         """Restore the model or result without running inference."""
         params = load_model_params(path)
-        return cls.from_params(**typing.cast(HMMParams, params))
+        return cls.from_params(typing.cast(HMMParams, params))
 
     @classmethod
-    def from_params(
-        cls,
-        *,
-        initial_probs: jax.Array,
-        transition_probs: jax.Array,
-        emissions: tuple[dict[str, jax.Array], ...],
-    ) -> typing.Self:
+    def from_params(cls, params: HMMParams) -> typing.Self:
         r"""Construct an AR-HMM from state, transition, and AR parameters.
 
         The coefficients have shape $(K,D_y,L,D_y)$ and the first $L$ observations
         serve as fixed conditioning history.
         """
         initial, transitions = categorical_from_params(
-            initial_probs,
-            transition_probs,
+            params['initial_probs'], params['transition_probs']
         )
 
         return cls(
@@ -191,7 +193,9 @@ class ARHMM(
                 initial=initial,
                 transitions=transitions,
                 emissions=AREmissionsCollection(
-                    tuple(cls._emissions_from_params(item) for item in emissions)
+                    tuple(
+                        cls._emissions_from_params(item) for item in params['emissions']
+                    )
                 ),
             ),
         )
@@ -206,7 +210,7 @@ class ARHMM(
     ) -> Sample:
         """Sample states and observations, optionally continuing a history."""
 
-        ls = LengthsSpec.from_params(steps, min_length=1)
+        ls = LengthsSpec.from_steps(steps, min_length=1)
 
         if initial_history is None:
             return self.core.sample(key, ls, session=session)
@@ -315,10 +319,16 @@ class GaussianARHMM(ARHMM[LinearGaussian]):
         return temporal
 
     @classmethod
+    def _emissions_to_params(
+        cls, emissions: AREmissions[LinearGaussian]
+    ) -> dists_io.LinearGaussianParams:
+        return dists_io.linear_gaussian_to_params(emissions.dist)
+
+    @classmethod
     def _emissions_from_params(
-        cls, params: dict[str, jax.Array]
+        cls, params: dists_io.LinearGaussianParams
     ) -> AREmissions[LinearGaussian]:
-        return AREmissions(dists_io.linear_gaussian_from_params(**params))
+        return AREmissions(dists_io.linear_gaussian_from_params(params))
 
     @classmethod
     def via_kmeans(
@@ -388,10 +398,16 @@ class PoissonARHMM(ARHMM[LinearPoisson]):
         return temporal
 
     @classmethod
+    def _emissions_to_params(
+        cls, emissions: AREmissions[LinearPoisson]
+    ) -> dists_io.LinearPoissonParams:
+        return dists_io.linear_poisson_to_params(emissions.dist)
+
+    @classmethod
     def _emissions_from_params(
-        cls, params: dict[str, jax.Array]
+        cls, params: dists_io.LinearPoissonParams
     ) -> AREmissions[LinearPoisson]:
-        return AREmissions(dists_io.linear_poisson_from_params(**params))
+        return AREmissions(dists_io.linear_poisson_from_params(params))
 
     @classmethod
     def via_kmeans(
@@ -449,7 +465,7 @@ class Inferred(
         facade_cls = _FACADES.get(model_type)
         if facade_cls is None:
             raise ValueError(f'Unsupported AR-HMM facade: {model_type!r}')
-        model = facade_cls.from_params(**params)
+        model = facade_cls.from_params(params)
         posterior = chains.discrete_from_storage(stored_posterior)
         return cls(
             model=typing.cast(ARHMMFacadeT, model), posterior=posterior, data=data

@@ -10,6 +10,7 @@ import jax.numpy as jnp
 
 from xxm.core import facade as _facade
 from xxm.core.data import DatasetCollection, Sequences
+from xxm.core.dists import io as dists_io
 from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
 from xxm.core.emissions.collection import DiscreteEmissionsCollection
@@ -75,11 +76,18 @@ class HMM(_facade.PermutableFacade[Model[EmissionT]], typing.Generic[EmissionT])
         return {
             'initial_probs': self.core.initial.dist.probs,
             'transition_probs': self.core.transitions.dist.probs,
-            'emissions': tuple(e.to_params() for e in self.core.emissions.emissions),
+            'emissions': tuple(
+                self._emissions_to_params(e) for e in self.core.emissions.emissions
+            ),
         }
 
     @classmethod
-    def _emissions_from_params(cls, params: dict[str, jax.Array]) -> EmissionT:
+    def _emissions_to_params(cls, emissions: EmissionT) -> typing.Any:
+        """Store one session's emissions; emission facades define this."""
+        raise NotImplementedError
+
+    @classmethod
+    def _emissions_from_params(cls, params: typing.Any) -> EmissionT:
         """Construct one session's emissions; emission facades define this."""
         raise NotImplementedError
 
@@ -87,20 +95,13 @@ class HMM(_facade.PermutableFacade[Model[EmissionT]], typing.Generic[EmissionT])
     def from_hdf5(cls, path: PathLike) -> typing.Self:
         """Restore the model or result without running inference."""
         params = load_model_params(path)
-        return cls.from_params(**typing.cast(HMMParams, params))
+        return cls.from_params(typing.cast(HMMParams, params))
 
     @classmethod
-    def from_params(
-        cls,
-        *,
-        initial_probs: jax.Array,
-        transition_probs: jax.Array,
-        emissions: tuple[dict[str, jax.Array], ...],
-    ) -> typing.Self:
+    def from_params(cls, params: HMMParams) -> typing.Self:
         r"""Construct a model from its parameters."""
         initial, transitions = categorical_from_params(
-            initial_probs,
-            transition_probs,
+            params['initial_probs'], params['transition_probs']
         )
 
         return cls(
@@ -108,7 +109,9 @@ class HMM(_facade.PermutableFacade[Model[EmissionT]], typing.Generic[EmissionT])
                 initial=initial,
                 transitions=transitions,
                 emissions=DiscreteEmissionsCollection(
-                    tuple(cls._emissions_from_params(item) for item in emissions)
+                    tuple(
+                        cls._emissions_from_params(item) for item in params['emissions']
+                    )
                 ),
             ),
         )
@@ -121,7 +124,7 @@ class HMM(_facade.PermutableFacade[Model[EmissionT]], typing.Generic[EmissionT])
         session: int | None = None,
     ) -> Sample:
         r"""Sample state and observation sequences with requested lengths."""
-        ls = LengthsSpec.from_params(steps, min_length=1)
+        ls = LengthsSpec.from_steps(steps, min_length=1)
         return self.core.sample(key, ls=ls, session=session)
 
     def infer(self, data: DatasetCollection) -> Inferred[typing.Self]:
@@ -175,8 +178,16 @@ class GaussianHMM(HMM[GaussianEmissions]):
         return self.core.emissions.get(session).dist
 
     @classmethod
-    def _emissions_from_params(cls, params: dict[str, jax.Array]) -> GaussianEmissions:
-        return GaussianEmissions.from_params(**params)
+    def _emissions_to_params(
+        cls, emissions: GaussianEmissions
+    ) -> dists_io.GaussianParams:
+        return dists_io.gaussian_to_params(emissions.dist)
+
+    @classmethod
+    def _emissions_from_params(
+        cls, params: dists_io.GaussianParams
+    ) -> GaussianEmissions:
+        return GaussianEmissions(dists_io.gaussian_from_params(params))
 
     @classmethod
     def via_kmeans(
@@ -218,8 +229,14 @@ class PoissonHMM(HMM[PoissonEmissions]):
         return self.core.emissions.get(session).dist
 
     @classmethod
-    def _emissions_from_params(cls, params: dict[str, jax.Array]) -> PoissonEmissions:
-        return PoissonEmissions.from_params(**params)
+    def _emissions_to_params(
+        cls, emissions: PoissonEmissions
+    ) -> dists_io.PoissonParams:
+        return dists_io.poisson_to_params(emissions.dist)
+
+    @classmethod
+    def _emissions_from_params(cls, params: dists_io.PoissonParams) -> PoissonEmissions:
+        return PoissonEmissions(dists_io.poisson_from_params(params))
 
     @classmethod
     def via_kmeans(
@@ -276,7 +293,7 @@ class Inferred(
         facade_cls = _FACADES.get(model_type)
         if facade_cls is None:
             raise ValueError(f'Unsupported HMM facade: {model_type!r}')
-        model = facade_cls.from_params(**params)
+        model = facade_cls.from_params(params)
         posterior = chains.discrete_from_storage(stored_posterior)
         return cls(model=typing.cast(HMMFacadeT, model), posterior=posterior, data=data)
 

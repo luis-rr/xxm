@@ -1,8 +1,10 @@
 """Canonical SLDS parameter schema."""
 
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 import jax
+
+from xxm.core.dists.io import LinearGaussianParams, LinearPoissonParams
 
 
 class SLDSParams(TypedDict):
@@ -13,5 +15,5 @@ class SLDSParams(TypedDict):
     dynamics_coefficients: jax.Array
     dynamics_bias: jax.Array
     dynamics_covariances: jax.Array
-    dynamics_input_coefficients: jax.Array
-    emissions: tuple[dict[str, jax.Array], ...]
+    dynamics_input_coefficients: NotRequired[jax.Array]
+    emissions: tuple[LinearGaussianParams | LinearPoissonParams, ...]

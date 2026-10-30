@@ -4,8 +4,10 @@ import pytest
 from jax import numpy as jnp
 
 from xxm.core.data import Sequences
+from xxm.core.dists.io import LinearGaussianParams, LinearPoissonParams
 from xxm.core.latents.gaussian import GaussianLinearDynamics
 from xxm.core.lengths import Lengths
+from xxm.lds.io import LDSParams
 from xxm.lds.model import GaussianLDS, PoissonLDS
 
 from .lds_helpers import make_model
@@ -49,7 +51,7 @@ def test_sample_returns_one_latent_and_observation_per_time_step():
 def test_dynamics_from_params_and_potentials_with_batch_and_query_axes(controlled):
     a = jnp.full((2, 1, 1), 0.5)
     b = jnp.full((2, 1, 1), 2.0) if controlled else None
-    dynamics = GaussianLinearDynamics.from_params(
+    dynamics = GaussianLinearDynamics.from_components(
         latent_coefficients=a,
         input_coefficients=b,
         bias=jnp.ones((2, 1)),
@@ -77,22 +79,23 @@ def test_dynamics_from_params_and_potentials_with_batch_and_query_axes(controlle
 @pytest.mark.parametrize('facade', [GaussianLDS, PoissonLDS])
 @pytest.mark.parametrize('controlled', [False, True])
 def test_facade_input_properties_and_conditioning(facade, controlled):
-    kwargs = {'covariance': jnp.eye(1)} if facade is GaussianLDS else {}
-    model = facade.from_params(
+    params = LDSParams(
         initial_mean=jnp.zeros(1),
         initial_covariance=jnp.eye(1),
         dynamics_coefficients=jnp.eye(1),
         dynamics_bias=jnp.zeros(1),
         dynamics_covariance=jnp.eye(1),
         emissions=(
-            {
-                'coefficients': jnp.eye(1),
-                'bias': jnp.zeros(1),
-                **kwargs,
-            },
+            LinearGaussianParams(
+                coefficients=jnp.eye(1), bias=jnp.zeros(1), covariance=jnp.eye(1)
+            )
+            if facade is GaussianLDS
+            else LinearPoissonParams(coefficients=jnp.eye(1), bias=jnp.zeros(1)),
         ),
-        dynamics_input_coefficients=jnp.full((1, 1), 2.0) if controlled else None,
     )
+    if controlled:
+        params['dynamics_input_coefficients'] = jnp.full((1, 1), 2.0)
+    model = facade.from_params(params)
     assert model.input_dim == int(controlled)
     assert model.input_coefficients.shape == (1, int(controlled))
     conditioned = model.dynamics(jnp.array([3.0]) if controlled else None)

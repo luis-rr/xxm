@@ -10,6 +10,8 @@ import xxm
 from xxm import arhmm, hmm
 from xxm.arhmm.data import ARDataset
 from xxm.core.data import Dataset, DatasetCollection
+from xxm.core.dists.io import LinearGaussianParams, LinearPoissonParams
+from xxm.hmm.io import HMMParams
 
 
 def core(family):
@@ -17,16 +19,23 @@ def core(family):
         'initial_probs': jnp.array([0.6, 0.4]),
         'transition_probs': jnp.array([[0.8, 0.2], [0.3, 0.7]]),
     }
-    emission = {
-        'coefficients': jnp.array([[[[0.2], [-0.1]]], [[[0.1], [0.15]]]]),
-        'bias': jnp.array([[0.1], [-0.2]]),
-    }
+    coefficients = jnp.array([[[[0.2], [-0.1]]], [[[0.1], [0.15]]]])
+    bias = jnp.array([[0.1], [-0.2]])
     if family == 'gaussian':
-        return arhmm.GaussianARHMM.from_params(
-            **params,
-            emissions=({**emission, 'covariance': jnp.array([[[0.7]], [[1.2]]])},),
+        emission = LinearGaussianParams(
+            coefficients=coefficients,
+            bias=bias,
+            covariance=jnp.array([[[0.7]], [[1.2]]]),
         )
-    return arhmm.PoissonARHMM.from_params(**params, emissions=(emission,))
+        return arhmm.GaussianARHMM.from_params(
+            HMMParams(**params, emissions=(emission,))
+        )
+    return arhmm.PoissonARHMM.from_params(
+        HMMParams(
+            **params,
+            emissions=(LinearPoissonParams(coefficients=coefficients, bias=bias),),
+        )
+    )
 
 
 @pytest.mark.parametrize('family', ['gaussian', 'poisson'])

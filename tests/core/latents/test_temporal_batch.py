@@ -38,7 +38,7 @@ def test_random_walk_time_follows_batch(steps):
     )
     key = jax.random.key(19)
 
-    ls = LengthsSpec.from_params(
+    ls = LengthsSpec.from_steps(
         Lengths.full(rw.batch_shape, steps),
     )
 
@@ -88,7 +88,7 @@ def test_gated_random_walk_aligns_gates_and_replicates(steps):
         inactive,
     )
 
-    ls = LengthsSpec.from_params(
+    ls = LengthsSpec.from_steps(
         Lengths.full(rw.batch_shape, steps),
     )
 

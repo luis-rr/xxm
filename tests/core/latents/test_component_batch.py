@@ -179,7 +179,7 @@ def test_gaussian_dynamics_ignore_padded_transition_moments_and_inputs():
         cross_covariances=jnp.array([[[0.0]], [[0.0]], [[jnp.nan]]]),
         lengths=Lengths(jnp.array(3)),
     )
-    dynamics = GaussianLinearDynamics.from_params(
+    dynamics = GaussianLinearDynamics.from_components(
         latent_coefficients=jnp.eye(1),
         input_coefficients=jnp.ones((1, 1)),
         bias=jnp.zeros(1),

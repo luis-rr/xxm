@@ -578,7 +578,7 @@ Readability should only be traded for performance when the gain is meaningful an
 
 ## Storage
 
-Concrete facades own canonical `to_params()` / `from_params(**params)` inverses.
+Concrete facades own canonical `to_params()` / `from_params(params)` inverses.
 They expose stored mathematical parameters, preserving numerical values,
 shapes, dtypes, emission order, and all sessions. HDF5 model loading uses
 only `from_params`, with no separate reconstruction implementation.

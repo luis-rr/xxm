@@ -10,6 +10,7 @@ from jax import numpy as jnp
 
 from xxm.core import facade as _facade
 from xxm.core.data import DatasetCollection, Sequences
+from xxm.core.dists import io as dists_io
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian, TemporalGaussian
 from xxm.core.dists.gaussian import GaussianChainMarginals as Posterior
 from xxm.core.dists.poisson import LinearPoisson
@@ -143,11 +144,18 @@ class LDS(_facade.AlignableFacade[Model[EmissionsT]], typing.Generic[EmissionsT]
             'dynamics_input_coefficients': self.core.dynamics.input_coefficients,
             'dynamics_bias': self.core.dynamics.dist.affine.bias,
             'dynamics_covariance': self.core.dynamics.dist.covariance,
-            'emissions': tuple(e.to_params() for e in self.core.emissions.emissions),
+            'emissions': tuple(
+                self._emissions_to_params(e) for e in self.core.emissions.emissions
+            ),
         }
 
     @classmethod
-    def _emissions_from_params(cls, params: dict[str, jax.Array]) -> EmissionsT:
+    def _emissions_to_params(cls, emissions: EmissionsT) -> typing.Any:
+        """Store one session's emissions; emission facades define this."""
+        raise NotImplementedError
+
+    @classmethod
+    def _emissions_from_params(cls, params: typing.Any) -> EmissionsT:
         """Construct one session's emissions; emission facades define this."""
         raise NotImplementedError
 
@@ -155,29 +163,21 @@ class LDS(_facade.AlignableFacade[Model[EmissionsT]], typing.Generic[EmissionsT]
     def from_hdf5(cls, path: PathLike) -> typing.Self:
         """Restore the model or result without running inference."""
         params = load_model_params(path)
-        return cls.from_params(**typing.cast(LDSParams, params))
+        return cls.from_params(typing.cast(LDSParams, params))
 
     @classmethod
-    def from_params(
-        cls,
-        *,
-        initial_mean: jax.Array,
-        initial_covariance: jax.Array,
-        dynamics_coefficients: jax.Array,
-        dynamics_bias: jax.Array,
-        dynamics_covariance: jax.Array,
-        emissions: tuple[dict[str, jax.Array], ...],
-        dynamics_input_coefficients: jax.Array | None = None,
-    ) -> typing.Self:
-        """Construct an LDS from explicit parameters."""
+    def from_params(cls, params: LDSParams) -> typing.Self:
+        """Construct an LDS from its stored parameters."""
         initial = GaussianInitial(
-            dist=Gaussian.from_moments(initial_mean, initial_covariance)
+            dist=Gaussian.from_moments(
+                params['initial_mean'], params['initial_covariance']
+            )
         )
-        dynamics = GaussianLinearDynamics.from_params(
-            latent_coefficients=dynamics_coefficients,
-            input_coefficients=dynamics_input_coefficients,
-            bias=dynamics_bias,
-            covariance=dynamics_covariance,
+        dynamics = GaussianLinearDynamics.from_components(
+            latent_coefficients=params['dynamics_coefficients'],
+            input_coefficients=params.get('dynamics_input_coefficients'),
+            bias=params['dynamics_bias'],
+            covariance=params['dynamics_covariance'],
         )
 
         return cls(
@@ -185,7 +185,9 @@ class LDS(_facade.AlignableFacade[Model[EmissionsT]], typing.Generic[EmissionsT]
                 initial=initial,
                 dynamics=dynamics,
                 emissions=ContinuousEmissionsCollection(
-                    tuple(cls._emissions_from_params(item) for item in emissions)
+                    tuple(
+                        cls._emissions_from_params(item) for item in params['emissions']
+                    )
                 ),
             ),
         )
@@ -200,7 +202,7 @@ class LDS(_facade.AlignableFacade[Model[EmissionsT]], typing.Generic[EmissionsT]
     ) -> Sample:
         r"""Sample latent states and observations."""
 
-        ls = LengthsSpec.from_params(steps, min_length=1)
+        ls = LengthsSpec.from_steps(steps, min_length=1)
         input_sequences = _sampling_inputs(self.core, ls, inputs)
 
         return self.core.sample(key, inputs=input_sequences, session=session)
@@ -318,8 +320,16 @@ class GaussianLDS(ExactLDS[GaussianEmissions]):
         return self.core.emissions.get(session).dist
 
     @classmethod
-    def _emissions_from_params(cls, params: dict[str, jax.Array]) -> GaussianEmissions:
-        return GaussianEmissions.from_params(**params)
+    def _emissions_to_params(
+        cls, emissions: GaussianEmissions
+    ) -> dists_io.LinearGaussianParams:
+        return dists_io.linear_gaussian_to_params(emissions.dist)
+
+    @classmethod
+    def _emissions_from_params(
+        cls, params: dists_io.LinearGaussianParams
+    ) -> GaussianEmissions:
+        return GaussianEmissions(dists_io.linear_gaussian_from_params(params))
 
     @classmethod
     def via_pca(
@@ -359,8 +369,16 @@ class PoissonLDS(LaplaceLDS[PoissonEmissions]):
         return self.core.emissions.get(session).dist
 
     @classmethod
-    def _emissions_from_params(cls, params: dict[str, jax.Array]) -> PoissonEmissions:
-        return PoissonEmissions.from_params(**params)
+    def _emissions_to_params(
+        cls, emissions: PoissonEmissions
+    ) -> dists_io.LinearPoissonParams:
+        return dists_io.linear_poisson_to_params(emissions.dist)
+
+    @classmethod
+    def _emissions_from_params(
+        cls, params: dists_io.LinearPoissonParams
+    ) -> PoissonEmissions:
+        return PoissonEmissions(dists_io.linear_poisson_from_params(params))
 
     @classmethod
     def via_pca(
@@ -426,7 +444,7 @@ class Inferred(
         facade_cls = _FACADES.get(model_type)
         if facade_cls is None:
             raise ValueError(f'Unsupported LDS facade: {model_type!r}')
-        model = facade_cls.from_params(**params)
+        model = facade_cls.from_params(params)
         posterior = chains.gaussian_from_storage(stored_posterior)
         return cls(model=typing.cast(LDSFacadeT, model), posterior=posterior, data=data)
 

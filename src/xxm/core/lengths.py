@@ -205,7 +205,7 @@ class LengthsSpec:
         return self.lengths.batch_shape
 
     @classmethod
-    def from_params(cls, lengths: LengthsLike, *, min_length: int = 0) -> typing.Self:
+    def from_steps(cls, lengths: LengthsLike, *, min_length: int = 0) -> typing.Self:
         if not isinstance(lengths, Lengths):
             lengths = Lengths.from_values(lengths)
 

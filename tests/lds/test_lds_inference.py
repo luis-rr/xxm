@@ -99,7 +99,7 @@ def test_withheld_observations_do_not_change_inference(make, infer):
 def test_hidden_timesteps_keep_known_inputs_and_padding_excludes_transitions():
     model = Model(
         initial=GaussianInitial(Gaussian.from_moments(jnp.zeros(1), jnp.eye(1))),
-        dynamics=GaussianLinearDynamics.from_params(
+        dynamics=GaussianLinearDynamics.from_components(
             latent_coefficients=jnp.eye(1),
             input_coefficients=jnp.array([[2.0]]),
             bias=jnp.zeros(1),
