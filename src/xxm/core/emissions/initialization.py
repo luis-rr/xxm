@@ -4,9 +4,7 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core import batch
-from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
-
-_Emissions = GaussianEmissions | PoissonEmissions
+from xxm.core.emissions.continuous import Emissions as _Emissions
 
 
 def _time_axis(values: jax.Array) -> int:
@@ -29,7 +27,7 @@ def _validate_inputs(
         observations.shape[:-2],
     )
 
-    if observations.shape[-1] != emissions.dist.output_dim:
+    if observations.shape[-1] != emissions.observation_dim:
         raise ValueError('observations must match the emission output dimension')
 
     if num_refinement_iters < 0:
@@ -204,7 +202,6 @@ def _baseline_observations(
     """Return the emission mean at zero latent for each model batch."""
     dtype = jnp.result_type(
         observations,
-        emissions.dist.affine.dtype,
         jnp.float32,
     )
 
@@ -212,7 +209,7 @@ def _baseline_observations(
         (
             *emissions.batch_shape,
             1,
-            *emissions.dist.input_shape,
+            emissions.latent_dim,
         ),
         dtype=dtype,
     )
@@ -291,7 +288,7 @@ def _complete_and_invert(
 
 
 def initial_latent_trajectory(
-    emissions: GaussianEmissions | PoissonEmissions,
+    emissions: _Emissions,
     observations: jax.Array,
     visible: jax.Array | None = None,
     *,

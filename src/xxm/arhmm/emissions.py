@@ -22,6 +22,7 @@ import jax.numpy as jnp
 
 from xxm.core import batch
 from xxm.core.data import Sequences
+from xxm.core.dists import io as dists_io
 from xxm.core.dists.discrete import DiscreteMarginals
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
@@ -178,6 +179,14 @@ class AREmissions(
         )  # (*B, K, T-L, L, D_y)
         conditional = self.dist.conditional(values)
         return conditional.move_axis(len(self.batch_shape), -1)  # (*B, T-L, K)
+
+    def to_params(self) -> dict[str, jax.Array]:
+        """Return the canonical stored parameters."""
+        if isinstance(self.dist, LinearGaussian):
+            return dists_io.linear_gaussian_to_params(self.dist)
+        if isinstance(self.dist, LinearPoisson):
+            return dists_io.linear_poisson_to_params(self.dist)
+        typing.assert_never(self.dist)
 
     def conditional_mean(
         self,

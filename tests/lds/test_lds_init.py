@@ -3,7 +3,8 @@ import jax.numpy as jnp
 import numpy as np
 
 from xxm.core.data import Dataset, DatasetCollection
-from xxm.lds.init import init_gaussian_via_pca, pca_latents
+from xxm.lds import GaussianLDS
+from xxm.lds.init import pca_latents
 
 OBSERVATIONS = jnp.array(
     [
@@ -17,7 +18,7 @@ OBSERVATIONS = jnp.array(
 
 def test_gaussian_via_pca_returns_model_with_requested_latent_dimension():
     data = DatasetCollection.from_datasets((Dataset.from_array(OBSERVATIONS),))
-    model = init_gaussian_via_pca(data, latent_dim=2)
+    model = GaussianLDS.via_pca(jax.random.key(0), data, latent_dim=2).get().core
 
     assert model.initial.dist.mean.shape == (2,)
     assert model.dynamics.dist.affine.coefficients.shape == (2, 2)

@@ -128,6 +128,25 @@ class Emissions(typing.Protocol):
         """Sample observations conditional on discrete states."""
         ...
 
+    def to_params(self) -> dict[str, jax.Array]:
+        """Return the canonical stored parameters."""
+        ...
+
+
+def _empty_groups(
+    observations: jax.Array,
+    assignments: jax.Array,
+    sample_weights: jax.Array,
+    num_groups: int,
+) -> jax.Array:  # (K,)
+    """Flag groups with no weighted assigned samples."""
+    counts = jnp.bincount(
+        assignments,
+        weights=sample_weights.astype(jnp.result_type(observations, jnp.float32)),
+        length=num_groups,
+    )
+    return counts <= 0
+
 
 class GaussianEmissions(typing.NamedTuple):
     r"""State-dependent Gaussian emissions.
@@ -254,6 +273,57 @@ class GaussianEmissions(typing.NamedTuple):
             dist=self.dist.permute(permutation, axis=-1),
         )
 
+    def to_params(self) -> dict[str, jax.Array]:
+        """Return the canonical stored parameters."""
+        return {'mean': self.dist.mean, 'covariance': self.dist.covariance}
+
+    @classmethod
+    def from_params(cls, *, mean: jax.Array, covariance: jax.Array) -> typing.Self:
+        """Construct emissions from canonical stored parameters."""
+        return cls(Gaussian(mean=mean, covariance=covariance))
+
+    @classmethod
+    def from_assignments(
+        cls,
+        observations: jax.Array,  # (T, D_y)
+        assignments: jax.Array,  # (T,)
+        sample_weights: jax.Array,  # (T,)
+        num_states: int,
+        *,
+        covariance_floor: float,
+    ) -> typing.Self:
+        """Fit one Gaussian per assigned state; empty states use the pooled fit."""
+        gaussian = gaussian_fit.from_samples_grouped(
+            values=observations,
+            assignments=assignments,
+            num_groups=num_states,
+            sample_weights=sample_weights,
+            covariance_floor=covariance_floor,
+        )
+
+        pooled = gaussian_fit.from_samples_weighted(
+            observations,
+            sample_weights,
+            covariance_floor=covariance_floor,
+        )
+
+        empty = _empty_groups(observations, assignments, sample_weights, num_states)
+
+        return cls(
+            gaussian._replace(
+                mean=jnp.where(
+                    empty[:, None],
+                    pooled.mean[None, :],
+                    gaussian.mean,
+                ),
+                covariance=jnp.where(
+                    empty[:, None, None],
+                    pooled.covariance[None, :, :],
+                    gaussian.covariance,
+                ),
+            )
+        )
+
 
 class PoissonEmissions(typing.NamedTuple):
     r"""State-dependent Poisson emissions parameterized by log rates.
@@ -361,6 +431,48 @@ class PoissonEmissions(typing.NamedTuple):
         """Relabel state-specific emission parameters."""
         return self._replace(
             dist=self.dist.permute(permutation, axis=-1),
+        )
+
+    def to_params(self) -> dict[str, jax.Array]:
+        """Return the canonical stored parameters."""
+        return {'log_rates': self.dist.log_rates}
+
+    @classmethod
+    def from_params(cls, *, log_rates: jax.Array) -> typing.Self:
+        """Construct emissions from canonical stored parameters."""
+        return cls(Poisson(log_rates=log_rates))
+
+    @classmethod
+    def from_assignments(
+        cls,
+        observations: jax.Array,  # (T, D_y)
+        assignments: jax.Array,  # (T,)
+        sample_weights: jax.Array,  # (T,)
+        num_states: int,
+    ) -> typing.Self:
+        """Fit one Poisson per assigned state; empty states use the pooled fit."""
+        poisson = poisson_fit.from_samples_grouped(
+            values=observations,
+            assignments=assignments,
+            num_groups=num_states,
+            sample_weights=sample_weights,
+        )
+
+        pooled = poisson_fit.from_samples_weighted(
+            observations,
+            sample_weights,
+        )
+
+        empty = _empty_groups(observations, assignments, sample_weights, num_states)
+
+        return cls(
+            poisson._replace(
+                log_rates=jnp.where(
+                    empty[:, None],
+                    pooled.log_rates[None, :],
+                    poisson.log_rates,
+                )
+            )
         )
 
     def sample(

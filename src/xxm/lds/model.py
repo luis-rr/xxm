@@ -1,4 +1,4 @@
-"""Facade classes for Gaussian and Poisson linear dynamical systems."""
+"""Facade classes for linear dynamical systems."""
 
 from __future__ import annotations
 
@@ -9,13 +9,18 @@ import jax
 from jax import numpy as jnp
 
 from xxm.core import facade as _facade
-from xxm.core.affine import Affine
 from xxm.core.data import DatasetCollection, Sequences
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian, TemporalGaussian
 from xxm.core.dists.gaussian import GaussianChainMarginals as Posterior
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.collection import ContinuousEmissionsCollection
-from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
+from xxm.core.emissions.continuous import (
+    EmissionsT,
+    GaussianEmissions,
+    LaplaceEmissionsT,
+    PoissonEmissions,
+    QuadraticEmissionsT,
+)
 from xxm.core.facade import Fit
 from xxm.core.io import chains, hdf5
 from xxm.core.io.hdf5 import PathLike, load_model_params
@@ -95,17 +100,15 @@ def _conditioned_dynamics(
     return model.dynamics.conditional(inputs)
 
 
-@jax.tree_util.register_dataclass
-@dataclasses.dataclass(frozen=True, eq=False)
-class GaussianLDS(_facade.AlignableFacade[Model[GaussianEmissions]]):
-    r"""Linear dynamical system with Gaussian emissions.
+class LDS(_facade.AlignableFacade[Model[EmissionsT]], typing.Generic[EmissionsT]):
+    r"""Linear dynamical system facade shared by all emission types.
 
     $$x_0 \sim \mathcal{N}(m_0,S_0),$$
 
     $$x_t\mid x_{t-1},u_t
-    \sim \mathcal{N}(Ax_{t-1}+Bu_t+b,Q),$$
+    \sim \mathcal{N}(Ax_{t-1}+Bu_t+b,Q).$$
 
-    $$y_t\mid x_t \sim \mathcal{N}(Cx_t+d,R).$$
+    Emission-specific facades bind the emission type and its initialization.
     """
 
     @property
@@ -131,10 +134,6 @@ class GaussianLDS(_facade.AlignableFacade[Model[GaussianEmissions]]):
         r"""Return $p(x_t\mid x_{t-1},u_t)$ conditioned on a known input."""
         return _conditioned_dynamics(self.core, inputs)
 
-    def emissions(self, session: int | None = None) -> LinearGaussian:
-        """Linear-Gaussian observation distribution."""
-        return self.core.emissions.get(session).dist
-
     def to_params(self) -> LDSParams:
         """Return stored parameters, with one dictionary per emission session."""
         return {
@@ -144,15 +143,13 @@ class GaussianLDS(_facade.AlignableFacade[Model[GaussianEmissions]]):
             'dynamics_input_coefficients': self.core.dynamics.input_coefficients,
             'dynamics_bias': self.core.dynamics.dist.affine.bias,
             'dynamics_covariance': self.core.dynamics.dist.covariance,
-            'emissions': tuple(
-                {
-                    'coefficients': e.dist.affine.coefficients,
-                    'bias': e.dist.affine.bias,
-                    'covariance': e.dist.covariance,
-                }
-                for e in self.core.emissions.emissions
-            ),
+            'emissions': tuple(e.to_params() for e in self.core.emissions.emissions),
         }
+
+    @classmethod
+    def _emissions_from_params(cls, params: dict[str, jax.Array]) -> EmissionsT:
+        """Construct one session's emissions; emission facades define this."""
+        raise NotImplementedError
 
     @classmethod
     def from_hdf5(cls, path: PathLike) -> typing.Self:
@@ -172,7 +169,7 @@ class GaussianLDS(_facade.AlignableFacade[Model[GaussianEmissions]]):
         emissions: tuple[dict[str, jax.Array], ...],
         dynamics_input_coefficients: jax.Array | None = None,
     ) -> typing.Self:
-        """Construct a Gaussian LDS from explicit parameters."""
+        """Construct an LDS from explicit parameters."""
         initial = GaussianInitial(
             dist=Gaussian(mean=initial_mean, covariance=initial_covariance)
         )
@@ -188,40 +185,8 @@ class GaussianLDS(_facade.AlignableFacade[Model[GaussianEmissions]]):
                 initial=initial,
                 dynamics=dynamics,
                 emissions=ContinuousEmissionsCollection(
-                    tuple(
-                        GaussianEmissions(
-                            LinearGaussian(
-                                affine=Affine(item['coefficients'], item['bias']),
-                                covariance=item['covariance'],
-                            )
-                        )
-                        for item in emissions
-                    )
+                    tuple(cls._emissions_from_params(item) for item in emissions)
                 ),
-            ),
-        )
-
-    @classmethod
-    def via_pca(
-        cls,
-        key: jax.Array,
-        data: DatasetCollection,
-        latent_dim: int,
-        *,
-        ridge=gaussian_fit.DEFAULT_RIDGE,
-        covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
-    ) -> GaussianLDSCollection:
-        """Initialize an independent model for every session."""
-        return GaussianLDSCollection.from_datasets(
-            key=key,
-            data=data,
-            init_fn=lambda _session_key, dataset: cls(
-                init_gaussian_via_pca(
-                    DatasetCollection((dataset,)),
-                    latent_dim=latent_dim,
-                    ridge=ridge,
-                    covariance_floor=covariance_floor,
-                )
             ),
         )
 
@@ -239,6 +204,10 @@ class GaussianLDS(_facade.AlignableFacade[Model[GaussianEmissions]]):
         input_sequences = _sampling_inputs(self.core, ls, inputs)
 
         return self.core.sample(key, inputs=input_sequences, session=session)
+
+
+class ExactLDS(LDS[QuadraticEmissionsT], typing.Generic[QuadraticEmissionsT]):
+    """LDS with conjugate emissions: exact inference and EM."""
 
     def infer(
         self,
@@ -282,150 +251,8 @@ class GaussianLDS(_facade.AlignableFacade[Model[GaussianEmissions]]):
         )
 
 
-@jax.tree_util.register_dataclass
-@dataclasses.dataclass(frozen=True, eq=False)
-class PoissonLDS(_facade.AlignableFacade[Model[PoissonEmissions]]):
-    r"""Linear dynamical system with Poisson emissions.
-
-    $$x_0 \sim \mathcal{N}(m_0,S_0),$$
-
-    $$x_t\mid x_{t-1},u_t
-    \sim \mathcal{N}(Ax_{t-1}+Bu_t+b,Q),$$
-
-    $$y_t\mid x_t \sim \operatorname{Poisson}(\exp(Cx_t+d)).$$
-    """
-
-    @property
-    def latent_dim(self) -> int:
-        """Dimension $D_x$ of the continuous latent state."""
-        return self.core.dynamics.latent_dim
-
-    def observation_dim(self, session: int | None = None) -> int:
-        """Dimension $D_y$ of each observation."""
-        return self.core.emissions.get(session).observation_dim
-
-    @property
-    def input_dim(self) -> int:
-        """Dimension $D_u$ of known dynamics inputs."""
-        return self.core.dynamics.input_dim
-
-    @property
-    def input_coefficients(self) -> jax.Array:
-        """Known-input dynamics coefficients $B$."""
-        return self.core.dynamics.input_coefficients
-
-    def dynamics(self, inputs: jax.Array | None = None) -> LinearGaussian:
-        r"""Return $p(x_t\mid x_{t-1},u_t)$ conditioned on a known input."""
-        return _conditioned_dynamics(self.core, inputs)
-
-    def emissions(self, session: int | None = None) -> LinearPoisson:
-        """Linear-Poisson observation distribution in log-rate form."""
-        return self.core.emissions.get(session).dist
-
-    def to_params(self) -> LDSParams:
-        """Return stored parameters, with one dictionary per emission session."""
-        return {
-            'initial_mean': self.core.initial.dist.mean,
-            'initial_covariance': self.core.initial.dist.covariance,
-            'dynamics_coefficients': self.core.dynamics.latent_coefficients,
-            'dynamics_input_coefficients': self.core.dynamics.input_coefficients,
-            'dynamics_bias': self.core.dynamics.dist.affine.bias,
-            'dynamics_covariance': self.core.dynamics.dist.covariance,
-            'emissions': tuple(
-                {
-                    'coefficients': e.dist.affine.coefficients,
-                    'bias': e.dist.affine.bias,
-                }
-                for e in self.core.emissions.emissions
-            ),
-        }
-
-    @classmethod
-    def from_hdf5(cls, path: PathLike) -> typing.Self:
-        """Restore the model or result without running inference."""
-        params = load_model_params(path)
-        return cls.from_params(**typing.cast(LDSParams, params))
-
-    @classmethod
-    def from_params(
-        cls,
-        *,
-        initial_mean: jax.Array,
-        initial_covariance: jax.Array,
-        dynamics_coefficients: jax.Array,
-        dynamics_bias: jax.Array,
-        dynamics_covariance: jax.Array,
-        emissions: tuple[dict[str, jax.Array], ...],
-        dynamics_input_coefficients: jax.Array | None = None,
-    ) -> typing.Self:
-        """Construct a Poisson LDS from explicit parameters."""
-        initial = GaussianInitial(
-            dist=Gaussian(mean=initial_mean, covariance=initial_covariance)
-        )
-        dynamics = GaussianLinearDynamics.from_params(
-            latent_coefficients=dynamics_coefficients,
-            input_coefficients=dynamics_input_coefficients,
-            bias=dynamics_bias,
-            covariance=dynamics_covariance,
-        )
-
-        return cls(
-            core=Model(
-                initial=initial,
-                dynamics=dynamics,
-                emissions=ContinuousEmissionsCollection(
-                    tuple(
-                        PoissonEmissions(
-                            LinearPoisson(
-                                affine=Affine(item['coefficients'], item['bias']),
-                            )
-                        )
-                        for item in emissions
-                    )
-                ),
-            ),
-        )
-
-    @classmethod
-    def via_pca(
-        cls,
-        key: jax.Array,
-        data: DatasetCollection,
-        latent_dim: int,
-        *,
-        ridge=gaussian_fit.DEFAULT_RIDGE,
-        covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
-        count_floor: float = poisson_fit.DEFAULT_COUNT_FLOOR,
-    ) -> PoissonLDSCollection:
-        """Initialize an independent model for every session."""
-        return PoissonLDSCollection.from_datasets(
-            key=key,
-            data=data,
-            init_fn=lambda _session_key, dataset: cls(
-                init_poisson_via_pca(
-                    DatasetCollection((dataset,)),
-                    latent_dim=latent_dim,
-                    ridge=ridge,
-                    covariance_floor=covariance_floor,
-                    count_floor=count_floor,
-                )
-            ),
-        )
-
-    def sample(
-        self,
-        key: jax.Array,
-        steps: LengthsLike,
-        *,
-        inputs: jax.Array | None = None,
-        session: int | None = None,
-    ) -> Sample:
-        r"""Sample latent states and observations."""
-
-        ls = LengthsSpec.from_params(steps, min_length=1)
-        input_sequences = _sampling_inputs(self.core, ls, inputs)
-
-        return self.core.sample(key, inputs=input_sequences, session=session)
+class LaplaceLDS(LDS[LaplaceEmissionsT], typing.Generic[LaplaceEmissionsT]):
+    """LDS with nonconjugate emissions: Laplace inference and Laplace EM."""
 
     def infer(
         self,
@@ -478,7 +305,93 @@ class PoissonLDS(_facade.AlignableFacade[Model[PoissonEmissions]]):
         )
 
 
-LDSFacadeT = typing.TypeVar('LDSFacadeT', GaussianLDS, PoissonLDS)
+@jax.tree_util.register_dataclass
+@dataclasses.dataclass(frozen=True, eq=False)
+class GaussianLDS(ExactLDS[GaussianEmissions]):
+    r"""Linear dynamical system with Gaussian emissions.
+
+    $$y_t\mid x_t \sim \mathcal{N}(Cx_t+d,R).$$
+    """
+
+    def emissions(self, session: int | None = None) -> LinearGaussian:
+        """Linear-Gaussian observation distribution."""
+        return self.core.emissions.get(session).dist
+
+    @classmethod
+    def _emissions_from_params(cls, params: dict[str, jax.Array]) -> GaussianEmissions:
+        return GaussianEmissions.from_params(**params)
+
+    @classmethod
+    def via_pca(
+        cls,
+        key: jax.Array,
+        data: DatasetCollection,
+        latent_dim: int,
+        *,
+        ridge: float = gaussian_fit.DEFAULT_RIDGE,
+        covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
+    ) -> GaussianLDSCollection:
+        """Initialize an independent model for every session from PCA latents."""
+        return GaussianLDSCollection.from_datasets(
+            key=key,
+            data=data,
+            init_fn=lambda _session_key, dataset: cls(
+                init_gaussian_via_pca(
+                    dataset,
+                    latent_dim,
+                    ridge=ridge,
+                    covariance_floor=covariance_floor,
+                )
+            ),
+        )
+
+
+@jax.tree_util.register_dataclass
+@dataclasses.dataclass(frozen=True, eq=False)
+class PoissonLDS(LaplaceLDS[PoissonEmissions]):
+    r"""Linear dynamical system with Poisson emissions.
+
+    $$y_t\mid x_t \sim \operatorname{Poisson}(\exp(Cx_t+d)).$$
+    """
+
+    def emissions(self, session: int | None = None) -> LinearPoisson:
+        """Linear-Poisson observation distribution in log-rate form."""
+        return self.core.emissions.get(session).dist
+
+    @classmethod
+    def _emissions_from_params(cls, params: dict[str, jax.Array]) -> PoissonEmissions:
+        return PoissonEmissions.from_params(**params)
+
+    @classmethod
+    def via_pca(
+        cls,
+        key: jax.Array,
+        data: DatasetCollection,
+        latent_dim: int,
+        *,
+        ridge: float = gaussian_fit.DEFAULT_RIDGE,
+        covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
+        count_floor: float = poisson_fit.DEFAULT_COUNT_FLOOR,
+    ) -> PoissonLDSCollection:
+        """Initialize an independent model for every session from log-count PCA."""
+        return PoissonLDSCollection.from_datasets(
+            key=key,
+            data=data,
+            init_fn=lambda _session_key, dataset: cls(
+                init_poisson_via_pca(
+                    dataset,
+                    latent_dim,
+                    ridge=ridge,
+                    covariance_floor=covariance_floor,
+                    count_floor=count_floor,
+                )
+            ),
+        )
+
+
+LDSFacadeT = typing.TypeVar('LDSFacadeT', bound='LDS[typing.Any]')
+ExactLDSFacadeT = typing.TypeVar('ExactLDSFacadeT', bound='ExactLDS[typing.Any]')
+LaplaceLDSFacadeT = typing.TypeVar('LaplaceLDSFacadeT', bound='LaplaceLDS[typing.Any]')
 
 
 @dataclasses.dataclass(frozen=True, eq=False)
@@ -510,12 +423,10 @@ class Inferred(
         model_type, raw, stored_posterior, stored_data = hdf5.load_inferred(path)
         data = DatasetCollection._from_storage(stored_data)
         params = typing.cast(LDSParams, raw)
-        if model_type == 'xxm.lds.GaussianLDS':
-            model = GaussianLDS.from_params(**params)
-        elif model_type == 'xxm.lds.PoissonLDS':
-            model = PoissonLDS.from_params(**params)
-        else:
+        facade_cls = _FACADES.get(model_type)
+        if facade_cls is None:
             raise ValueError(f'Unsupported LDS facade: {model_type!r}')
+        model = facade_cls.from_params(**params)
         posterior = chains.gaussian_from_storage(stored_posterior)
         return cls(model=typing.cast(LDSFacadeT, model), posterior=posterior, data=data)
 
@@ -600,5 +511,88 @@ class LDSCollection(
         return Inferred
 
 
-GaussianLDSCollection = LDSCollection[GaussianLDS]
-PoissonLDSCollection = LDSCollection[PoissonLDS]
+@dataclasses.dataclass(frozen=True, eq=False)
+class ExactLDSCollection(
+    LDSCollection[ExactLDSFacadeT], typing.Generic[ExactLDSFacadeT]
+):
+    """Independent exact-inference LDS facades."""
+
+    def infer(
+        self,
+        data: DatasetCollection,
+        *,
+        max_workers: int = 1,
+    ) -> LDSInferredCollection[ExactLDSFacadeT]:
+        """Infer every session independently."""
+        return self._infer_each(
+            data,
+            lambda model, subset: model.infer(subset),
+            max_workers=max_workers,
+        )
+
+    def fit(
+        self,
+        data: DatasetCollection,
+        *,
+        num_iters: int,
+        progress: bool | str = False,
+        max_workers: int = 1,
+    ) -> _facade.FitCollection[LDSInferredCollection[ExactLDSFacadeT]]:
+        """Fit every session independently by EM."""
+        return self._fit_each(
+            data,
+            lambda model, subset: model.fit(
+                subset, num_iters=num_iters, progress=progress
+            ),
+            max_workers=max_workers,
+        )
+
+
+@dataclasses.dataclass(frozen=True, eq=False)
+class LaplaceLDSCollection(
+    LDSCollection[LaplaceLDSFacadeT], typing.Generic[LaplaceLDSFacadeT]
+):
+    """Independent Laplace-inference LDS facades."""
+
+    def infer(
+        self,
+        data: DatasetCollection,
+        *,
+        laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
+        max_workers: int = 1,
+    ) -> LDSInferredCollection[LaplaceLDSFacadeT]:
+        """Infer every session independently."""
+        return self._infer_each(
+            data,
+            lambda model, subset: model.infer(subset, laplace_params=laplace_params),
+            max_workers=max_workers,
+        )
+
+    def fit(
+        self,
+        data: DatasetCollection,
+        *,
+        num_iters: int,
+        laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
+        progress: bool | str = False,
+        max_workers: int = 1,
+    ) -> _facade.FitCollection[LDSInferredCollection[LaplaceLDSFacadeT]]:
+        """Fit every session independently by Laplace EM."""
+        return self._fit_each(
+            data,
+            lambda model, subset: model.fit(
+                subset,
+                num_iters=num_iters,
+                progress=progress,
+                laplace_params=laplace_params,
+            ),
+            max_workers=max_workers,
+        )
+
+
+GaussianLDSCollection = ExactLDSCollection[GaussianLDS]
+PoissonLDSCollection = LaplaceLDSCollection[PoissonLDS]
+
+_FACADES: dict[str, type[LDS[typing.Any]]] = {
+    f'xxm.lds.{facade.__name__}': facade for facade in (GaussianLDS, PoissonLDS)
+}

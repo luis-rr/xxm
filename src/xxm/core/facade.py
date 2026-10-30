@@ -165,16 +165,6 @@ class Fit(typing.NamedTuple, typing.Generic[Inferred_co]):
     objective_trace: jax.Array
 
 
-class _FacadeOperations(typing.Protocol[Inferred_co]):
-    """Internal typing boundary for heterogeneous facade keyword arguments."""
-
-    def infer(self, data: DatasetCollection, **kwargs: typing.Any) -> Inferred_co: ...
-
-    def fit(
-        self, data: DatasetCollection, **kwargs: typing.Any
-    ) -> Fit[Inferred_co]: ...
-
-
 # ---------------------------------------------------------------------
 # Typed collections of inferred and fitted results
 # ---------------------------------------------------------------------
@@ -502,45 +492,34 @@ class FacadeCollection(typing.Generic[FacadeT, InferredT, InferredCollectionT]):
 
         return tuple(completed[i] for i in range(len(pairs)))
 
-    def infer(
+    def _infer_each(
         self,
         data: DatasetCollection,
+        infer: typing.Callable[[FacadeT, DatasetCollection], InferredT],
         *,
-        max_workers: int = 1,
-        **kwargs: typing.Any,
+        max_workers: int,
     ) -> InferredCollectionT:
-        """Infer independently, preserving the family collection type."""
-
-        def single(model: FacadeT, subset: DatasetCollection) -> InferredT:
-            typed = typing.cast(_FacadeOperations[InferredT], model)
-            return typed.infer(subset, **kwargs)
-
+        """Infer each session independently; family collections type `infer`."""
         results = self.map(
             data,
-            single,
+            infer,
             map_progress=len(self.models) > 1,
             max_workers=max_workers,
         )
 
         return self._wrap_inferred(data, results)
 
-    def fit(
+    def _fit_each(
         self,
         data: DatasetCollection,
+        fit: typing.Callable[[FacadeT, DatasetCollection], Fit[InferredT]],
         *,
-        max_workers: int = 1,
-        **kwargs: typing.Any,
+        max_workers: int,
     ) -> FitCollection[InferredCollectionT]:
-        """Fit independently, retaining fitted facades and their posteriors."""
-        fit_kwargs = {'progress': False, **kwargs}
-
-        def single(model: FacadeT, subset: DatasetCollection) -> Fit[InferredT]:
-            typed = typing.cast(_FacadeOperations[InferredT], model)
-            return typed.fit(subset, **fit_kwargs)
-
+        """Fit each session independently; family collections type `fit`."""
         fits = self.map(
             data,
-            single,
+            fit,
             map_progress=len(self.models) > 1,
             max_workers=max_workers,
         )

@@ -257,3 +257,18 @@ def compute_chain_potentials(
         pairs=transitions.compute_pair_potentials(ls),
         lengths=ls.lengths,
     )
+
+
+# TODO: Consider a lightweight component combining `CategoricalInitial` and
+# `CategoricalTransitions`, which this tuple return hints at, together with a
+# continuous counterpart (initial state plus dynamics). Neither exists today;
+# both would change model fields, inference, learning and parameter schemas.
+def categorical_from_params(
+    initial_probs: jax.Array,  # (K,)
+    transition_probs: jax.Array,  # (K, K)
+) -> tuple[CategoricalInitial, CategoricalTransitions]:
+    """Construct the initial and transition components from probabilities."""
+    return (
+        CategoricalInitial(dist=Categorical(probs=initial_probs)),
+        CategoricalTransitions(dist=Categorical(probs=transition_probs)),
+    )

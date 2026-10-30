@@ -7,9 +7,13 @@ import jax
 from jax import numpy as jnp
 
 from xxm.core.affine import Affine
-from xxm.core.data import Dataset, DatasetCollection, WeightedObservations
+from xxm.core.data import Dataset, WeightedObservations
 from xxm.core.emissions.collection import ContinuousEmissionsCollection
-from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
+from xxm.core.emissions.continuous import (
+    EmissionsT,
+    GaussianEmissions,
+    PoissonEmissions,
+)
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import poisson as poisson_fit
@@ -215,114 +219,98 @@ def _init_dynamics(
     return GaussianLinearDynamics(dist=dist)
 
 
-def _init_gaussian_emissions(
-    latents: jax.Array,
+def masked_pca_latents(
+    values: jax.Array,  # (*B, T, D_y)
     data: Dataset,
+    latent_dim: int,
+) -> jax.Array:  # (*B, T, D_x)
+    """Validate PCA initialization, then project `values` onto shared PCA latents.
+
+    `values` are the observations in the space PCA should operate on, e.g. the
+    raw observations or a link-transformed version of them.
+    """
+    _validate_initialization(data, latent_dim)
+    return _masked_pca_latents(values, data, latent_dim)
+
+
+def observed_rows(
+    latents: jax.Array,  # (*B, T, D_x)
+    data: Dataset,
+) -> tuple[jax.Array, jax.Array]:  # (N, D_x), (N, D_y)
+    """Return latent and observation rows at observed timesteps."""
+    observed = data.observation_weights()
+    return latents[observed], data.observations.values[observed]
+
+
+def init_from_latents(
+    latents: jax.Array,  # (*B, T, D_x)
+    data: Dataset,
+    emissions: ContinuousEmissionsCollection[EmissionsT],
+    *,
+    ridge: float,
     covariance_floor: float,
-) -> GaussianEmissions:
-    observed = data.observation_weights()
-
-    return GaussianEmissions.from_latents(
-        latents=latents[observed],
-        observations=data.observations.values[observed],
-        covariance_floor=covariance_floor,
-    )
-
-
-def _init_poisson_emissions(
-    latents: jax.Array,
-    data: Dataset,
-) -> PoissonEmissions:
-    observed = data.observation_weights()
-
-    return PoissonEmissions.from_latents(
-        latents=latents[observed],
-        observations=data.observations.values[observed],
+) -> Model[EmissionsT]:
+    """Fit the initial state and dynamics from latents and attach `emissions`."""
+    return Model(
+        initial=_init_initial(
+            latents,
+            data,
+            covariance_floor=covariance_floor,
+        ),
+        dynamics=_init_dynamics(
+            latents,
+            data,
+            ridge=ridge,
+            covariance_floor=covariance_floor,
+        ),
+        emissions=emissions,
     )
 
 
 def init_gaussian_via_pca(
-    data: DatasetCollection,
+    data: Dataset,
     latent_dim: int,
     *,
-    ridge=gaussian_fit.DEFAULT_RIDGE,
-    covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
+    ridge: float = gaussian_fit.DEFAULT_RIDGE,
+    covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
 ) -> Model[GaussianEmissions]:
-    """Initialize one shared Gaussian LDS from independent sequences."""
-    dataset = data.single()
-    _validate_initialization(dataset, latent_dim)
-
-    latents = _masked_pca_latents(
-        dataset.observations.values,
-        dataset,
-        latent_dim,
+    """Initialize a Gaussian LDS from PCA latents of the observations."""
+    latents = masked_pca_latents(data.observations.values, data, latent_dim)
+    latent_rows, observation_rows = observed_rows(latents, data)
+    emissions = GaussianEmissions.from_latents(
+        latent_rows,
+        observation_rows,
+        covariance_floor=covariance_floor,
     )
-
-    return Model(
-        initial=_init_initial(
-            latents,
-            dataset,
-            covariance_floor=covariance_floor,
-        ),
-        dynamics=_init_dynamics(
-            latents,
-            dataset,
-            ridge=ridge,
-            covariance_floor=covariance_floor,
-        ),
-        emissions=ContinuousEmissionsCollection(
-            (
-                _init_gaussian_emissions(
-                    latents,
-                    dataset,
-                    covariance_floor=covariance_floor,
-                ),
-            )
-        ),
+    return init_from_latents(
+        latents,
+        data,
+        ContinuousEmissionsCollection.from_single(emissions),
+        ridge=ridge,
+        covariance_floor=covariance_floor,
     )
 
 
 def init_poisson_via_pca(
-    data: DatasetCollection,
+    data: Dataset,
     latent_dim: int,
     *,
-    ridge=gaussian_fit.DEFAULT_RIDGE,
-    covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
+    ridge: float = gaussian_fit.DEFAULT_RIDGE,
+    covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     count_floor: float = poisson_fit.DEFAULT_COUNT_FLOOR,
 ) -> Model[PoissonEmissions]:
-    """Initialize one shared Poisson LDS from independent sequences."""
-    dataset = data.single()
-    _validate_initialization(dataset, latent_dim)
-
-    transformed = poisson_fit.inverse_exp_link(
-        dataset.weighted_observations().safe_values(),
+    """Initialize a Poisson LDS from PCA latents of stabilized log counts."""
+    log_counts = poisson_fit.inverse_exp_link(
+        data.weighted_observations().safe_values(),
         count_floor=count_floor,
     )
-
-    latents = _masked_pca_latents(
-        transformed,
-        dataset,
-        latent_dim,
-    )
-
-    return Model(
-        initial=_init_initial(
-            latents,
-            dataset,
-            covariance_floor=covariance_floor,
-        ),
-        dynamics=_init_dynamics(
-            latents,
-            dataset,
-            ridge=ridge,
-            covariance_floor=covariance_floor,
-        ),
-        emissions=ContinuousEmissionsCollection(
-            (
-                _init_poisson_emissions(
-                    latents,
-                    dataset,
-                ),
-            )
-        ),
+    latents = masked_pca_latents(log_counts, data, latent_dim)
+    latent_rows, observation_rows = observed_rows(latents, data)
+    emissions = PoissonEmissions.from_latents(latent_rows, observation_rows)
+    return init_from_latents(
+        latents,
+        data,
+        ContinuousEmissionsCollection.from_single(emissions),
+        ridge=ridge,
+        covariance_floor=covariance_floor,
     )

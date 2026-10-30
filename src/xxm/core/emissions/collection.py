@@ -50,6 +50,11 @@ class EmissionsCollection(
 
     emissions: tuple[EmissionT, ...]
 
+    @classmethod
+    def from_single(cls, emission: EmissionT) -> typing.Self:
+        """Construct a collection with one session."""
+        return cls((emission,))
+
     def _dispatch(
         self,
         data: tuple[DataT, ...],

@@ -3,7 +3,6 @@
 import jax
 import jax.numpy as jnp
 
-from xxm.core.data import DatasetCollection
 from xxm.core.dists.discrete import Categorical
 from xxm.core.dists.gaussian import LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
@@ -13,7 +12,7 @@ from xxm.core.optim import poisson as poisson_fit
 from xxm.core.optim.kmeans import kmeans_assignments
 
 from .core import Model
-from .data import ARDataset, ARDatasetCollection
+from .data import ARDataset
 from .emissions import AREmissions, AREmissionsCollection, ConditionalDistT
 
 DEFAULT_SELF_TRANSITION_PROB = 0.9
@@ -49,12 +48,14 @@ def _visible_rows(
     )
 
 
-def _init(
+def init_from_emissions(
     emissions: AREmissionsCollection[ConditionalDistT],
     num_states: int,
     dtype: jnp.dtype,
-    self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
+    *,
+    self_transition_prob: float = DEFAULT_SELF_TRANSITION_PROB,
 ) -> Model[ConditionalDistT]:
+    """Attach emissions to uniform initial and sticky transition probabilities."""
     if num_states == 1:
         transition_probs = jnp.array(
             [[1.0]],
@@ -114,14 +115,17 @@ def _init_state_assignments(
     )
 
 
-def _init_gaussian_emissions(
+def cluster_rows(
     key: jax.Array,
     data: ARDataset,
     num_states: int,
-    ridge=gaussian_fit.DEFAULT_RIDGE,
-    covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
-) -> AREmissions[LinearGaussian]:
-    predictors, current = _visible_rows(data)
+) -> tuple[jax.Array, jax.Array, jax.Array]:  # (R, L, D_y), (R, D_y), (R,)
+    """Pool visible complete AR windows and assign them to states by K-means.
+
+    Returns the lagged predictors, the current targets, and one state
+    assignment per visible regression row.
+    """
+    predictors, targets = _visible_rows(data)
 
     if predictors.shape[0] < num_states:
         raise ValueError(
@@ -132,130 +136,68 @@ def _init_gaussian_emissions(
     assignments = _init_state_assignments(
         key=key,
         predictors=predictors,
-        current=current,
+        current=targets,
         num_states=num_states,
-    )  # (T-L,)
-
-    model = gaussian_fit.linear_from_samples_grouped(
-        inputs=predictors,
-        outputs=current,
-        assignments=assignments,
-        num_groups=num_states,
-        ridge=ridge,
-        covariance_floor=covariance_floor,
     )
 
-    return AREmissions(model)
+    return predictors, targets, assignments
 
 
 def init_gaussian_via_kmeans(
     key: jax.Array,
-    data: ARDatasetCollection,
-    num_states: int,
-    self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
-    *,
-    covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
-) -> Model[LinearGaussian]:
-    r"""Initialize per-session K-means emissions with first $L$ values fixed.
-
-    Shared state priors are retained; session state labels are not aligned.
-    """
-
-    keys = (
-        (key,) if len(data.datasets) == 1 else jax.random.split(key, len(data.datasets))
-    )
-    emissions = AREmissionsCollection(
-        tuple(
-            _init_gaussian_emissions(
-                key=session_key,
-                data=dataset,
-                num_states=num_states,
-                covariance_floor=covariance_floor,
-            )
-            for dataset, session_key in zip(data.datasets, keys, strict=True)
-        )
-    )
-
-    return _init(
-        emissions=emissions,
-        num_states=num_states,
-        dtype=data.dtype,
-        self_transition_prob=self_transition_prob,
-    )
-
-
-def _init_poisson_emissions(
-    key: jax.Array,
     data: ARDataset,
     num_states: int,
-    ridge=poisson_fit.DEFAULT_RIDGE,
-) -> AREmissions[LinearPoisson]:
-    predictors, current = _visible_rows(data)
+    *,
+    self_transition_prob: float = DEFAULT_SELF_TRANSITION_PROB,
+    covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
+) -> Model[LinearGaussian]:
+    r"""Initialize a Gaussian AR-HMM by K-means over complete AR windows.
 
-    if predictors.shape[0] < num_states:
-        raise ValueError(
-            f'AR-HMM initialization requires at least {num_states} '
-            f'visible complete regression rows; got {predictors.shape[0]}'
+    The first $L$ values of each sequence are fixed conditioning history.
+    """
+    predictors, targets, assignments = cluster_rows(key, data, num_states)
+    emissions = AREmissions(
+        gaussian_fit.linear_from_samples_grouped(
+            inputs=predictors,
+            outputs=targets,
+            assignments=assignments,
+            num_groups=num_states,
+            ridge=gaussian_fit.DEFAULT_RIDGE,
+            covariance_floor=covariance_floor,
         )
-
-    assignments = _init_state_assignments(
-        key=key,
-        predictors=predictors,
-        current=current,
-        num_states=num_states,
-    )  # (T-L,)
-
-    model = poisson_fit.linear_from_samples_grouped(
-        inputs=predictors,
-        outputs=current,
-        assignments=assignments,
-        num_groups=num_states,
-        ridge=ridge,
     )
-
-    return AREmissions(model)
+    return init_from_emissions(
+        AREmissionsCollection.from_single(emissions),
+        num_states,
+        jnp.result_type(targets, jnp.float32),
+        self_transition_prob=self_transition_prob,
+    )
 
 
 def init_poisson_via_kmeans(
     key: jax.Array,
-    data: DatasetCollection,
+    data: ARDataset,
     num_states: int,
-    num_lags: int,
-    self_transition_prob=DEFAULT_SELF_TRANSITION_PROB,
-    dtype=jnp.float32,
+    *,
+    self_transition_prob: float = DEFAULT_SELF_TRANSITION_PROB,
 ) -> Model[LinearPoisson]:
-    """
-    Initialize a Poisson AR-HMM conditional on the first ``num_lags`` values.
+    r"""Initialize a Poisson AR-HMM by K-means over complete AR windows.
 
-    ``observations[:num_lags]`` provide the fixed autoregressive history.
-    Latent states correspond only to ``observations[num_lags:]``.
-    K-means emissions are initialized independently per session without
-    aligning labels; initial-state and transition priors are shared.
+    The first $L$ values of each sequence are fixed conditioning history.
     """
-    prepared = ARDatasetCollection.from_datasets(
-        data,
-        num_lags,
-    )
-
-    keys = (
-        (key,)
-        if len(prepared.datasets) == 1
-        else jax.random.split(key, len(prepared.datasets))
-    )
-    emissions = AREmissionsCollection(
-        tuple(
-            _init_poisson_emissions(
-                key=session_key,
-                data=dataset,
-                num_states=num_states,
-            )
-            for dataset, session_key in zip(prepared.datasets, keys, strict=True)
+    predictors, targets, assignments = cluster_rows(key, data, num_states)
+    emissions = AREmissions(
+        poisson_fit.linear_from_samples_grouped(
+            inputs=predictors,
+            outputs=targets,
+            assignments=assignments,
+            num_groups=num_states,
+            ridge=poisson_fit.DEFAULT_RIDGE,
         )
     )
-
-    return _init(
-        emissions=emissions,
-        num_states=num_states,
+    return init_from_emissions(
+        AREmissionsCollection.from_single(emissions),
+        num_states,
+        jnp.result_type(targets, jnp.float32),
         self_transition_prob=self_transition_prob,
-        dtype=jnp.result_type(prepared.dtype, dtype),
     )

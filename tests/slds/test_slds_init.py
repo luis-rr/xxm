@@ -5,7 +5,7 @@ import pytest
 
 import xxm
 from xxm.core.data import Dataset, DatasetCollection
-from xxm.slds.init import init_gaussian_via_pca
+from xxm.slds import GaussianSLDS
 
 
 def test_gaussian_via_pca_returns_requested_model_structure():
@@ -21,11 +21,15 @@ def test_gaussian_via_pca_returns_requested_model_structure():
         ]
     )
 
-    model = init_gaussian_via_pca(
-        key=jax.random.key(0),
-        data=DatasetCollection.from_datasets((Dataset.from_array(observations),)),
-        num_states=2,
-        latent_dim=1,
+    model = (
+        GaussianSLDS.via_pca(
+            key=jax.random.key(0),
+            data=DatasetCollection.from_datasets((Dataset.from_array(observations),)),
+            num_states=2,
+            latent_dim=1,
+        )
+        .get()
+        .core
     )
 
     assert model.state_initial.dist.probs.shape == (2,)
