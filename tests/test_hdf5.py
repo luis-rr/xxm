@@ -10,11 +10,12 @@ from xxm import arhmm, hmm, lds, slds
 from xxm.core.data import Dataset, DatasetCollection, Sequences
 from xxm.core.dists.discrete import DiscreteChainMarginals
 from xxm.core.dists.gaussian import GaussianChainMarginals
-from xxm.core.io import hdf5
+from xxm.core.io import chains, hdf5
 from xxm.core.lengths import Lengths
 from xxm.core.mask import ArbitraryMask
 from xxm.hmm.io import HMMParams
 from xxm.lds.io import LDSParams
+from xxm.slds import serialization as slds_serialization
 from xxm.slds.io import SLDSParams
 
 FACADES = (
@@ -206,19 +207,21 @@ def make_posterior(data, *, num_lags=0):
     return discrete, gaussian
 
 
-@pytest.mark.parametrize('family', [hmm, arhmm, lds, slds])
-def test_posterior_roundtrip(tmp_path, family):
+@pytest.mark.parametrize('kind', ['discrete', 'gaussian', 'switching'])
+def test_posterior_roundtrip(tmp_path, kind):
     discrete, gaussian = make_posterior(make_data())
-    posterior = (
-        slds.Posterior(discrete, gaussian)
-        if family is slds
-        else gaussian
-        if family is lds
-        else discrete
-    )
     path = tmp_path / 'posterior.h5'
-    family.save_posterior(posterior, path)
-    assert_tree_equal(posterior, family.load_posterior(path))
+    match kind:
+        case 'discrete':
+            chains.save_discrete_posterior(discrete, path)
+            assert_tree_equal(discrete, chains.load_discrete_posterior(path))
+        case 'gaussian':
+            chains.save_gaussian_posterior(gaussian, path)
+            assert_tree_equal(gaussian, chains.load_gaussian_posterior(path))
+        case _:
+            posterior = slds.Posterior(discrete, gaussian)
+            slds_serialization.save_posterior(posterior, path)
+            assert_tree_equal(posterior, slds_serialization.load_posterior(path))
 
 
 @pytest.mark.parametrize(('facade', 'noise'), FACADE_NOISE)

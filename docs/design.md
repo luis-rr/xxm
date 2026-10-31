@@ -305,6 +305,8 @@ Principles:
 
 Model-family namespaces expose the core model representation together with the functions needed to initialize, infer, fit, sample from, and inspect it. Algorithm-specific names remain explicit at this level, for example `infer_exact`, `infer_laplace`, or `fit_variational_em`.
 
+`__init__.py` manifests stay small and user-facing. They export what a user names directly: facades, result types, parameter schemas, core models and posteriors, and the main entry points to initialize, infer, and fit. Building blocks that users only receive or that serve the implementation, such as abstract bases, collection types, and helper routines, are not re-exported; they remain importable from the modules that define them.
+
 For example:
 
 ```python

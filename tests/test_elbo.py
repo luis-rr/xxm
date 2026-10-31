@@ -6,6 +6,7 @@ import xxm
 from xxm import arhmm, hmm, lds
 from xxm.arhmm.data import ARDatasetCollection
 from xxm.core.data import DatasetCollection
+from xxm.hmm.model import GaussianHMMCollection
 
 from .test_hdf5 import FACADE_NOISE, make_data, make_model
 
@@ -57,7 +58,7 @@ def test_collection_elbo_sums_sessions():
     assert isinstance(model, xxm.GaussianHMM)
     session = DatasetCollection((make_data().datasets[0],))
     data = DatasetCollection((session.datasets[0], session.datasets[0]))
-    collection = hmm.GaussianHMMCollection(models=(model, model))
+    collection = GaussianHMMCollection(models=(model, model))
     np.testing.assert_allclose(
         collection.infer(data).elbo(), 2 * model.infer(session).elbo(), rtol=1e-5
     )

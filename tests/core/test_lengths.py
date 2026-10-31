@@ -4,8 +4,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from xxm import Lengths
 from xxm.core.data import Dataset, Sequences, WeightedObservations
+from xxm.core.lengths import Lengths
 from xxm.core.mask import ArbitraryMask
 
 

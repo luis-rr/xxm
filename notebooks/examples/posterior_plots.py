@@ -12,8 +12,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 
-import xxm.plot.core as plot
-import xxm.plot.gridded as gridded_plot
+from xxm import plot
 from xxm.core.dists.gaussian import TemporalGaussian
 from xxm.core.dists.gridded import GriddedDistribution, TemporalGriddedDistribution
 
@@ -73,7 +72,7 @@ def plot_density_over_time(
         (edges,),
         variables=(variable,),
     )
-    mesh = gridded_plot.plot_temporal_gridded_1d(
+    mesh = plot.plot_temporal_gridded_1d(
         ax,
         grid,
         cmap=DENSITY_CMAP,
@@ -178,7 +177,7 @@ def plot_occupancy_density(
         variables=(0, 1),
     )
     kwargs = {'cmap': DENSITY_CMAP, 'rasterized': True} | kwargs
-    return gridded_plot.plot_gridded_2d(ax, grid, **kwargs)
+    return plot.plot_gridded_2d(ax, grid, **kwargs)
 
 
 def plot_occupancy(
