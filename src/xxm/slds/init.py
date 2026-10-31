@@ -30,6 +30,7 @@ from xxm.core.optim import gaussian_full as gaussian_full_fit
 from xxm.core.optim import poisson as poisson_fit
 from xxm.core.optim.batch import filter_valid_batches
 from xxm.core.optim.gaussian import CovarianceType
+from xxm.core.optim.loop import Progress
 from xxm.lds.init import (
     _masked_pca_latents,
     observed_rows,
@@ -309,7 +310,7 @@ def init_via_arhmm(
     self_transition_prob: float = DEFAULT_SELF_TRANSITION_PROB,
     covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     pseudocount: float = categorical_fit.DEFAULT_PSEUDOCOUNT,
-    progress: bool | str = 'AR-HMM',
+    progress: Progress = 'AR-HMM',
 ) -> Model[EmissionsT]:
     """Initialize switching structure by fitting a lag-1 AR-HMM to latents."""
     latent_data = _latent_dataset(latents, data)
@@ -416,7 +417,7 @@ def init_gaussian_via_arhmm(
     self_transition_prob: float = DEFAULT_SELF_TRANSITION_PROB,
     covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     pseudocount: float = categorical_fit.DEFAULT_PSEUDOCOUNT,
-    progress: bool | str = 'AR-HMM',
+    progress: Progress = 'AR-HMM',
     noise: CovarianceType,
 ) -> Model[GaussianEmissions]:
     """Initialize a Gaussian SLDS by fitting a lag-1 AR-HMM to PCA latents."""
@@ -473,7 +474,7 @@ def init_poisson_via_arhmm(
     covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     pseudocount: float = categorical_fit.DEFAULT_PSEUDOCOUNT,
     count_floor: float = poisson_fit.DEFAULT_COUNT_FLOOR,
-    progress: bool | str = 'AR-HMM',
+    progress: Progress = 'AR-HMM',
 ) -> Model[PoissonEmissions]:
     """Initialize a Poisson SLDS by fitting an AR-HMM to inverse-link PCA latents."""
     latents, emissions = _poisson_latents(data, num_states, latent_dim, count_floor)

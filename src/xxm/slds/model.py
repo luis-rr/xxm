@@ -41,6 +41,7 @@ from xxm.core.lengths import LengthsLike, LengthsSpec
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import poisson as poisson_fit
 from xxm.core.optim.gaussian import CovarianceType
+from xxm.core.optim.loop import Progress
 from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
 
 from .core import (
@@ -328,7 +329,7 @@ class VariationalSLDS(SLDS[QuadraticEmissionsT], typing.Generic[QuadraticEmissio
         num_iters: int,
         num_inference_iters: int,
         initial_latents: jax.Array | None = None,
-        progress: bool | str = 'Variational EM',
+        progress: Progress = 'Variational EM',
     ) -> Fit[Inferred[typing.Self]]:
         """Fit model parameters with variational expectation-maximization."""
         initial_latents = _initial_latents(self.core.emissions, data, initial_latents)
@@ -387,7 +388,7 @@ class LaplaceSLDS(SLDS[LaplaceEmissionsT], typing.Generic[LaplaceEmissionsT]):
         num_iters: int,
         num_inference_iters: int,
         initial_latents: jax.Array | None = None,
-        progress: bool | str = 'Laplace EM',
+        progress: Progress = 'Laplace EM',
         laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
     ) -> Fit[Inferred[typing.Self]]:
         """Fit model parameters with Laplace EM."""
@@ -480,7 +481,7 @@ class GaussianSLDS(VariationalSLDS[GaussianEmissions]):
         num_arhmm_iters: int = 10,
         self_transition_prob: float = DEFAULT_SELF_TRANSITION_PROB,
         covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
-        progress: bool | str = 'AR-HMM',
+        progress: Progress = 'AR-HMM',
         noise: CovarianceType = 'diagonal',
     ) -> GaussianSLDSCollection:
         """Initialize an independent model for every session from a fitted AR-HMM."""
@@ -570,7 +571,7 @@ class PoissonSLDS(LaplaceSLDS[PoissonEmissions]):
         self_transition_prob: float = DEFAULT_SELF_TRANSITION_PROB,
         covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
         count_floor: float = poisson_fit.DEFAULT_COUNT_FLOOR,
-        progress: bool | str = 'AR-HMM',
+        progress: Progress = 'AR-HMM',
     ) -> PoissonSLDSCollection:
         """Initialize an independent model for every session from a fitted AR-HMM."""
 
@@ -773,7 +774,7 @@ class VariationalSLDSCollection(
         num_iters: int,
         num_inference_iters: int,
         initial_latents: tuple[jax.Array, ...] | None = None,
-        progress: bool | str = False,
+        progress: Progress = False,
         max_workers: int = 1,
     ) -> _facade.FitCollection[SLDSInferredCollection[VariationalSLDSFacadeT]]:
         """Fit every session independently by variational EM, optionally from per-session warm starts."""
@@ -829,7 +830,7 @@ class LaplaceSLDSCollection(
         num_inference_iters: int,
         initial_latents: tuple[jax.Array, ...] | None = None,
         laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
-        progress: bool | str = False,
+        progress: Progress = False,
         max_workers: int = 1,
     ) -> _facade.FitCollection[SLDSInferredCollection[LaplaceSLDSFacadeT]]:
         """Fit every session independently by Laplace EM, optionally from per-session warm starts."""

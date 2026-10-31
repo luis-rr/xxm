@@ -23,6 +23,7 @@ from xxm.core.io.hdf5 import PathLike, load_model_params
 from xxm.core.latents.discrete import categorical_from_params
 from xxm.core.lengths import Lengths, LengthsLike, LengthsSpec
 from xxm.core.optim.gaussian import CovarianceType
+from xxm.core.optim.loop import Progress
 from xxm.hmm.io import HMMParams
 
 from .core import Model, Posterior, Sample
@@ -256,7 +257,7 @@ class ARHMM(
         data: DatasetCollection,
         *,
         num_iters: int,
-        progress: bool | str = 'EM',
+        progress: Progress = 'EM',
     ) -> Fit[Inferred[typing.Self]]:
         """Fit the conditional AR-HMM with expectation maximization."""
 
@@ -593,7 +594,7 @@ class ARHMMCollection(
         data: DatasetCollection,
         *,
         num_iters: int,
-        progress: bool | str = False,
+        progress: Progress = False,
         max_workers: int = 1,
     ) -> _facade.FitCollection[ARHMMInferredCollection[ARHMMFacadeT]]:
         """Fit every session independently by EM."""

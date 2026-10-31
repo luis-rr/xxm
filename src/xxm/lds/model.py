@@ -35,6 +35,7 @@ from xxm.core.lengths import LengthsLike, LengthsSpec
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import poisson as poisson_fit
 from xxm.core.optim.gaussian import CovarianceType
+from xxm.core.optim.loop import Progress
 from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
 
 from .core import Model, Sample
@@ -239,7 +240,7 @@ class ExactLDS(LDS[QuadraticEmissionsT], typing.Generic[QuadraticEmissionsT]):
         data: DatasetCollection,
         *,
         num_iters: int,
-        progress: bool | str = 'EM',
+        progress: Progress = 'EM',
     ) -> Fit[Inferred[typing.Self]]:
         """Fit shared parameters across all Dataset batch entries by EM."""
         fit = _fit_em_jit(
@@ -291,7 +292,7 @@ class LaplaceLDS(LDS[LaplaceEmissionsT], typing.Generic[LaplaceEmissionsT]):
         data: DatasetCollection,
         *,
         num_iters: int,
-        progress: bool | str = 'Laplace EM',
+        progress: Progress = 'Laplace EM',
         laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
     ) -> Fit[Inferred[typing.Self]]:
         """Fit shared parameters across Dataset batch entries by Laplace EM."""
@@ -569,7 +570,7 @@ class ExactLDSCollection(
         data: DatasetCollection,
         *,
         num_iters: int,
-        progress: bool | str = False,
+        progress: Progress = False,
         max_workers: int = 1,
     ) -> _facade.FitCollection[LDSInferredCollection[ExactLDSFacadeT]]:
         """Fit every session independently by EM."""
@@ -615,7 +616,7 @@ class LaplaceLDSCollection(
         *,
         num_iters: int,
         laplace_params: OptimParams = DEFAULT_OPTIM_PARAMS,
-        progress: bool | str = False,
+        progress: Progress = False,
         max_workers: int = 1,
     ) -> _facade.FitCollection[LDSInferredCollection[LaplaceLDSFacadeT]]:
         """Fit every session independently by Laplace EM."""

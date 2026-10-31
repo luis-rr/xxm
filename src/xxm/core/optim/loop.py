@@ -42,18 +42,14 @@ _ScanStep = Callable[
     tuple[StateT, jax.Array],
 ]
 
-_ProgressDecorator = Callable[
-    [_ScanStep[StateT]],
-    _ScanStep[StateT],
-]
-
-Progress = bool | str | _ProgressDecorator[StateT]
+Progress = bool | str
+"""Show a progress bar (`True`), hide it (`False`), or show it with a label."""
 
 
 def _add_progress_bar(
     step: _ScanStep[StateT],
     num_iters: int,
-    progress: Progress[StateT],
+    progress: Progress,
 ) -> _ScanStep[StateT]:
     """Wrap a scan step with a progress bar if requested."""
 
@@ -66,15 +62,12 @@ def _add_progress_bar(
             tqdm_type='auto',
         )(step)
 
-    elif isinstance(progress, str):
+    else:
         decorated = scan_tqdm(
             num_iters,
             tqdm_type='auto',
             desc=progress,
         )(step)
-
-    else:
-        return progress(step)
 
     return typing.cast(
         _ScanStep[StateT],
@@ -87,7 +80,7 @@ def _scan(
     *,
     num_iters: int,
     step: _ScanStep[StateT],
-    progress: Progress[StateT],
+    progress: Progress,
 ) -> tuple[StateT, jax.Array]:
     """Run a fitting scan with optional progress reporting."""
 
@@ -110,7 +103,7 @@ def fit_one(
     *,
     num_iters: int,
     step: FitStep[StateT, DataT],
-    progress: Progress[StateT] = False,
+    progress: Progress = False,
 ) -> Fit[StateT]:
     """Iteratively update a fitting state."""
 

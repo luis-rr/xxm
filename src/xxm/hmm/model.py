@@ -24,6 +24,7 @@ from xxm.core.io.hdf5 import PathLike, load_model_params
 from xxm.core.latents.discrete import categorical_from_params
 from xxm.core.lengths import LengthsLike, LengthsSpec
 from xxm.core.optim.gaussian import CovarianceType
+from xxm.core.optim.loop import Progress
 
 from .collection import collection_align, collection_compose
 from .core import Model, Posterior, Sample
@@ -147,7 +148,7 @@ class HMM(_facade.PermutableFacade[Model[EmissionT]], typing.Generic[EmissionT])
         data: DatasetCollection,
         *,
         num_iters: int,
-        progress: bool | str = 'EM',
+        progress: Progress = 'EM',
     ) -> Fit[Inferred[typing.Self]]:
         """Fit model parameters by expectation-maximization."""
         fit = _fit_em_jit(
@@ -443,7 +444,7 @@ class HMMCollection(
         data: DatasetCollection,
         *,
         num_iters: int,
-        progress: bool | str = False,
+        progress: Progress = False,
         max_workers: int = 1,
     ) -> _facade.FitCollection[HMMInferredCollection[HMMFacadeT]]:
         """Fit every session independently by EM."""

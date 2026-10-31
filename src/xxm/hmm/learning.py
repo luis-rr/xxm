@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from xxm.core.data import DatasetCollection
 from xxm.core.inference import InferenceState
-from xxm.core.optim.loop import Fit
+from xxm.core.optim.loop import Fit, Progress
 from xxm.core.optim.loop import fit_one as _fit_one
 
 from .core import Model, Posterior
@@ -25,7 +25,7 @@ def fit_em(
     model: Model,
     data: DatasetCollection,
     num_iters: int,
-    progress: bool | str = 'EM',
+    progress: Progress = 'EM',
 ) -> Fit[InferenceState[Model, Posterior]]:
     """Fit model via exact expectation-maximization."""
 

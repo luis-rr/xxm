@@ -15,8 +15,7 @@ from xxm.core.affine import Affine
 from xxm.core.batch import Batchable
 from xxm.core.data import Dataset, DatasetCollection
 from xxm.core.io.hdf5 import PathLike, save_model_params
-
-Progress = bool | str
+from xxm.core.optim.loop import Progress
 
 CoreT = typing.TypeVar('CoreT', bound=Batchable)
 FacadeT = typing.TypeVar('FacadeT')
