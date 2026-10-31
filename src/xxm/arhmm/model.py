@@ -13,7 +13,6 @@ from xxm.core import facade as _facade
 from xxm.core.data import DatasetCollection, Sequences
 from xxm.core.dists import io as dists_io
 from xxm.core.dists.gaussian import (
-    DiagonalGaussian,
     LinearGaussian,
     TemporalGaussian,
 )
@@ -315,11 +314,8 @@ class GaussianARHMM(ARHMM[LinearGaussian]):
         dataset = data.get(session)
         prepared = ARDataset.from_dataset(dataset, self.num_lags)
 
-        conditional = self.core.emissions.get(session).conditional(prepared.predictors)
         temporal = TemporalGaussian(
-            dist=conditional.to_full()
-            if isinstance(conditional, DiagonalGaussian)
-            else conditional,
+            dist=self.core.emissions.get(session).conditional(prepared.predictors),
             lengths=dataset.lengths.shift(-self.num_lags),
         )
 

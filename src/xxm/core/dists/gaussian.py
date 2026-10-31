@@ -10,6 +10,7 @@ from xxm.core import batch
 from xxm.core.affine import Affine
 from xxm.core.data import Sequences
 from xxm.core.dists.additive import AffineDist, LocDist
+from xxm.core.dists.temporal import Temporal
 from xxm.core.lengths import Lengths
 
 
@@ -724,15 +725,16 @@ class DiagonalGaussian(LocDist[DiagonalGaussianNoise]):
         return self.noise.variances
 
     @property
+    def variance(self) -> jax.Array:  # (..., N)
+        """Marginal variances $v$."""
+        return self.noise.variances
+
+    @property
     def covariance(self) -> jax.Array:  # (..., N, N)
         r"""Dense covariance $\operatorname{diag}(v)$, for display and plotting."""
         return self.variances[..., :, None] * jnp.eye(
             self.variable_dim, dtype=self.dtype
         )
-
-    def to_full(self) -> FullGaussian:
-        """The same distribution with a dense covariance."""
-        return FullGaussian.from_moments(self.mean, self.covariance)
 
     def whiten(
         self,
@@ -892,13 +894,11 @@ class PairedGaussian(typing.NamedTuple):
         return batch.move_axis(self, source, destination)
 
 
-# TODO: Consider a generic `TemporalDist[D]` over any distribution, which would
-# also cover `TemporalPoisson`.
-class TemporalGaussian(typing.NamedTuple):
+class TemporalGaussian(Temporal[Gaussian]):
     """Time-indexed Gaussian distributions with contiguous valid prefixes.
 
     dist.mean:        (*B, T, *C, D)
-    dist.covariance:  (*B, T, *C, D, D)
+    dist.covariance:  (*B, T, *C, D, D), or variances (*B, T, *C, D) if diagonal
     lengths.values:   (*B,)
 
     *B contains structural batch dimensions.
@@ -909,38 +909,22 @@ class TemporalGaussian(typing.NamedTuple):
     Generic batch operations affect only *B.
     """
 
-    dist: FullGaussian
-    lengths: Lengths
-
-    @property
-    def batch_shape(self) -> tuple[int, ...]:
-        return self.lengths.batch_shape
-
-    @property
-    def time_axis(self) -> int:
-        return len(self.batch_shape)
-
-    @property
-    def max_steps(self) -> int:
-        return self.dist.batch_shape[self.time_axis]
-
-    @property
-    def variable_dim(self) -> int:
-        return self.dist.variable_dim
+    __slots__ = ()
 
     def validate(self) -> None:
         """Validate static shapes without inspecting traced lengths."""
         if self.dist.mean.ndim < len(self.batch_shape) + 2:
             raise ValueError('Gaussian mean must have shape (*B, T, *C, D)')
 
-        trailing = batch.split_prefix(
-            self.dist.batch_shape,
-            self.batch_shape,
-            name='Gaussian batch shape',
-        )
+        super().validate()
 
-        if not trailing:
-            raise ValueError('TemporalGaussian requires a time axis')
+        if isinstance(self.dist, DiagonalGaussian):
+            if self.dist.variances.shape != self.dist.mean.shape:
+                raise ValueError(
+                    f'Gaussian variances must have shape {self.dist.mean.shape}; '
+                    f'got {self.dist.variances.shape}'
+                )
+            return
 
         expected = self.dist.mean.shape + (self.variable_dim,)
         if self.dist.covariance.shape != expected:
@@ -949,92 +933,10 @@ class TemporalGaussian(typing.NamedTuple):
                 f'got {self.dist.covariance.shape}'
             )
 
-        if not jnp.issubdtype(self.lengths.values.dtype, jnp.integer):
-            raise ValueError('lengths must have an integer dtype')
-
-    @property
-    def mean(self) -> Sequences:
-        """Gaussian means, with padded timesteps cleared."""
-        return Sequences.from_padded(
-            self.dist.mean,
-            self.lengths,
-        )
-
     @property
     def covariance(self) -> Sequences:
         """Gaussian covariance matrices, with padded timesteps cleared."""
-        return Sequences.from_padded(
-            self.dist.covariance,
-            self.lengths,
-        )
-
-    @property
-    def variance(self) -> Sequences:
-        """Marginal variances, with padded timesteps cleared."""
-        return Sequences.from_padded(
-            self.dist.variance,
-            self.lengths,
-        )
-
-    @property
-    def std(self) -> Sequences:
-        """Marginal standard deviations, with padded timesteps cleared."""
-        return Sequences.from_padded(
-            jnp.sqrt(self.dist.variance),
-            self.lengths,
-        )
-
-    def select(self, index: batch.SelT) -> typing.Self:
-        """Select only structural batch dimensions."""
-        return batch.select(self, index)
-
-    def broadcast(self, shape, axis: int = 0) -> typing.Self:
-        """Insert replicated batch dimensions."""
-        return batch.broadcast(self, shape, axis=axis)
-
-    def squeeze(self, axis=None) -> typing.Self:
-        """Remove singleton structural batch dimensions."""
-        return batch.squeeze(self, axis=axis)
-
-    def permute(self, permutation, axis: int = 0) -> typing.Self:
-        """Reorder entries along one structural batch axis."""
-        return batch.permute(self, permutation, axis=axis)
-
-    def move_axis(
-        self,
-        source: int,
-        destination: int,
-    ) -> typing.Self:
-        """Move an axis within the structural batch prefix."""
-        return batch.move_axis(self, source, destination)
-
-    def select_time(
-        self,
-        *,
-        start: int,
-        stop: int | None = None,
-    ) -> typing.Self:
-        """Select a time interval, adjusting valid-prefix lengths."""
-        start, stop, _ = slice(start, stop).indices(self.max_steps)
-
-        new_lengths = Lengths(
-            jnp.clip(
-                self.lengths.values - start,
-                0,
-                max(stop - start, 0),
-            )
-        )
-
-        index = (slice(None),) * self.time_axis + (slice(start, stop),)
-
-        return type(self)(
-            dist=self.dist.select(index),
-            lengths=new_lengths,
-        )
-
-    def get(self, index: batch.SelT | None = None) -> typing.Self:
-        """Retrieve exactly one unbatched item."""
-        return batch.get(self, index)
+        return self.sequences(self.dist.covariance)
 
 
 def _log_det(covariance: jax.Array) -> jax.Array:
