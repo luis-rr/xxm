@@ -12,17 +12,18 @@ import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 
-from xxm import plot
 from xxm.core.dists.gaussian import TemporalGaussian
 from xxm.core.dists.gridded import GriddedDistribution, TemporalGriddedDistribution
+from xxm.plot import core as plot
+from xxm.plot.gridded import plot_gridded_2d, plot_temporal_gridded_1d
 
-DENSITY_CMAP = LinearSegmentedColormap.from_list(
+POSTERIOR_DENSITY_CMAP = LinearSegmentedColormap.from_list(
     'posterior_density',
     ['white', plot.INFERRED_COLOR],
 )
 
 
-def grid_edges(
+def _grid_edges(
     posterior: TemporalGaussian,
     variable: int,
     *,
@@ -61,7 +62,7 @@ def plot_density_over_time(
 
     `posterior` is unbatched; `truth` has shape (T,).
     """
-    edges = grid_edges(
+    edges = _grid_edges(
         posterior,
         variable,
         cells_per_std=cells_per_std,
@@ -72,10 +73,10 @@ def plot_density_over_time(
         (edges,),
         variables=(variable,),
     )
-    mesh = plot.plot_temporal_gridded_1d(
+    mesh = plot_temporal_gridded_1d(
         ax,
         grid,
-        cmap=DENSITY_CMAP,
+        cmap=POSTERIOR_DENSITY_CMAP,
         rasterized=True,
     )
 
@@ -163,7 +164,7 @@ def plot_occupancy_density(
     grid to cover it.
     """
     edges = tuple(
-        grid_edges(
+        _grid_edges(
             posterior,
             d,
             cells_per_std=cells_per_std,
@@ -176,8 +177,8 @@ def plot_occupancy_density(
         edges,
         variables=(0, 1),
     )
-    kwargs = {'cmap': DENSITY_CMAP, 'rasterized': True} | kwargs
-    return plot.plot_gridded_2d(ax, grid, **kwargs)
+    kwargs = {'cmap': POSTERIOR_DENSITY_CMAP, 'rasterized': True} | kwargs
+    return plot_gridded_2d(ax, grid, **kwargs)
 
 
 def plot_occupancy(

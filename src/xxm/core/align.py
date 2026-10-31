@@ -339,6 +339,35 @@ def match_signed_permutation(
     return permutation, signs
 
 
+def match_statewise_signed_permutation(
+    source: jax.Array,
+    target: jax.Array,
+) -> tuple[jax.Array, jax.Array]:
+    """Match motif coordinates independently for each discrete state."""
+    if source.shape != target.shape:
+        raise ValueError(
+            'source and target must have the same shape, '
+            f'got {source.shape} and {target.shape}'
+        )
+
+    if source.ndim < 4:
+        raise ValueError('expected motifs with shape (K, P, ...)')
+
+    matches = [
+        match_signed_permutation(
+            source[k],
+            target[k],
+        )
+        for k in range(source.shape[0])
+    ]
+
+    permutations = jnp.stack([permutation for permutation, _ in matches])
+
+    signs = jnp.stack([signs for _, signs in matches])
+
+    return permutations, signs
+
+
 def zscore_gaussian(gaussian: FullGaussian) -> Affine:
     """Return an affine map that z-scores a Gaussian distribution.
 

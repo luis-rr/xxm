@@ -14,7 +14,7 @@ from matplotlib.contour import QuadContourSet
 from matplotlib.patches import StepPatch
 from numpy.typing import ArrayLike, NDArray
 
-from ..core.dists.gridded import GriddedDistribution, TemporalGriddedDistribution
+from xxm.core.dists.gridded import GriddedDistribution, TemporalGriddedDistribution
 
 Kind1D = Literal['stairs', 'fill']
 Kind2D = Literal['mesh', 'contour', 'contourf']
