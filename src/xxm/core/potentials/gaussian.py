@@ -100,6 +100,10 @@ class GaussianPotential(typing.NamedTuple):
             ),
         )
 
+    # TODO: For full observation noise on wide data, form the information
+    # vectors as (y - d) R^-1 C and the summed quadratic term as tr(R^-1 S) from
+    # data moments, without whitening every observation. This changes whether
+    # the log constant is stored summed or per step.
     @classmethod
     def from_linear_likelihood(
         cls,
