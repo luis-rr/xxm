@@ -40,6 +40,7 @@ from xxm.core.latents.switching import GaussianLinearSwitchingDynamics
 from xxm.core.lengths import LengthsLike, LengthsSpec
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import poisson as poisson_fit
+from xxm.core.optim.gaussian import CovarianceType
 from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
 
 from .core import (
@@ -433,7 +434,8 @@ class GaussianSLDS(VariationalSLDS[GaussianEmissions]):
 
     @classmethod
     def _emissions_from_params(
-        cls, params: dists_io.LinearGaussianParams
+        cls,
+        params: dists_io.LinearGaussianParams,
     ) -> GaussianEmissions:
         return GaussianEmissions(dists_io.linear_gaussian_from_params(params))
 
@@ -447,6 +449,7 @@ class GaussianSLDS(VariationalSLDS[GaussianEmissions]):
         *,
         self_transition_prob: float = DEFAULT_SELF_TRANSITION_PROB,
         covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
+        noise: CovarianceType = 'diagonal',
     ) -> GaussianSLDSCollection:
         """Initialize an independent model for every session from PCA latents."""
 
@@ -461,6 +464,7 @@ class GaussianSLDS(VariationalSLDS[GaussianEmissions]):
                     latent_dim,
                     self_transition_prob=self_transition_prob,
                     covariance_floor=covariance_floor,
+                    noise=noise,
                 )
             ),
         )
@@ -477,6 +481,7 @@ class GaussianSLDS(VariationalSLDS[GaussianEmissions]):
         self_transition_prob: float = DEFAULT_SELF_TRANSITION_PROB,
         covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
         progress: bool | str = 'AR-HMM',
+        noise: CovarianceType = 'diagonal',
     ) -> GaussianSLDSCollection:
         """Initialize an independent model for every session from a fitted AR-HMM."""
 
@@ -493,6 +498,7 @@ class GaussianSLDS(VariationalSLDS[GaussianEmissions]):
                     self_transition_prob=self_transition_prob,
                     covariance_floor=covariance_floor,
                     progress=progress,
+                    noise=noise,
                 )
             ),
         )

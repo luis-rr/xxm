@@ -10,6 +10,7 @@ import xxm
 from xxm import arhmm, hmm
 from xxm.arhmm.data import ARDataset
 from xxm.core.data import Dataset, DatasetCollection
+from xxm.core.dists.gaussian import FullLinearGaussian
 from xxm.core.dists.io import FullLinearGaussianParams, LinearPoissonParams
 from xxm.hmm.io import HMMParams
 
@@ -177,7 +178,9 @@ def test_continuation_uses_chronological_history(family):
             + coefficients[1] * older
         )
         if isinstance(model, arhmm.GaussianARHMM):
-            covariance = model.states().covariance[state]
+            states_dist = model.states()
+            assert isinstance(states_dist, FullLinearGaussian)
+            covariance = states_dist.covariance[state]
             value = jax.random.multivariate_normal(sample_key, mean, covariance)
         else:
             value = jax.random.poisson(sample_key, jnp.exp(mean))

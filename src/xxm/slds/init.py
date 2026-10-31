@@ -1,5 +1,7 @@
 """Initialize switching dynamics from PCA latents and autoregressive HMMs."""
 
+import typing
+
 import jax
 import jax.numpy as jnp
 
@@ -27,6 +29,7 @@ from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import gaussian_full as gaussian_full_fit
 from xxm.core.optim import poisson as poisson_fit
 from xxm.core.optim.batch import filter_valid_batches
+from xxm.core.optim.gaussian import CovarianceType
 from xxm.lds.init import (
     _masked_pca_latents,
     observed_rows,
@@ -273,12 +276,17 @@ def init_via_pca(
     """
     latent_data = _latent_dataset(latents, data)
 
-    arhmm = init_gaussian_via_kmeans(
-        key,
-        latent_data,
-        num_states,
-        self_transition_prob=self_transition_prob,
-        covariance_floor=covariance_floor,
+    # The AR-HMM noise becomes the SLDS dynamics noise, which stays full.
+    arhmm = typing.cast(
+        ARHMMModel[FullLinearGaussian],
+        init_gaussian_via_kmeans(
+            key,
+            latent_data,
+            num_states,
+            self_transition_prob=self_transition_prob,
+            covariance_floor=covariance_floor,
+            noise='full',
+        ),
     )
 
     return _init_from_arhmm(
@@ -306,12 +314,17 @@ def init_via_arhmm(
     """Initialize switching structure by fitting a lag-1 AR-HMM to latents."""
     latent_data = _latent_dataset(latents, data)
 
-    arhmm = init_gaussian_via_kmeans(
-        key,
-        latent_data,
-        num_states,
-        self_transition_prob=self_transition_prob,
-        covariance_floor=covariance_floor,
+    # The AR-HMM noise becomes the SLDS dynamics noise, which stays full.
+    arhmm = typing.cast(
+        ARHMMModel[FullLinearGaussian],
+        init_gaussian_via_kmeans(
+            key,
+            latent_data,
+            num_states,
+            self_transition_prob=self_transition_prob,
+            covariance_floor=covariance_floor,
+            noise='full',
+        ),
     )
 
     arhmm = fit_arhmm(
@@ -335,6 +348,7 @@ def _gaussian_latents(
     num_states: int,
     latent_dim: int,
     covariance_floor: float,
+    noise: CovarianceType,
 ) -> tuple[jax.Array, ContinuousEmissionsCollection[GaussianEmissions]]:
     """PCA latents of the observations and Gaussian emissions fitted to them."""
     latents = masked_pca_latents(data.observations.values, data, num_states, latent_dim)
@@ -343,6 +357,7 @@ def _gaussian_latents(
         latent_rows,
         observation_rows,
         covariance_floor=covariance_floor,
+        noise=noise,
     )
     return latents, ContinuousEmissionsCollection.from_single(emissions)
 
@@ -373,10 +388,11 @@ def init_gaussian_via_pca(
     self_transition_prob: float = DEFAULT_SELF_TRANSITION_PROB,
     covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     pseudocount: float = categorical_fit.DEFAULT_PSEUDOCOUNT,
+    noise: CovarianceType,
 ) -> Model[GaussianEmissions]:
     """Initialize a Gaussian SLDS from PCA latents and a K-means AR-HMM."""
     latents, emissions = _gaussian_latents(
-        data, num_states, latent_dim, covariance_floor
+        data, num_states, latent_dim, covariance_floor, noise
     )
     return init_via_pca(
         key,
@@ -401,10 +417,11 @@ def init_gaussian_via_arhmm(
     covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
     pseudocount: float = categorical_fit.DEFAULT_PSEUDOCOUNT,
     progress: bool | str = 'AR-HMM',
+    noise: CovarianceType,
 ) -> Model[GaussianEmissions]:
     """Initialize a Gaussian SLDS by fitting a lag-1 AR-HMM to PCA latents."""
     latents, emissions = _gaussian_latents(
-        data, num_states, latent_dim, covariance_floor
+        data, num_states, latent_dim, covariance_floor, noise
     )
     return init_via_arhmm(
         key,

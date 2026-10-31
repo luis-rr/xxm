@@ -19,6 +19,7 @@ from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import gaussian_full as gaussian_full_fit
 from xxm.core.optim import poisson as poisson_fit
+from xxm.core.optim.gaussian import CovarianceType
 
 from .core import Model
 
@@ -271,14 +272,16 @@ def init_gaussian_via_pca(
     *,
     ridge: float = gaussian_fit.DEFAULT_RIDGE,
     covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
+    noise: CovarianceType,
 ) -> Model[GaussianEmissions]:
-    """Initialize a Gaussian LDS from PCA latents of the observations."""
+    """Initialize a Gaussian LDS with `noise` covariance from PCA latents."""
     latents = masked_pca_latents(data.observations.values, data, latent_dim)
     latent_rows, observation_rows = observed_rows(latents, data)
     emissions = GaussianEmissions.from_latents(
         latent_rows,
         observation_rows,
         covariance_floor=covariance_floor,
+        noise=noise,
     )
     return init_from_latents(
         latents,

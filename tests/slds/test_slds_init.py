@@ -5,6 +5,7 @@ import pytest
 
 import xxm
 from xxm.core.data import Dataset, DatasetCollection
+from xxm.core.dists.gaussian import DiagonalLinearGaussian
 from xxm.slds import GaussianSLDS
 
 
@@ -44,7 +45,9 @@ def test_gaussian_via_pca_returns_requested_model_structure():
 
     assert model.emissions.get().dist.affine.coefficients.shape == (2, 1)
     assert model.emissions.get().dist.affine.bias.shape == (2,)
-    assert model.emissions.get().dist.covariance.shape == (2, 2)
+    emissions = model.emissions.get().dist
+    assert isinstance(emissions, DiagonalLinearGaussian)
+    assert emissions.variances.shape == (2,)
 
     np.testing.assert_allclose(model.state_initial.dist.probs.sum(), 1.0)
     np.testing.assert_allclose(model.transitions.dist.probs.sum(axis=-1), 1.0)

@@ -23,6 +23,7 @@ from xxm.core.io import chains, hdf5
 from xxm.core.io.hdf5 import PathLike, load_model_params
 from xxm.core.latents.discrete import categorical_from_params
 from xxm.core.lengths import LengthsLike, LengthsSpec
+from xxm.core.optim.gaussian import CovarianceType
 
 from .collection import collection_align, collection_compose
 from .core import Model, Posterior, Sample
@@ -198,6 +199,7 @@ class GaussianHMM(HMM[GaussianEmissions]):
         num_states: int,
         *,
         self_transition_prob: float = DEFAULT_SELF_TRANSITION_PROB,
+        noise: CovarianceType = 'diagonal',
     ) -> GaussianHMMCollection:
         """Initialize an independent HMM for every session with weighted K-means."""
 
@@ -210,6 +212,7 @@ class GaussianHMM(HMM[GaussianEmissions]):
                     dataset,
                     num_states,
                     self_transition_prob=self_transition_prob,
+                    noise=noise,
                 )
             ),
         )

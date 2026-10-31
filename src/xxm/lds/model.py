@@ -34,6 +34,7 @@ from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
 from xxm.core.lengths import LengthsLike, LengthsSpec
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import poisson as poisson_fit
+from xxm.core.optim.gaussian import CovarianceType
 from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
 
 from .core import Model, Sample
@@ -332,7 +333,8 @@ class GaussianLDS(ExactLDS[GaussianEmissions]):
 
     @classmethod
     def _emissions_from_params(
-        cls, params: dists_io.LinearGaussianParams
+        cls,
+        params: dists_io.LinearGaussianParams,
     ) -> GaussianEmissions:
         return GaussianEmissions(dists_io.linear_gaussian_from_params(params))
 
@@ -345,6 +347,7 @@ class GaussianLDS(ExactLDS[GaussianEmissions]):
         *,
         ridge: float = gaussian_fit.DEFAULT_RIDGE,
         covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
+        noise: CovarianceType = 'diagonal',
     ) -> GaussianLDSCollection:
         """Initialize an independent model for every session from PCA latents."""
         return GaussianLDSCollection.from_datasets(
@@ -356,6 +359,7 @@ class GaussianLDS(ExactLDS[GaussianEmissions]):
                     latent_dim,
                     ridge=ridge,
                     covariance_floor=covariance_floor,
+                    noise=noise,
                 )
             ),
         )

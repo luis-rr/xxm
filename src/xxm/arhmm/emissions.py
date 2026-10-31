@@ -23,21 +23,27 @@ import jax.numpy as jnp
 from xxm.core import batch
 from xxm.core.data import Sequences
 from xxm.core.dists.discrete import DiscreteMarginals
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.dists.gaussian import (
+    DiagonalGaussian,
+    DiagonalLinearGaussian,
+    FullGaussian,
+    FullLinearGaussian,
+    Gaussian,
+    LinearGaussian,
+)
 from xxm.core.dists.poisson import LinearPoisson, Poisson
 from xxm.core.emissions.collection import EmissionsCollection
 from xxm.core.optim import gaussian as gaussian_fit
-from xxm.core.optim import gaussian_full as gaussian_full_fit
 from xxm.core.optim import poisson as poisson_fit
 from xxm.core.optim.batch import filter_valid_batches
+from xxm.core.optim.gaussian import gaussian_fit_for_dist
 from xxm.core.potentials.discrete import DiscretePotential
 
 from .data import ARWeightedObservations
 
 ConditionalDistT = typing.TypeVar(
     'ConditionalDistT',
-    LinearGaussian,
-    LinearPoisson,
+    bound=LinearGaussian | LinearPoisson,
 )
 
 
@@ -50,31 +56,31 @@ def _fit_ar_model(
     covariance_floor,
 ) -> ConditionalDistT:
 
+    # A bound TypeVar is not narrowed by isinstance; each branch keeps the type.
     if isinstance(dist, LinearGaussian):
         if ridge is None:
             ridge = gaussian_fit.DEFAULT_RIDGE
 
-        return gaussian_full_fit.linear_from_samples_weighted(
+        fitted = gaussian_fit_for_dist(dist).linear_from_samples_weighted(
             inputs=inputs,
             outputs=outputs,
             weights=weights,
             ridge=ridge,
             covariance_floor=covariance_floor,
         )
+        return typing.cast(ConditionalDistT, fitted)
 
-    if isinstance(dist, LinearPoisson):
-        if ridge is None:
-            ridge = poisson_fit.DEFAULT_RIDGE
+    if ridge is None:
+        ridge = poisson_fit.DEFAULT_RIDGE
 
-        return poisson_fit.linear_from_samples_weighted(
-            inputs=inputs,
-            outputs=outputs,
-            weights=weights,
-            initial_affine=dist.affine,
-            ridge=ridge,
-        )
-
-    typing.assert_never(dist)
+    fitted = poisson_fit.linear_from_samples_weighted(
+        inputs=inputs,
+        outputs=outputs,
+        weights=weights,
+        initial_affine=dist.affine,
+        ridge=ridge,
+    )
+    return typing.cast(ConditionalDistT, fitted)
 
 
 class AREmissions(
@@ -150,6 +156,18 @@ class AREmissions(
             )
 
         return num_lags
+
+    @typing.overload
+    def conditional(
+        self: 'AREmissions[FullLinearGaussian]',
+        predictors: jax.Array,
+    ) -> FullGaussian: ...
+
+    @typing.overload
+    def conditional(
+        self: 'AREmissions[DiagonalLinearGaussian]',
+        predictors: jax.Array,
+    ) -> DiagonalGaussian: ...
 
     @typing.overload
     def conditional(

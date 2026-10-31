@@ -12,13 +12,18 @@ from xxm.core import batch
 from xxm.core import facade as _facade
 from xxm.core.data import DatasetCollection, Sequences
 from xxm.core.dists import io as dists_io
-from xxm.core.dists.gaussian import LinearGaussian, TemporalGaussian
+from xxm.core.dists.gaussian import (
+    DiagonalGaussian,
+    LinearGaussian,
+    TemporalGaussian,
+)
 from xxm.core.dists.poisson import LinearPoisson, TemporalPoisson
 from xxm.core.facade import Fit
 from xxm.core.io import chains, hdf5
 from xxm.core.io.hdf5 import PathLike, load_model_params
 from xxm.core.latents.discrete import categorical_from_params
 from xxm.core.lengths import Lengths, LengthsLike, LengthsSpec
+from xxm.core.optim.gaussian import CovarianceType
 from xxm.hmm.io import HMMParams
 
 from .core import Model, Posterior, Sample
@@ -287,8 +292,8 @@ class GaussianARHMM(ARHMM[LinearGaussian]):
     $$y_{L+s}\mid z_s=k,y_{L+s-1:L+s-L}
     \sim\mathcal{N}\left(b_k+\sum_{\ell=1}^L A_{k,\ell}y_{L+s-\ell},R_k\right).$$
 
-    `states.affine` stores the AR coefficients and biases; `states.covariance`
-    stores $R_k$.
+    `states.affine` stores the AR coefficients and biases; `states.noise`
+    stores $R_k$, diagonal or full.
     """
 
     def states(self, session: int | None = None) -> LinearGaussian:
@@ -310,8 +315,11 @@ class GaussianARHMM(ARHMM[LinearGaussian]):
         dataset = data.get(session)
         prepared = ARDataset.from_dataset(dataset, self.num_lags)
 
+        conditional = self.core.emissions.get(session).conditional(prepared.predictors)
         temporal = TemporalGaussian(
-            dist=self.core.emissions.get(session).conditional(prepared.predictors),
+            dist=conditional.to_full()
+            if isinstance(conditional, DiagonalGaussian)
+            else conditional,
             lengths=dataset.lengths.shift(-self.num_lags),
         )
 
@@ -327,7 +335,8 @@ class GaussianARHMM(ARHMM[LinearGaussian]):
 
     @classmethod
     def _emissions_from_params(
-        cls, params: dists_io.LinearGaussianParams
+        cls,
+        params: dists_io.LinearGaussianParams,
     ) -> AREmissions[LinearGaussian]:
         return AREmissions(dists_io.linear_gaussian_from_params(params))
 
@@ -340,6 +349,7 @@ class GaussianARHMM(ARHMM[LinearGaussian]):
         num_lags: int,
         *,
         self_transition_prob: float = DEFAULT_SELF_TRANSITION_PROB,
+        noise: CovarianceType = 'diagonal',
     ) -> GaussianARHMMCollection:
         """Initialize an independent model for every session with K-means."""
 
@@ -352,6 +362,7 @@ class GaussianARHMM(ARHMM[LinearGaussian]):
                     ARDataset.from_dataset(dataset, num_lags),
                     num_states,
                     self_transition_prob=self_transition_prob,
+                    noise=noise,
                 )
             ),
         )

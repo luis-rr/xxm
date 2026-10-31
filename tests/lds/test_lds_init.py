@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from xxm.core.data import Dataset, DatasetCollection
+from xxm.core.dists.gaussian import DiagonalLinearGaussian
 from xxm.lds import GaussianLDS
 from xxm.lds.init import pca_latents
 
@@ -23,7 +24,9 @@ def test_gaussian_via_pca_returns_model_with_requested_latent_dimension():
     assert model.initial.dist.mean.shape == (2,)
     assert model.dynamics.dist.affine.coefficients.shape == (2, 2)
     assert model.emissions.get().dist.affine.coefficients.shape == (3, 2)
-    assert model.emissions.get().dist.covariance.shape == (3, 3)
+    emissions = model.emissions.get().dist
+    assert isinstance(emissions, DiagonalLinearGaussian)
+    assert emissions.variances.shape == (3,)
 
 
 def test_pca_latents_are_jittable():

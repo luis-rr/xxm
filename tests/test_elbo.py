@@ -7,7 +7,7 @@ from xxm import arhmm, hmm, lds
 from xxm.arhmm.data import ARDatasetCollection
 from xxm.core.data import DatasetCollection
 
-from .test_hdf5 import FACADES, make_data, make_model
+from .test_hdf5 import FACADE_NOISE, make_data, make_model
 
 AR_FACADES = (xxm.GaussianARHMM, xxm.PoissonARHMM)
 
@@ -23,9 +23,9 @@ def infer(model, data):
     return model.infer(data)
 
 
-@pytest.mark.parametrize('facade', FACADES)
-def test_elbo_is_finite_scalar(facade):
-    elbo = infer(make_model(facade), data_for(facade)).elbo()
+@pytest.mark.parametrize(('facade', 'noise'), FACADE_NOISE)
+def test_elbo_is_finite_scalar(facade, noise):
+    elbo = infer(make_model(facade, noise=noise), data_for(facade)).elbo()
     assert elbo.shape == ()
     assert jnp.isfinite(elbo)
 
@@ -33,8 +33,9 @@ def test_elbo_is_finite_scalar(facade):
 @pytest.mark.parametrize(
     'facade', [xxm.GaussianHMM, xxm.GaussianARHMM, xxm.GaussianLDS]
 )
-def test_exact_elbo_is_log_likelihood(facade):
-    model, data = make_model(facade), data_for(facade)
+@pytest.mark.parametrize('noise', ['full', 'diagonal'])
+def test_exact_elbo_is_log_likelihood(facade, noise):
+    model, data = make_model(facade, noise=noise), data_for(facade)
     match model:
         case xxm.GaussianHMM():
             objective = hmm.inference.infer_exact(model.core, data).objective

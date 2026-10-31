@@ -139,6 +139,7 @@ def test_gaussian_fit_recovers_known_parameters():
 
     expected_covariance = 0.25 + gaussian_fit.DEFAULT_COV_FLOOR * output_variance
 
+    assert isinstance(fitted.dist, FullLinearGaussian)
     np.testing.assert_allclose(
         fitted.dist.covariance,
         expected_covariance.reshape(1, 1),

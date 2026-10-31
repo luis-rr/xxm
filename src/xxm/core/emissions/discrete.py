@@ -8,12 +8,16 @@ import jax.numpy as jnp
 from xxm.core import batch
 from xxm.core.data import Sequences, WeightedObservations
 from xxm.core.dists.discrete import DiscreteMarginals
-from xxm.core.dists.gaussian import FullGaussian, Gaussian
+from xxm.core.dists.gaussian import Gaussian
 from xxm.core.dists.poisson import Poisson
 from xxm.core.optim import gaussian as gaussian_fit
-from xxm.core.optim import gaussian_full as gaussian_full_fit
 from xxm.core.optim import poisson as poisson_fit
 from xxm.core.optim.batch import filter_valid_batches
+from xxm.core.optim.gaussian import (
+    CovarianceType,
+    gaussian_fit_for,
+    gaussian_fit_for_dist,
+)
 from xxm.core.potentials.discrete import DiscretePotential
 
 
@@ -149,9 +153,12 @@ class GaussianEmissions(typing.NamedTuple):
     r"""State-dependent Gaussian emissions.
 
     $$y_t|z_t=k \sim \mathcal{N}(\mu_k, \Sigma_k).$$
+
+    $\Sigma_k$ is diagonal or full; EM keeps the structure the emissions were
+    constructed with.
     """
 
-    dist: Gaussian  # underlying batch (*B, K); K is the intrinsic state axis
+    dist: Gaussian  # batch (*B, K); K is the intrinsic state axis
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
@@ -226,9 +233,11 @@ class GaussianEmissions(typing.NamedTuple):
             observations, posterior, batch_shape
         )
 
+        from_samples_weighted = gaussian_fit_for_dist(self.dist).from_samples_weighted
+
         def fit_one(observations_i, state_weights_i, current_i):
             weights = jnp.moveaxis(state_weights_i, -1, 0)
-            fitted = gaussian_full_fit.from_samples_weighted(
+            fitted = from_samples_weighted(
                 observations_i,
                 weights,
                 covariance_floor=covariance_floor,
@@ -279,9 +288,11 @@ class GaussianEmissions(typing.NamedTuple):
         num_states: int,
         *,
         covariance_floor: float,
+        noise: CovarianceType,
     ) -> typing.Self:
         """Fit one Gaussian per assigned state; empty states use the pooled fit."""
-        gaussian = gaussian_full_fit.from_samples_grouped(
+        fit = gaussian_fit_for(noise)
+        gaussian = fit.from_samples_grouped(
             values=observations,
             assignments=assignments,
             num_groups=num_states,
@@ -289,7 +300,7 @@ class GaussianEmissions(typing.NamedTuple):
             covariance_floor=covariance_floor,
         )
 
-        pooled = gaussian_full_fit.from_samples_weighted(
+        pooled = fit.from_samples_weighted(
             observations,
             sample_weights,
             covariance_floor=covariance_floor,
@@ -297,20 +308,11 @@ class GaussianEmissions(typing.NamedTuple):
 
         empty = _empty_groups(observations, assignments, sample_weights, num_states)
 
-        return cls(
-            FullGaussian.from_moments(
-                jnp.where(
-                    empty[:, None],
-                    pooled.mean[None, :],
-                    gaussian.mean,
-                ),
-                jnp.where(
-                    empty[:, None, None],
-                    pooled.covariance[None, :, :],
-                    gaussian.covariance,
-                ),
-            )
-        )
+        def fill_empty(pooled_leaf: jax.Array, grouped_leaf: jax.Array) -> jax.Array:
+            mask = empty.reshape(empty.shape + (1,) * pooled_leaf.ndim)
+            return jnp.where(mask, pooled_leaf[None], grouped_leaf)
+
+        return cls(jax.tree.map(fill_empty, pooled, gaussian))
 
 
 class PoissonEmissions(typing.NamedTuple):

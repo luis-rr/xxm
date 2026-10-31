@@ -562,14 +562,235 @@ class FullLinearGaussian(AffineDist[FullGaussianNoise]):
         )
 
 
-GaussianNoise = FullGaussianNoise
-"""Gaussian noise of any covariance structure."""
+class DiagonalGaussianNoise(typing.NamedTuple):
+    r"""Zero-mean Gaussian noise with independent coordinates.
 
-Gaussian = FullGaussian
-"""A Gaussian of any covariance structure."""
+    $$\epsilon \sim \mathcal{N}(0, \operatorname{diag}(v)).$$
 
-LinearGaussian = FullLinearGaussian
-"""A linear-Gaussian conditional with noise of any covariance structure."""
+    `variances` stores $v$. Leading dimensions are batch dimensions.
+    """
+
+    variances: jax.Array  # (..., N)
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        """Batch shape."""
+        return self.variances.shape[:-1]
+
+    @property
+    def variable_dim(self) -> int:
+        """Dimension of the noise variable."""
+        return self.variances.shape[-1]
+
+    @property
+    def dtype(self) -> jnp.dtype:
+        """Data type."""
+        return self.variances.dtype
+
+    def select(self, index: batch.SelT) -> typing.Self:
+        """Index only batch dimensions, retaining this object type."""
+        return batch.select(self, index)
+
+    def broadcast(self, shape, axis: int = 0) -> typing.Self:
+        """Insert replicated batch dimensions at `axis`."""
+        return batch.broadcast(self, shape, axis=axis)
+
+    def squeeze(self, axis=None) -> typing.Self:
+        """Remove singleton batch dimensions."""
+        return batch.squeeze(self, axis=axis)
+
+    def permute(self, permutation, axis: int = 0) -> typing.Self:
+        """Reorder entries along a batch axis."""
+        return batch.permute(self, permutation, axis=axis)
+
+    def move_axis(self, source: int, destination: int) -> typing.Self:
+        """Move one batch axis to another position."""
+        return batch.move_axis(self, source, destination)
+
+    def astype(self, dtype: jax.typing.DTypeLike) -> typing.Self:
+        """Convert to a different data type."""
+        return self._replace(variances=self.variances.astype(dtype))
+
+    def permute_variables(self, permutation: jax.Array) -> typing.Self:
+        """Reorder variable dimensions globally or independently by batch."""
+        permutation = batch.broadcast_trailing(
+            permutation,
+            self.batch_shape,
+            (self.variable_dim,),
+        )
+        return self._replace(
+            variances=jnp.take_along_axis(self.variances, permutation, axis=-1)
+        )
+
+    def reorient_variables(self, signs: jax.Array) -> typing.Self:
+        """Flip variable signs; independent coordinates keep their variances."""
+        return self
+
+    def with_floor(
+        self,
+        floor: float,
+        reference: 'DiagonalGaussianNoise | None' = None,
+    ) -> typing.Self:
+        """Add an isotropic floor relative to a reference scale.
+
+        `floor` is a dimensionless fraction of the average marginal variance of
+        `reference`, which defaults to this noise.
+        """
+        reference = self if reference is None else reference
+
+        scale = jnp.mean(reference.variances, axis=-1)
+        scale = jnp.where(scale > 0.0, scale, 1.0)
+
+        return self._replace(variances=self.variances + floor * scale[..., None])
+
+    def whiten(
+        self,
+        values: jax.Array,  # (*B, *Q, N)
+    ) -> jax.Array:  # (*B, *Q, N)
+        r"""Map values to $\epsilon / \sqrt{v}$.
+
+        Query axes `*Q` follow the receiver batch.
+        """
+        if values.shape[-1:] != (self.variable_dim,):
+            raise ValueError('values must match the noise variable dimension')
+
+        variances = batch.align_array(
+            self.variances, self.batch_shape, values.shape[:-1]
+        )
+        return values / jnp.sqrt(variances)
+
+    def log_det(self) -> jax.Array:  # (*B,)
+        r"""Log determinant $\sum_i \log v_i$."""
+        return jnp.sum(jnp.log(self.variances), axis=-1)
+
+    @property
+    def variance(self) -> jax.Array:  # (*B, N)
+        """Marginal variances."""
+        return self.variances
+
+    def entropy(self) -> jax.Array:  # (*B,)
+        """Differential entropy."""
+        return 0.5 * (
+            self.variable_dim * (1.0 + jnp.log(2.0 * jnp.pi)) + self.log_det()
+        )
+
+    def log_prob(
+        self,
+        values: jax.Array,  # (*B, *Q, N)
+    ) -> jax.Array:  # (*B, *Q)
+        """Evaluate aligned values, with query axes following the receiver batch."""
+        mahalanobis = jnp.sum(self.whiten(values) ** 2, axis=-1)
+        log_det = batch.align_array(self.log_det(), self.batch_shape, values.shape[:-1])
+
+        return -0.5 * (
+            self.variable_dim * jnp.log(2.0 * jnp.pi) + log_det + mahalanobis
+        )
+
+    def sample(self, key: jax.Array, sample_shape: tuple[int, ...] = ()) -> jax.Array:
+        """Sample values with shape `(*batch_shape, *sample_shape, N)`."""
+        shape = self.batch_shape + (1,) * len(sample_shape) + (self.variable_dim,)
+        standard = jax.random.normal(
+            key,
+            self.batch_shape + sample_shape + (self.variable_dim,),
+            dtype=self.dtype,
+        )
+        return standard * jnp.sqrt(self.variances.reshape(shape))
+
+
+class DiagonalGaussian(LocDist[DiagonalGaussianNoise]):
+    r"""Gaussian distribution with independent coordinates.
+
+    $$u \sim \mathcal{N}(\mu, \operatorname{diag}(v)).$$
+
+    `loc` stores $\mu$ and `noise` is $\mathcal{N}(0, \operatorname{diag}(v))$.
+    Leading dimensions are batch dimensions, shared across all attributes.
+    """
+
+    __slots__ = ()
+
+    @classmethod
+    def from_moments(cls, mean: jax.Array, variances: jax.Array) -> typing.Self:
+        """Construct from a mean `(..., N)` and variances `(..., N)`."""
+        return cls(mean, DiagonalGaussianNoise(variances))
+
+    @property
+    def mean(self) -> jax.Array:  # (..., N)
+        r"""Mean $\mu$."""
+        return self.loc
+
+    @property
+    def variances(self) -> jax.Array:  # (..., N)
+        """Marginal variances $v$."""
+        return self.noise.variances
+
+    @property
+    def covariance(self) -> jax.Array:  # (..., N, N)
+        r"""Dense covariance $\operatorname{diag}(v)$, for display and plotting."""
+        return self.variances[..., :, None] * jnp.eye(
+            self.variable_dim, dtype=self.dtype
+        )
+
+    def to_full(self) -> FullGaussian:
+        """The same distribution with a dense covariance."""
+        return FullGaussian.from_moments(self.mean, self.covariance)
+
+    def whiten(
+        self,
+        values: jax.Array,  # (*B, *Q, N)
+    ) -> jax.Array:  # (*B, *Q, N)
+        r"""Map values to $(u - \mu) / \sqrt{v}$."""
+        return self.noise.whiten(self.residual(values))
+
+
+class DiagonalLinearGaussian(AffineDist[DiagonalGaussianNoise]):
+    r"""Linear-Gaussian conditional distribution with independent outputs.
+
+    $$v \mid u \sim \mathcal{N}(Wu + b, \operatorname{diag}(s)).$$
+
+    `affine` encodes $(W, b)$ and `noise` is $\mathcal{N}(0, \operatorname{diag}(s))$.
+    Leading dimensions are batch dimensions, shared across all attributes.
+    """
+
+    __slots__ = ()
+
+    @classmethod
+    def from_components(
+        cls,
+        coefficients: jax.Array,  # (..., O, *input_shape)
+        bias: jax.Array,  # (..., O)
+        variances: jax.Array,  # (..., O)
+    ) -> typing.Self:
+        """Construct from affine coefficients, bias, and noise variances."""
+        return cls(Affine(coefficients, bias), DiagonalGaussianNoise(variances))
+
+    @property
+    def variances(self) -> jax.Array:  # (..., O)
+        """Noise variances $s$."""
+        return self.noise.variances
+
+    def conditional(
+        self,
+        values: jax.Array,  # (..., *input_shape)
+    ) -> DiagonalGaussian:
+        """Conditional distribution at deterministic input."""
+        mean = self.conditional_mean(values)  # (..., O)
+
+        variances = jnp.broadcast_to(
+            batch.align_array(self.variances, self.batch_shape, mean.shape[:-1]),
+            mean.shape,
+        )  # (..., O)
+
+        return DiagonalGaussian.from_moments(mean, variances)
+
+
+GaussianNoise = FullGaussianNoise | DiagonalGaussianNoise
+"""Gaussian noise with full or diagonal covariance."""
+
+Gaussian = FullGaussian | DiagonalGaussian
+"""A Gaussian with full or diagonal covariance."""
+
+LinearGaussian = FullLinearGaussian | DiagonalLinearGaussian
+"""A linear-Gaussian conditional with full or diagonal noise covariance."""
 
 
 class PairedGaussian(typing.NamedTuple):

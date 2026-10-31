@@ -15,6 +15,7 @@ from xxm.core.emissions.discrete import (
 )
 from xxm.core.latents.discrete import CategoricalInitial, CategoricalTransitions
 from xxm.core.optim import gaussian as gaussian_fit
+from xxm.core.optim.gaussian import CovarianceType
 from xxm.core.optim.kmeans import kmeans_assignments
 from xxm.hmm.core import Model
 
@@ -120,8 +121,9 @@ def init_gaussian_via_kmeans(
     *,
     self_transition_prob: float = DEFAULT_SELF_TRANSITION_PROB,
     covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
+    noise: CovarianceType,
 ) -> Model[GaussianEmissions]:
-    """Initialize a Gaussian HMM with weighted K-means."""
+    """Initialize a Gaussian HMM with weighted K-means and `noise` covariances."""
     observations, weights, assignments = cluster_observations(key, data, num_states)
     emissions = GaussianEmissions.from_assignments(
         observations,
@@ -129,6 +131,7 @@ def init_gaussian_via_kmeans(
         weights,
         num_states,
         covariance_floor=covariance_floor,
+        noise=noise,
     )
     return init_from_emissions(
         DiscreteEmissionsCollection.from_single(emissions),

@@ -18,9 +18,13 @@ from xxm.core.dists.gaussian import (
 )
 from xxm.core.dists.poisson import LinearPoisson, Poisson
 from xxm.core.optim import gaussian as gaussian_fit
-from xxm.core.optim import gaussian_full as gaussian_full_fit
 from xxm.core.optim import poisson as poisson_fit
 from xxm.core.optim.batch import filter_valid_batches
+from xxm.core.optim.gaussian import (
+    CovarianceType,
+    gaussian_fit_for,
+    gaussian_fit_for_dist,
+)
 from xxm.core.potentials.gaussian import (
     GaussianPotential,
 )
@@ -192,7 +196,8 @@ class GaussianEmissions(typing.NamedTuple):
     $$y_t|x_t \sim \mathcal{N}(Cx_t + d, R).$$
 
     `dist.affine.coefficients` stores $C$, `dist.affine.bias` stores $d$,
-    and `dist.noise` is $\mathcal{N}(0, R)$.
+    and `dist.noise` is $\mathcal{N}(0, R)$, with $R$ diagonal or full.
+    EM keeps the noise structure the emissions were constructed with.
     """
 
     dist: LinearGaussian  # structural batch *B
@@ -332,13 +337,15 @@ class GaussianEmissions(typing.NamedTuple):
             self.batch_shape,
         )
 
+        linear_from_marginals = gaussian_fit_for_dist(self.dist).linear_from_marginals
+
         def fit_one(
             values_i: jax.Array,
             weights_i: jax.Array,
             means_i: jax.Array,
             covariances_i: jax.Array,
         ) -> LinearGaussian:
-            return gaussian_full_fit.linear_from_marginals(
+            return linear_from_marginals(
                 inputs=FullGaussian.from_moments(means_i, covariances_i),
                 outputs=values_i,
                 weights=weights_i,
@@ -394,11 +401,14 @@ class GaussianEmissions(typing.NamedTuple):
         observations: jax.Array,
         ridge=gaussian_fit.DEFAULT_RIDGE,
         covariance_floor=gaussian_fit.DEFAULT_COV_FLOOR_INIT,
+        *,
+        noise: CovarianceType,
     ) -> typing.Self:
-        """Fit Gaussian emissions to a known latent trajectory."""
+        """Fit Gaussian emissions with `noise` structure to a known latent trajectory."""
         batch_shape = latents.shape[:-2]
+        linear_from_samples = gaussian_fit_for(noise).linear_from_samples
         fitted = batch.vmap_batch(
-            lambda latents_i, observations_i: gaussian_full_fit.linear_from_samples(
+            lambda latents_i, observations_i: linear_from_samples(
                 latents_i,
                 observations_i,
                 ridge=ridge,

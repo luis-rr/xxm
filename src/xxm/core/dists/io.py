@@ -6,6 +6,8 @@ import jax
 
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import (
+    DiagonalGaussian,
+    DiagonalLinearGaussian,
     FullGaussian,
     FullLinearGaussian,
     Gaussian,
@@ -19,7 +21,12 @@ class FullGaussianParams(TypedDict):
     covariance: jax.Array
 
 
-GaussianParams = FullGaussianParams
+class DiagonalGaussianParams(TypedDict):
+    mean: jax.Array
+    variances: jax.Array
+
+
+GaussianParams = FullGaussianParams | DiagonalGaussianParams
 
 
 class PoissonParams(TypedDict):
@@ -32,7 +39,13 @@ class FullLinearGaussianParams(TypedDict):
     covariance: jax.Array
 
 
-LinearGaussianParams = FullLinearGaussianParams
+class DiagonalLinearGaussianParams(TypedDict):
+    coefficients: jax.Array
+    bias: jax.Array
+    variances: jax.Array
+
+
+LinearGaussianParams = FullLinearGaussianParams | DiagonalLinearGaussianParams
 
 
 class LinearPoissonParams(TypedDict):
@@ -40,13 +53,21 @@ class LinearPoissonParams(TypedDict):
     bias: jax.Array
 
 
-def gaussian_to_params(dist: Gaussian) -> GaussianParams:
-    """Return the stored parameters of a Gaussian."""
+def gaussian_to_params(
+    dist: Gaussian,
+) -> GaussianParams:
+    """Return the stored parameters of a full or diagonal Gaussian."""
+    if isinstance(dist, DiagonalGaussian):
+        return {'mean': dist.mean, 'variances': dist.variances}
     return {'mean': dist.mean, 'covariance': dist.covariance}
 
 
-def gaussian_from_params(params: GaussianParams) -> Gaussian:
-    """Construct a Gaussian from stored parameters."""
+def gaussian_from_params(
+    params: GaussianParams,
+) -> Gaussian:
+    """Construct a full or diagonal Gaussian from stored parameters."""
+    if 'variances' in params:
+        return DiagonalGaussian.from_moments(params['mean'], params['variances'])
     return FullGaussian.from_moments(params['mean'], params['covariance'])
 
 
@@ -60,8 +81,16 @@ def poisson_from_params(params: PoissonParams) -> Poisson:
     return Poisson(log_rates=params['log_rates'])
 
 
-def linear_gaussian_to_params(dist: LinearGaussian) -> LinearGaussianParams:
-    """Return the stored parameters of a linear-Gaussian conditional."""
+def linear_gaussian_to_params(
+    dist: LinearGaussian,
+) -> LinearGaussianParams:
+    """Return the stored parameters of a full or diagonal linear-Gaussian conditional."""
+    if isinstance(dist, DiagonalLinearGaussian):
+        return {
+            'coefficients': dist.affine.coefficients,
+            'bias': dist.affine.bias,
+            'variances': dist.variances,
+        }
     return {
         'coefficients': dist.affine.coefficients,
         'bias': dist.affine.bias,
@@ -69,8 +98,14 @@ def linear_gaussian_to_params(dist: LinearGaussian) -> LinearGaussianParams:
     }
 
 
-def linear_gaussian_from_params(params: LinearGaussianParams) -> LinearGaussian:
-    """Construct a linear-Gaussian conditional from stored parameters."""
+def linear_gaussian_from_params(
+    params: LinearGaussianParams,
+) -> LinearGaussian:
+    """Construct a full or diagonal linear-Gaussian conditional from stored parameters."""
+    if 'variances' in params:
+        return DiagonalLinearGaussian.from_components(
+            params['coefficients'], params['bias'], params['variances']
+        )
     return FullLinearGaussian.from_components(
         params['coefficients'], params['bias'], params['covariance']
     )

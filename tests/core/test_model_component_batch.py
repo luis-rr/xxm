@@ -1,6 +1,7 @@
 """Independent structural batches on reusable model components."""
 
 import math
+import typing
 
 import jax
 import jax.numpy as jnp
@@ -107,12 +108,17 @@ def test_from_latents_matches_independent_sequences(component_type):
         continuous.PoissonEmissions,
     )
     args = (latents, observations) if has_observations else (latents,)
-    kwargs = (
+    kwargs: dict[str, typing.Any] = (
         {'inputs': jnp.empty(B + (T, 0), dtype=latents.dtype)}
         if component_type is GaussianLinearDynamics
         else {}
     )
-    fitted = component_type.from_latents(*args, **kwargs)
+    options: dict[str, typing.Any] = (
+        {'noise': 'diagonal'} if component_type is continuous.GaussianEmissions else {}
+    )
+    # Signatures differ by component type; only GaussianEmissions takes noise.
+    from_latents: typing.Any = component_type.from_latents
+    fitted = from_latents(*args, **kwargs, **options)
     assert fitted.batch_shape == B
     for i, j in CHECK_INDICES:
         args_i = (
@@ -122,7 +128,8 @@ def test_from_latents_matches_independent_sequences(component_type):
         )
         kwargs_i = {name: values[i, j] for name, values in kwargs.items()}
         _assert_tree_close(
-            fitted.select((i, j)), component_type.from_latents(*args_i, **kwargs_i)
+            fitted.select((i, j)),
+            from_latents(*args_i, **kwargs_i, **options),
         )
 
 

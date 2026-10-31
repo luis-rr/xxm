@@ -28,6 +28,20 @@ FACADES = (
     xxm.PoissonSLDS,
 )
 
+GAUSSIAN_FACADES = (
+    xxm.GaussianHMM,
+    xxm.GaussianARHMM,
+    xxm.GaussianLDS,
+    xxm.GaussianSLDS,
+)
+
+# Gaussian facades run with both observation-noise structures.
+FACADE_NOISE = [
+    (facade, noise)
+    for facade in FACADES
+    for noise in (('full', 'diagonal') if facade in GAUSSIAN_FACADES else ('full',))
+]
+
 
 def assert_tree_equal(left, right):
     left_leaves, left_tree = jax.tree_util.tree_flatten(left)
@@ -39,14 +53,10 @@ def assert_tree_equal(left, right):
         np.testing.assert_array_equal(a, b)
 
 
-def make_model(facade, sessions=2, input_dim=1):
+def make_model(facade, sessions=2, input_dim=1, noise='full'):
     # Explicit dtypes keep promotion independent of JAX's weak scalar typing.
-    gaussian = facade in (
-        xxm.GaussianHMM,
-        xxm.GaussianARHMM,
-        xxm.GaussianLDS,
-        xxm.GaussianSLDS,
-    )
+    gaussian = facade in GAUSSIAN_FACADES
+    diagonal = noise == 'diagonal'
     discrete = facade in (xxm.GaussianHMM, xxm.PoissonHMM)
     ar = facade in (xxm.GaussianARHMM, xxm.PoissonARHMM)
     switching = facade in (xxm.GaussianSLDS, xxm.PoissonSLDS)
@@ -54,12 +64,19 @@ def make_model(facade, sessions=2, input_dim=1):
     for dim in range(1, sessions + 1):
         if discrete:
             item = (
-                {
-                    'mean': jnp.full((2, dim), -0.25 * dim, dtype=jnp.float32),
-                    'covariance': jnp.tile(
-                        jnp.eye(dim, dtype=jnp.float32)[None], (2, 1, 1)
-                    ),
-                }
+                (
+                    {
+                        'mean': jnp.full((2, dim), -0.25 * dim, dtype=jnp.float32),
+                        'variances': jnp.ones((2, dim), dtype=jnp.float32),
+                    }
+                    if diagonal
+                    else {
+                        'mean': jnp.full((2, dim), -0.25 * dim, dtype=jnp.float32),
+                        'covariance': jnp.tile(
+                            jnp.eye(dim, dtype=jnp.float32)[None], (2, 1, 1)
+                        ),
+                    }
+                )
                 if gaussian
                 else {'log_rates': jnp.full((2, dim), -0.5 * dim, dtype=jnp.float32)}
             )
@@ -71,7 +88,11 @@ def make_model(facade, sessions=2, input_dim=1):
                     (2, dim) if ar else (dim,), -0.5 * dim, dtype=jnp.float16
                 ),
             }
-            if gaussian:
+            if gaussian and diagonal:
+                item['variances'] = jnp.ones(
+                    (2, dim) if ar else (dim,), dtype=jnp.float32
+                )
+            elif gaussian:
                 item['covariance'] = (
                     jnp.tile(jnp.eye(dim, dtype=jnp.float32)[None], (2, 1, 1))
                     if ar
@@ -116,10 +137,10 @@ def make_model(facade, sessions=2, input_dim=1):
     )
 
 
-@pytest.mark.parametrize('facade', FACADES)
+@pytest.mark.parametrize(('facade', 'noise'), FACADE_NOISE)
 @pytest.mark.parametrize('sessions', [1, 2])
-def test_model_roundtrips(tmp_path, facade, sessions):
-    model = make_model(facade, sessions=sessions, input_dim=sessions - 1)
+def test_model_roundtrips(tmp_path, facade, noise, sessions):
+    model = make_model(facade, sessions=sessions, input_dim=sessions - 1, noise=noise)
     params = model.to_params()
     restored = facade.from_params(params)
     assert type(restored) is facade
@@ -200,9 +221,9 @@ def test_posterior_roundtrip(tmp_path, family):
     assert_tree_equal(posterior, family.load_posterior(path))
 
 
-@pytest.mark.parametrize('facade', FACADES)
-def test_inferred_roundtrip(tmp_path, facade):
-    model, data = make_model(facade), make_data()
+@pytest.mark.parametrize(('facade', 'noise'), FACADE_NOISE)
+def test_inferred_roundtrip(tmp_path, facade, noise):
+    model, data = make_model(facade, noise=noise), make_data()
     discrete, gaussian = make_posterior(
         data,
         num_lags=2 if isinstance(model, (xxm.GaussianARHMM, xxm.PoissonARHMM)) else 0,

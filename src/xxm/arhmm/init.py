@@ -8,8 +8,8 @@ from xxm.core.dists.gaussian import LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.latents.discrete import CategoricalInitial, CategoricalTransitions
 from xxm.core.optim import gaussian as gaussian_fit
-from xxm.core.optim import gaussian_full as gaussian_full_fit
 from xxm.core.optim import poisson as poisson_fit
+from xxm.core.optim.gaussian import CovarianceType, gaussian_fit_for
 from xxm.core.optim.kmeans import kmeans_assignments
 
 from .core import Model
@@ -151,6 +151,7 @@ def init_gaussian_via_kmeans(
     *,
     self_transition_prob: float = DEFAULT_SELF_TRANSITION_PROB,
     covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
+    noise: CovarianceType,
 ) -> Model[LinearGaussian]:
     r"""Initialize a Gaussian AR-HMM by K-means over complete AR windows.
 
@@ -158,7 +159,7 @@ def init_gaussian_via_kmeans(
     """
     predictors, targets, assignments = cluster_rows(key, data, num_states)
     emissions = AREmissions(
-        gaussian_full_fit.linear_from_samples_grouped(
+        gaussian_fit_for(noise).linear_from_samples_grouped(
             inputs=predictors,
             outputs=targets,
             assignments=assignments,
