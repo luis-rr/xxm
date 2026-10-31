@@ -10,7 +10,7 @@ import xxm
 from xxm import arhmm, hmm
 from xxm.arhmm.data import ARDataset
 from xxm.core.data import Dataset, DatasetCollection
-from xxm.core.dists.io import LinearGaussianParams, LinearPoissonParams
+from xxm.core.dists.io import FullLinearGaussianParams, LinearPoissonParams
 from xxm.hmm.io import HMMParams
 
 
@@ -22,7 +22,7 @@ def core(family):
     coefficients = jnp.array([[[[0.2], [-0.1]]], [[[0.1], [0.15]]]])
     bias = jnp.array([[0.1], [-0.2]])
     if family == 'gaussian':
-        emission = LinearGaussianParams(
+        emission = FullLinearGaussianParams(
             coefficients=coefficients,
             bias=bias,
             covariance=jnp.array([[[0.7]], [[1.2]]]),

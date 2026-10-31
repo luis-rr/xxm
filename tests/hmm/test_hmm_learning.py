@@ -4,7 +4,7 @@ import numpy as np
 
 from xxm.core.data import Dataset, DatasetCollection, WeightedObservations
 from xxm.core.dists.discrete import Categorical, DiscreteChainMarginals
-from xxm.core.dists.gaussian import Gaussian
+from xxm.core.dists.gaussian import FullGaussian
 from xxm.core.dists.poisson import Poisson
 from xxm.core.emissions.collection import DiscreteEmissionsCollection
 from xxm.core.emissions.discrete import GaussianEmissions, PoissonEmissions
@@ -209,7 +209,7 @@ def test_poisson_m_step():
 
 def test_gaussian_log_likelihoods():
     emissions = GaussianEmissions(
-        dist=Gaussian.from_moments(
+        dist=FullGaussian.from_moments(
             jnp.array(
                 [
                     [0.0],
@@ -267,7 +267,7 @@ def test_gaussian_m_step():
     )
 
     emissions = GaussianEmissions(
-        dist=Gaussian.from_moments(jnp.zeros((2, 1)), jnp.ones((2, 1, 1))),
+        dist=FullGaussian.from_moments(jnp.zeros((2, 1)), jnp.ones((2, 1, 1))),
     )
 
     result = emissions.fit_params(

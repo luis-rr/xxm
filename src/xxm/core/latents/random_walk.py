@@ -7,7 +7,7 @@ import jax.numpy as jnp
 
 from xxm.core import batch
 from xxm.core.data import Sequences
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.dists.gaussian import FullGaussian, FullLinearGaussian
 from xxm.core.lengths import LengthsSpec
 from xxm.core.potentials.gaussian import (
     GaussianChainPotentials,
@@ -34,9 +34,7 @@ def _zero_mean_from_covariance(
     )
 
 
-def _random_walk_transition(
-    innovation: Gaussian,
-) -> LinearGaussian:
+def _random_walk_transition(innovation: FullGaussian) -> FullLinearGaussian:
     """Construct x[t] | x[t-1] from an additive Gaussian innovation."""
     variable_dim = innovation.variable_dim
 
@@ -48,7 +46,7 @@ def _random_walk_transition(
         innovation.batch_shape + (variable_dim, variable_dim),
     )
 
-    return LinearGaussian.from_components(
+    return FullLinearGaussian.from_components(
         coefficients, innovation.mean, innovation.covariance
     )
 
@@ -76,8 +74,8 @@ class GaussianRandomWalk(typing.NamedTuple):
     $$
     """
 
-    initial: Gaussian
-    innovation: Gaussian
+    initial: FullGaussian
+    innovation: FullGaussian
 
     @classmethod
     def from_covariances(
@@ -88,10 +86,10 @@ class GaussianRandomWalk(typing.NamedTuple):
     ) -> typing.Self:
         """Construct a zero-mean random walk from `(*B, D, D)` covariances."""
         return cls(
-            initial=Gaussian.from_moments(
+            initial=FullGaussian.from_moments(
                 _zero_mean_from_covariance(initial_covariance), initial_covariance
             ),
-            innovation=Gaussian.from_moments(
+            innovation=FullGaussian.from_moments(
                 _zero_mean_from_covariance(innovation_covariance), innovation_covariance
             ),
         )
@@ -120,7 +118,7 @@ class GaussianRandomWalk(typing.NamedTuple):
             self.innovation.dtype,
         )
 
-    def transition_dist(self) -> LinearGaussian:
+    def transition_dist(self) -> FullLinearGaussian:
         """Construct the additive Gaussian transition distribution."""
         _ = self.batch_shape
         _ = self.variable_dim
@@ -296,9 +294,9 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
     """
 
     # Underlying Gaussian batch shape: (*B, K), event dimension: D.
-    initial: Gaussian
-    active_innovation: Gaussian
-    inactive_innovation: Gaussian
+    initial: FullGaussian
+    active_innovation: FullGaussian
+    inactive_innovation: FullGaussian
 
     @classmethod
     def from_covariances(
@@ -310,13 +308,13 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
     ) -> typing.Self:
         """Construct a zero-mean gated walk from `(*B, K, D, D)` covariances."""
         return cls(
-            initial=Gaussian.from_moments(
+            initial=FullGaussian.from_moments(
                 _zero_mean_from_covariance(initial_covariance), initial_covariance
             ),
-            active_innovation=Gaussian.from_moments(
+            active_innovation=FullGaussian.from_moments(
                 _zero_mean_from_covariance(active_covariance), active_covariance
             ),
-            inactive_innovation=Gaussian.from_moments(
+            inactive_innovation=FullGaussian.from_moments(
                 _zero_mean_from_covariance(inactive_covariance), inactive_covariance
             ),
         )
@@ -373,14 +371,14 @@ class GatedGaussianRandomWalk(typing.NamedTuple):
             self.inactive_innovation.dtype,
         )
 
-    def active_transition_dist(self) -> LinearGaussian:
+    def active_transition_dist(self) -> FullLinearGaussian:
         """Construct active transition distributions with batch `(*B, K)`."""
         _ = self.batch_shape
         _ = self.variable_dim
 
         return _random_walk_transition(self.active_innovation)
 
-    def inactive_transition_dist(self) -> LinearGaussian:
+    def inactive_transition_dist(self) -> FullLinearGaussian:
         """Construct inactive transition distributions with batch `(*B, K)`."""
         _ = self.batch_shape
         _ = self.variable_dim

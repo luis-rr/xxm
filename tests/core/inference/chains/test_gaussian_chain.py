@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from xxm.core.dists.gaussian import Gaussian
+from xxm.core.dists.gaussian import FullGaussian
 from xxm.core.inference.chains.gaussian import GaussianChain
 from xxm.core.lengths import Lengths
 from xxm.core.potentials.gaussian import GaussianPotential
@@ -237,7 +237,7 @@ def test_gaussian_chain_add_time_indexed_local_potential():
     covariances = jnp.broadcast_to(jnp.eye(2), (3, 2, 2))
 
     potential = GaussianPotential.from_moments(
-        Gaussian.from_moments(means, covariances)
+        FullGaussian.from_moments(means, covariances)
     )
 
     result = chain.add_local_potential(potential)
@@ -264,7 +264,7 @@ def test_gaussian_chain_add_local_potential_jit():
     chain = make_chain()
 
     potential = GaussianPotential.from_moments(
-        Gaussian.from_moments(
+        FullGaussian.from_moments(
             jnp.zeros((3, 2)), jnp.broadcast_to(jnp.eye(2), (3, 2, 2))
         ),
     )

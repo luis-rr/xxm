@@ -8,10 +8,10 @@ from xxm.arhmm.emissions import AREmissions
 from xxm.core.affine import Affine
 from xxm.core.dists.discrete import Categorical, DiscreteChainMarginals
 from xxm.core.dists.gaussian import (
-    Gaussian,
+    FullGaussian,
+    FullGaussianNoise,
+    FullLinearGaussian,
     GaussianChainMarginals,
-    GaussianNoise,
-    LinearGaussian,
 )
 from xxm.core.dists.poisson import LinearPoisson, Poisson
 from xxm.core.emissions import continuous, discrete
@@ -41,7 +41,7 @@ def _values(shape):
 
 def _gaussian(batch, dim=D):
     mean = _values(batch + (dim,))
-    return Gaussian(mean, GaussianNoise.identity(dim, batch, dtype=mean.dtype))
+    return FullGaussian(mean, FullGaussianNoise.identity(dim, batch, dtype=mean.dtype))
 
 
 def _linear(batch, output_dim=D, input_shape=(D,)):
@@ -49,8 +49,8 @@ def _linear(batch, output_dim=D, input_shape=(D,)):
         0.1 * _values(batch + (output_dim,) + input_shape),
         0.2 * _values(batch + (output_dim,)),
     )
-    return LinearGaussian(
-        affine, GaussianNoise.identity(output_dim, batch, dtype=affine.dtype)
+    return FullLinearGaussian(
+        affine, FullGaussianNoise.identity(output_dim, batch, dtype=affine.dtype)
     )
 
 

@@ -7,7 +7,7 @@ import jax.numpy as jnp
 
 from xxm.core import batch
 from xxm.core.affine import Affine
-from xxm.core.dists.gaussian import Gaussian
+from xxm.core.dists.gaussian import FullGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
 from xxm.core.optim.newton import NewtonSearch, OptimParams
 
@@ -98,7 +98,7 @@ class _NewtonSearchModel(typing.NamedTuple):
 
         linear_model = linear_model.broadcast((self.input_means.shape[0],))
         return linear_model.expected_rates(
-            Gaussian.from_moments(self.input_means, self.input_covariances)
+            FullGaussian.from_moments(self.input_means, self.input_covariances)
         )
 
     def objective(self, params: _NewtonSearchParams) -> jax.Array:
@@ -114,7 +114,9 @@ class _NewtonSearchModel(typing.NamedTuple):
             linear_model = linear_model.broadcast((self.input_means.shape[0],))
             log_probs = linear_model.expected_log_prob_each(
                 values=self.values,
-                inputs=Gaussian.from_moments(self.input_means, self.input_covariances),
+                inputs=FullGaussian.from_moments(
+                    self.input_means, self.input_covariances
+                ),
             )
 
         log_likelihood = jnp.sum(
@@ -595,7 +597,7 @@ def _linear_from_batched_marginals(
 
 
 def linear_from_marginals(
-    inputs: Gaussian,  # S-batched
+    inputs: FullGaussian,  # S-batched
     outputs: jax.Array,  # (S, O)
     weights: jax.Array | None = None,  # (..., S)
     initial_affine: Affine | None = None,

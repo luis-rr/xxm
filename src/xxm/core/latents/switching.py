@@ -9,9 +9,10 @@ from xxm.core import batch
 from xxm.core.affine import Affine
 from xxm.core.data import Sequences
 from xxm.core.dists.discrete import DiscreteMarginals
-from xxm.core.dists.gaussian import GaussianMarginals, LinearGaussian
+from xxm.core.dists.gaussian import FullLinearGaussian, GaussianMarginals
 from xxm.core.latents.gaussian import GaussianLinearDynamics
 from xxm.core.optim import gaussian as gaussian_fit
+from xxm.core.optim import gaussian_full as gaussian_full_fit
 from xxm.core.optim.batch import filter_valid_batches
 from xxm.core.potentials.gaussian import (
     GaussianPairPotential,
@@ -25,7 +26,7 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
     Consequently the first transition uses $z[1]$; $z[0]$ indexes the initial distribution.
     """
 
-    dist: LinearGaussian  # underlying batch (*B, K); K is the intrinsic state axis
+    dist: FullLinearGaussian  # underlying batch (*B, K); K is the intrinsic state axis
 
     @classmethod
     def from_components(
@@ -87,7 +88,7 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
     def input_coefficients(self) -> jax.Array:
         return GaussianLinearDynamics(self.dist).input_coefficients
 
-    def conditional(self, inputs: jax.Array) -> LinearGaussian:
+    def conditional(self, inputs: jax.Array) -> FullLinearGaussian:
         """Condition on inputs `(*B, *Q, D_u)`, returning batch `(*B, *Q, K)`."""
         batch.split_prefix(
             inputs.shape[:-1], self.batch_shape, name='input batch shape'
@@ -179,7 +180,7 @@ class GaussianLinearSwitchingDynamics(typing.NamedTuple):
         state_weights = jnp.moveaxis(state_weights, -1, -2)
 
         def fit_one(paired_i, inputs_i, weights_i):
-            return gaussian_fit.linear_from_paired_covariates(
+            return gaussian_full_fit.linear_from_paired_covariates(
                 paired_i,
                 inputs_i,
                 weights=weights_i,

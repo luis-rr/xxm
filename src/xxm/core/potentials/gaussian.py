@@ -9,7 +9,8 @@ import jax.numpy as jnp
 
 from xxm.core import batch
 from xxm.core.dists.gaussian import (
-    Gaussian,
+    FullGaussian,
+    FullLinearGaussian,
     GaussianChainMarginals,
     LinearGaussian,
     PairedGaussian,
@@ -30,12 +31,12 @@ class GaussianPotential(typing.NamedTuple):
     information_vectors: jax.Array  # (..., N)
     log_constant: jax.Array  # (...)
 
-    def normalize(self) -> Gaussian:
+    def normalize(self) -> FullGaussian:
         """Return the normalized Gaussian distribution defined by this potential.
 
         Requires a positive-definite precision matrix.
         """
-        return Gaussian.from_canonical(
+        return FullGaussian.from_canonical(
             precision=self.precision_blocks,
             information=self.information_vectors,
         )
@@ -57,7 +58,7 @@ class GaussianPotential(typing.NamedTuple):
     @classmethod
     def from_moments(
         cls,
-        gaussian: Gaussian,
+        gaussian: FullGaussian,
     ) -> GaussianPotential:
         r"""Convert Gaussian moments $(\mu,\Sigma)$ to canonical parameters $(J,h,c)$."""
         if gaussian.mean.ndim < 1:
@@ -425,7 +426,7 @@ class GaussianPairPotential(typing.NamedTuple):
     @classmethod
     def from_linear_conditional(
         cls,
-        lin_gaussian: LinearGaussian,
+        lin_gaussian: FullLinearGaussian,
     ) -> GaussianPairPotential:
         r"""Convert $p(x_1\mid x_0)$ into a joint pair potential over $(x_0,x_1)$."""
         if lin_gaussian.input_ndim != 1:

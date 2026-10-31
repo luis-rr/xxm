@@ -10,9 +10,15 @@ from jax import numpy as jnp
 from xxm.core import batch
 from xxm.core.affine import Affine
 from xxm.core.data import Sequences, WeightedObservations
-from xxm.core.dists.gaussian import Gaussian, GaussianMarginals, LinearGaussian
+from xxm.core.dists.gaussian import (
+    FullGaussian,
+    Gaussian,
+    GaussianMarginals,
+    LinearGaussian,
+)
 from xxm.core.dists.poisson import LinearPoisson, Poisson
 from xxm.core.optim import gaussian as gaussian_fit
+from xxm.core.optim import gaussian_full as gaussian_full_fit
 from xxm.core.optim import poisson as poisson_fit
 from xxm.core.optim.batch import filter_valid_batches
 from xxm.core.potentials.gaussian import (
@@ -332,8 +338,8 @@ class GaussianEmissions(typing.NamedTuple):
             means_i: jax.Array,
             covariances_i: jax.Array,
         ) -> LinearGaussian:
-            return gaussian_fit.linear_from_marginals(
-                inputs=Gaussian.from_moments(means_i, covariances_i),
+            return gaussian_full_fit.linear_from_marginals(
+                inputs=FullGaussian.from_moments(means_i, covariances_i),
                 outputs=values_i,
                 weights=weights_i,
                 ridge=ridge,
@@ -392,7 +398,7 @@ class GaussianEmissions(typing.NamedTuple):
         """Fit Gaussian emissions to a known latent trajectory."""
         batch_shape = latents.shape[:-2]
         fitted = batch.vmap_batch(
-            lambda latents_i, observations_i: gaussian_fit.linear_from_samples(
+            lambda latents_i, observations_i: gaussian_full_fit.linear_from_samples(
                 latents_i,
                 observations_i,
                 ridge=ridge,
@@ -500,7 +506,7 @@ class PoissonEmissions(typing.NamedTuple):
 
         log_probs = dist.expected_log_prob(
             observations.safe_values(),
-            Gaussian.from_moments(safe_mean, safe_covariance),
+            FullGaussian.from_moments(safe_mean, safe_covariance),
         )
 
         return observations.weighted_sum(log_probs)
@@ -589,7 +595,7 @@ class PoissonEmissions(typing.NamedTuple):
             dist_i: LinearPoisson,
         ) -> LinearPoisson:
             return poisson_fit.linear_from_marginals(
-                inputs=Gaussian.from_moments(means_i, covariances_i),
+                inputs=FullGaussian.from_moments(means_i, covariances_i),
                 outputs=values_i,
                 weights=weights_i,
                 initial_affine=dist_i.affine,
@@ -625,7 +631,7 @@ class PoissonEmissions(typing.NamedTuple):
         )
 
         return dist.expected_rates(
-            Gaussian.from_moments(posterior.means, posterior.covariances)
+            FullGaussian.from_moments(posterior.means, posterior.covariances)
         )
 
     def conditional_mean(self, latents: jax.Array) -> jax.Array:

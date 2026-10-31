@@ -2,11 +2,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from xxm.core.dists.gaussian import Gaussian, PairedGaussian
+from xxm.core.dists.gaussian import FullGaussian, PairedGaussian
 
 
 def _gaussian():
-    return Gaussian.from_moments(
+    return FullGaussian.from_moments(
         jnp.arange(12.0).reshape(2, 3, 2), jnp.broadcast_to(jnp.eye(2), (2, 3, 2, 2))
     )
 
@@ -24,7 +24,7 @@ def test_select_expands_only_the_batch_prefix():
 
     selected = gaussian.select((1, 2))
     assert selected.batch_shape == ()
-    assert isinstance(selected, Gaussian)
+    assert isinstance(selected, FullGaussian)
     np.testing.assert_array_equal(selected.mean, gaussian.mean[1, 2])
 
 

@@ -8,7 +8,7 @@ from jax import numpy as jnp
 
 from xxm.core.affine import Affine
 from xxm.core.data import Dataset, WeightedObservations
-from xxm.core.dists.gaussian import GaussianNoise
+from xxm.core.dists.gaussian import FullGaussianNoise
 from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import (
     EmissionsT,
@@ -17,6 +17,7 @@ from xxm.core.emissions.continuous import (
 )
 from xxm.core.latents.gaussian import GaussianInitial, GaussianLinearDynamics
 from xxm.core.optim import gaussian as gaussian_fit
+from xxm.core.optim import gaussian_full as gaussian_full_fit
 from xxm.core.optim import poisson as poisson_fit
 
 from .core import Model
@@ -136,13 +137,13 @@ def _init_initial(
             f'(covariance_floor={covariance_floor}).',
         )
 
-    initial = gaussian_fit.from_samples_weighted(
+    initial = gaussian_full_fit.from_samples_weighted(
         values=latents[..., 0, :].reshape((-1, latent_dim)),
         weights=start_weights.reshape(-1),
         covariance_floor=0.0,
     )
 
-    reference = gaussian_fit.from_samples(
+    reference = gaussian_full_fit.from_samples(
         latents[observed],
         covariance_floor=0.0,
     )
@@ -156,7 +157,7 @@ def _init_initial(
         reference.covariance,
     )
 
-    noise = GaussianNoise(base_covariance).with_floor(
+    noise = FullGaussianNoise(base_covariance).with_floor(
         covariance_floor, reference=reference.noise
     )
 
@@ -206,7 +207,7 @@ def _init_dynamics(
         axis=-1,
     )
 
-    dist = gaussian_fit.linear_from_samples(
+    dist = gaussian_full_fit.linear_from_samples(
         inputs=predictors[usable],
         outputs=latents[..., 1:, :][usable],
         ridge=ridge,

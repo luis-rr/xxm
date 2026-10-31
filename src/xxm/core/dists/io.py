@@ -5,23 +5,34 @@ from typing import TypedDict
 import jax
 
 from xxm.core.affine import Affine
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.dists.gaussian import (
+    FullGaussian,
+    FullLinearGaussian,
+    Gaussian,
+    LinearGaussian,
+)
 from xxm.core.dists.poisson import LinearPoisson, Poisson
 
 
-class GaussianParams(TypedDict):
+class FullGaussianParams(TypedDict):
     mean: jax.Array
     covariance: jax.Array
+
+
+GaussianParams = FullGaussianParams
 
 
 class PoissonParams(TypedDict):
     log_rates: jax.Array
 
 
-class LinearGaussianParams(TypedDict):
+class FullLinearGaussianParams(TypedDict):
     coefficients: jax.Array
     bias: jax.Array
     covariance: jax.Array
+
+
+LinearGaussianParams = FullLinearGaussianParams
 
 
 class LinearPoissonParams(TypedDict):
@@ -36,7 +47,7 @@ def gaussian_to_params(dist: Gaussian) -> GaussianParams:
 
 def gaussian_from_params(params: GaussianParams) -> Gaussian:
     """Construct a Gaussian from stored parameters."""
-    return Gaussian.from_moments(params['mean'], params['covariance'])
+    return FullGaussian.from_moments(params['mean'], params['covariance'])
 
 
 def poisson_to_params(dist: Poisson) -> PoissonParams:
@@ -60,7 +71,7 @@ def linear_gaussian_to_params(dist: LinearGaussian) -> LinearGaussianParams:
 
 def linear_gaussian_from_params(params: LinearGaussianParams) -> LinearGaussian:
     """Construct a linear-Gaussian conditional from stored parameters."""
-    return LinearGaussian.from_components(
+    return FullLinearGaussian.from_components(
         params['coefficients'], params['bias'], params['covariance']
     )
 

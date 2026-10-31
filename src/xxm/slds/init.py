@@ -12,7 +12,7 @@ from xxm.arhmm.init import (
 )
 from xxm.arhmm.learning import fit_em as fit_arhmm
 from xxm.core.data import Dataset
-from xxm.core.dists.gaussian import LinearGaussian
+from xxm.core.dists.gaussian import FullLinearGaussian
 from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import (
     EmissionsT,
@@ -24,6 +24,7 @@ from xxm.core.latents.gaussian import StateConditionedGaussian
 from xxm.core.latents.switching import GaussianLinearSwitchingDynamics
 from xxm.core.optim import categorical as categorical_fit
 from xxm.core.optim import gaussian as gaussian_fit
+from xxm.core.optim import gaussian_full as gaussian_full_fit
 from xxm.core.optim import poisson as poisson_fit
 from xxm.core.optim.batch import filter_valid_batches
 from xxm.lds.init import (
@@ -124,13 +125,13 @@ def _init_state_conditioned_initial_from_latents(
         0,
     )  # (K, S)
 
-    fitted = gaussian_fit.from_samples_weighted(
+    fitted = gaussian_full_fit.from_samples_weighted(
         values=values,
         weights=state_weights,
         covariance_floor=covariance_floor,
     )
 
-    fallback = gaussian_fit.from_samples_weighted(
+    fallback = gaussian_full_fit.from_samples_weighted(
         values=values,
         weights=flat_weights,
         covariance_floor=covariance_floor,
@@ -154,7 +155,7 @@ def _init_state_conditioned_initial_from_latents(
 def _init_from_arhmm(
     latent_data: ARDataset,
     emissions: ContinuousEmissionsCollection[EmissionsT],
-    arhmm: ARHMMModel[LinearGaussian],
+    arhmm: ARHMMModel[FullLinearGaussian],
     covariance_floor: float,
     pseudocount: float,
 ) -> Model[EmissionsT]:

@@ -4,7 +4,7 @@ import numpy as np
 
 from xxm.core.data import Dataset, DatasetCollection, WeightedObservations
 from xxm.core.dists.discrete import Categorical
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.dists.gaussian import FullGaussian, FullLinearGaussian
 from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import GaussianEmissions
 from xxm.core.inference.chains.discrete import DiscreteChain
@@ -28,7 +28,9 @@ def _mock_gaussian_emissions(
     noise_covariance: jax.Array,
 ) -> GaussianEmissions:
     return GaussianEmissions(
-        dist=LinearGaussian.from_components(jnp.eye(1), jnp.zeros(1), noise_covariance),
+        dist=FullLinearGaussian.from_components(
+            jnp.eye(1), jnp.zeros(1), noise_covariance
+        ),
     )
 
 
@@ -45,10 +47,10 @@ def _single_state_model() -> Model:
             )
         ),
         latent_initial=StateConditionedGaussian(
-            dist=Gaussian.from_moments(jnp.array([[0.0]]), jnp.array([[[1.0]]])),
+            dist=FullGaussian.from_moments(jnp.array([[0.0]]), jnp.array([[[1.0]]])),
         ),
         dynamics=GaussianLinearSwitchingDynamics(
-            dist=LinearGaussian.from_components(
+            dist=FullLinearGaussian.from_components(
                 jnp.array([[[0.8]]]), jnp.array([[0.2]]), jnp.array([[[0.5]]])
             ),
         ),
@@ -76,7 +78,7 @@ def _two_state_model() -> Model:
             )
         ),
         latent_initial=StateConditionedGaussian(
-            dist=Gaussian.from_moments(
+            dist=FullGaussian.from_moments(
                 jnp.array(
                     [
                         [0.0],
@@ -92,7 +94,7 @@ def _two_state_model() -> Model:
             ),
         ),
         dynamics=GaussianLinearSwitchingDynamics(
-            dist=LinearGaussian.from_components(
+            dist=FullLinearGaussian.from_components(
                 jnp.array(
                     [
                         [[0.8]],

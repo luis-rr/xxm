@@ -4,10 +4,10 @@ import numpy as np
 
 from xxm.core.dists.discrete import DiscreteChainMarginals
 from xxm.core.dists.gaussian import (
-    Gaussian,
+    FullGaussian,
+    FullGaussianNoise,
+    FullLinearGaussian,
     GaussianChainMarginals,
-    GaussianNoise,
-    LinearGaussian,
 )
 from xxm.core.inference.chains.discrete import DiscreteChain
 from xxm.core.inference.chains.gaussian import GaussianChain
@@ -36,10 +36,10 @@ def discrete_chain(batch, steps):
 def gaussian_chain(batch, steps):
     d = 2
     rng = np.random.default_rng(32)
-    initial = Gaussian(
-        jnp.asarray(rng.normal(size=batch + (d,))), GaussianNoise.identity(d, batch)
+    initial = FullGaussian(
+        jnp.asarray(rng.normal(size=batch + (d,))), FullGaussianNoise.identity(d, batch)
     )
-    pairs = LinearGaussian.from_components(
+    pairs = FullLinearGaussian.from_components(
         jnp.asarray(rng.normal(scale=0.1, size=batch + (steps - 1, d, d))),
         jnp.asarray(rng.normal(size=batch + (steps - 1, d))),
         jnp.broadcast_to(jnp.eye(d), batch + (steps - 1, d, d)),
@@ -50,7 +50,7 @@ def gaussian_chain(batch, steps):
         Lengths(jnp.full(batch, steps)),
     )
     local = GaussianPotential.from_moments(
-        Gaussian.from_moments(
+        FullGaussian.from_moments(
             jnp.asarray(rng.normal(size=batch + (steps, d))),
             jnp.broadcast_to(jnp.eye(d), batch + (steps, d, d)),
         )

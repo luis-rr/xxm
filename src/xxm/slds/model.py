@@ -12,7 +12,12 @@ from xxm.core import facade as _facade
 from xxm.core.data import DatasetCollection, Sequences
 from xxm.core.dists import io as dists_io
 from xxm.core.dists.discrete import Categorical
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian, TemporalGaussian
+from xxm.core.dists.gaussian import (
+    FullGaussian,
+    FullLinearGaussian,
+    LinearGaussian,
+    TemporalGaussian,
+)
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import (
@@ -139,7 +144,7 @@ def _sampling_inputs(
     return Sequences.from_padded(values, ls.lengths)
 
 
-def _conditioned_dynamics(model: Model, inputs: jax.Array | None) -> LinearGaussian:
+def _conditioned_dynamics(model: Model, inputs: jax.Array | None) -> FullLinearGaussian:
     if inputs is None:
         if model.dynamics.input_dim != 0:
             raise ValueError('controlled SLDS dynamics require an input value')
@@ -192,7 +197,7 @@ class SLDS(
         """Dimension $D_y$ of each observation."""
         return self.core.emissions.get(session).observation_dim
 
-    def dynamics(self, inputs: jax.Array | None = None) -> LinearGaussian:
+    def dynamics(self, inputs: jax.Array | None = None) -> FullLinearGaussian:
         """State-specific latent transitions conditioned on known inputs."""
         return _conditioned_dynamics(self.core, inputs)
 
@@ -251,7 +256,7 @@ class SLDS(
                     )
                 ),
                 latent_initial=StateConditionedGaussian(
-                    dist=Gaussian.from_moments(
+                    dist=FullGaussian.from_moments(
                         params['latent_initial_means'],
                         params['latent_initial_covariances'],
                     )
@@ -643,7 +648,7 @@ class Inferred(
         continuous = posterior.continuous
 
         return TemporalGaussian(
-            Gaussian.from_moments(continuous.means, continuous.covariances),
+            FullGaussian.from_moments(continuous.means, continuous.covariances),
             continuous.lengths,
         )
 

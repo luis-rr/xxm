@@ -2,8 +2,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from xxm.core.dists.gaussian import Gaussian
-from xxm.core.optim import gaussian as gaussian_fit
+from xxm.core.dists.gaussian import FullGaussian
+from xxm.core.optim import gaussian_full as gaussian_full_fit
 
 ATOL = 1e-5
 
@@ -19,7 +19,7 @@ def test_fit_weighted_matches_hard_assignments():
         ]
     ).T
 
-    fit = gaussian_fit.from_samples_weighted(
+    fit = gaussian_full_fit.from_samples_weighted(
         observations,
         weights,
         covariance_floor=0.0,
@@ -39,13 +39,13 @@ def test_fit_linear_recovers_exact_affine_map():
     )
     outputs = 2.0 * inputs + 1.0
 
-    eager = gaussian_fit.linear_from_samples(
+    eager = gaussian_full_fit.linear_from_samples(
         inputs,
         outputs,
         ridge=0.0,
         covariance_floor=0.0,
     )
-    jitted = jax.jit(gaussian_fit.linear_from_samples)(
+    jitted = jax.jit(gaussian_full_fit.linear_from_samples)(
         inputs,
         outputs,
         ridge=0.0,
@@ -82,7 +82,7 @@ def test_fit_weighted_linear_recovers_state_specific_affine_maps():
         ]
     ).T
 
-    fit = gaussian_fit.linear_from_samples_weighted(
+    fit = gaussian_full_fit.linear_from_samples_weighted(
         inputs,
         outputs,
         weights,
@@ -116,21 +116,21 @@ def test_public_routines_are_jittable():
 
     @jax.jit
     def run(observations, means, covariances, weights, inputs, outputs):
-        log_likelihoods = Gaussian.from_moments(means, covariances).log_prob_broadcast(
-            observations
-        )
-        weighted_fit = gaussian_fit.from_samples_weighted(
+        log_likelihoods = FullGaussian.from_moments(
+            means, covariances
+        ).log_prob_broadcast(observations)
+        weighted_fit = gaussian_full_fit.from_samples_weighted(
             observations,
             weights,
             covariance_floor=0.0,
         )
-        linear_fit = gaussian_fit.linear_from_samples(
+        linear_fit = gaussian_full_fit.linear_from_samples(
             inputs,
             outputs,
             ridge=0.0,
             covariance_floor=0.0,
         )
-        weighted_linear_fit = gaussian_fit.linear_from_samples_weighted(
+        weighted_linear_fit = gaussian_full_fit.linear_from_samples_weighted(
             inputs,
             outputs,
             weights,
@@ -157,7 +157,7 @@ def test_weighted_fits_support_multi_axis_batches():
     values = jnp.arange(15.0).reshape(5, 3)
     weights = jnp.arange(30.0).reshape(2, 3, 5) + 1.0
 
-    fit = gaussian_fit.from_samples_weighted(
+    fit = gaussian_full_fit.from_samples_weighted(
         values,
         weights,
         covariance_floor=0.0,
@@ -165,7 +165,7 @@ def test_weighted_fits_support_multi_axis_batches():
 
     assert fit.batch_shape == (2, 3)
     for index in np.ndindex((2, 3)):
-        expected = gaussian_fit.from_samples_weighted(
+        expected = gaussian_full_fit.from_samples_weighted(
             values,
             weights[index],
             covariance_floor=0.0,
@@ -190,7 +190,7 @@ def test_fit_linear_preserves_structured_input_shape():
 
     outputs = 2.0 * inputs[:, 0] - 3.0 * inputs[:, 1] + 1.0
 
-    fit = gaussian_fit.linear_from_samples(
+    fit = gaussian_full_fit.linear_from_samples(
         inputs,
         outputs,
         ridge=0.0,

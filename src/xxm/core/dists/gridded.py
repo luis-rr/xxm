@@ -20,7 +20,7 @@ import numpy as np
 
 from .. import batch
 from ..lengths import Lengths
-from .gaussian import Gaussian, TemporalGaussian
+from .gaussian import FullGaussian, TemporalGaussian
 
 MAX_GRID_DIM = 3
 
@@ -76,7 +76,7 @@ def _quadrature(order: int, dim: int, dtype) -> tuple[jax.Array, jax.Array]:
 
 
 def _gaussian_masses(
-    dist: Gaussian,
+    dist: FullGaussian,
     edges: tuple[jax.Array, ...],
     quadrature_order: int,
 ) -> jax.Array:
@@ -233,7 +233,7 @@ class GriddedDistribution(typing.NamedTuple):
     @classmethod
     def from_gaussian(
         cls,
-        dist: Gaussian,
+        dist: FullGaussian,
         edges: tuple[jax.Array, ...],
         *,
         quadrature_order: int = 3,
@@ -286,7 +286,7 @@ class GriddedDistribution(typing.NamedTuple):
                 covariances, t, axis=time_axis, keepdims=False
             )
             at_t = cls.from_gaussian(
-                Gaussian.from_moments(mean, cov),
+                FullGaussian.from_moments(mean, cov),
                 edges,
                 quadrature_order=quadrature_order,
             ).mass
@@ -411,7 +411,7 @@ class TemporalGriddedDistribution(typing.NamedTuple):
                 covariances, t, axis=time_axis, keepdims=False
             )
             mass = GriddedDistribution.from_gaussian(
-                Gaussian.from_moments(mean, cov),
+                FullGaussian.from_moments(mean, cov),
                 edges,
                 quadrature_order=quadrature_order,
             ).mass

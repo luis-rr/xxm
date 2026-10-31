@@ -11,7 +11,7 @@ import jax.numpy as jnp
 
 from xxm.core import batch
 from xxm.core.data import Sequences
-from xxm.core.dists.gaussian import Gaussian
+from xxm.core.dists.gaussian import FullGaussian
 from xxm.core.latents.hermite_core import HermiteBasis
 from xxm.core.lengths import LengthsSpec
 from xxm.core.potentials.gaussian import GaussianPotential
@@ -33,7 +33,7 @@ class HermiteGaussian:
     Temporal realizations therefore have shape `(*B, T, P)`.
     """
 
-    coefficients: Gaussian
+    coefficients: FullGaussian
     basis: HermiteBasis
 
     def __post_init__(self) -> None:
@@ -50,7 +50,7 @@ class HermiteGaussian:
     @classmethod
     def from_coefficient_gaussian(
         cls,
-        coefficients: Gaussian,
+        coefficients: FullGaussian,
         *,
         variable_dim: int,
     ) -> typing.Self:
@@ -119,7 +119,7 @@ class HermiteGaussian:
             ),
         )
 
-        coefficients = Gaussian.from_canonical(
+        coefficients = FullGaussian.from_canonical(
             precision=precision,
             information=jnp.zeros(
                 batch_shape + (coefficient_dim,),
@@ -205,7 +205,7 @@ class HermiteGaussian:
 
     def with_coefficients(
         self,
-        coefficients: Gaussian,
+        coefficients: FullGaussian,
     ) -> typing.Self:
         """Replace coefficient moments while preserving Hermite structure."""
         result = type(self)(
@@ -297,7 +297,7 @@ class HermiteGaussian:
     def marginals(
         self,
         ls: LengthsSpec,
-    ) -> Gaussian:
+    ) -> FullGaussian:
         """Project coefficient uncertainty to masked temporal marginals."""
         batch.require_same_shape(
             self.batch_shape,
@@ -309,7 +309,7 @@ class HermiteGaussian:
     def marginals_from_basis(
         self,
         basis_values: jax.Array,
-    ) -> Gaussian:
+    ) -> FullGaussian:
         """Project coefficient moments through an evaluated temporal basis.
 
         The basis has shape (*B, T, C). Invalid times should already
@@ -364,7 +364,7 @@ class HermiteGaussian:
             temporal_covariance + jnp.swapaxes(temporal_covariance, -1, -2)
         )
 
-        return Gaussian.from_moments(temporal_mean, temporal_covariance)
+        return FullGaussian.from_moments(temporal_mean, temporal_covariance)
 
     def log_prob(
         self,

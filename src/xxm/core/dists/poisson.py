@@ -9,7 +9,7 @@ import jax.scipy as jsp
 from xxm.core import batch
 from xxm.core.affine import Affine
 from xxm.core.data import Sequences
-from xxm.core.dists.gaussian import Gaussian
+from xxm.core.dists.gaussian import FullGaussian
 from xxm.core.lengths import Lengths
 
 
@@ -196,16 +196,18 @@ class LinearPoisson(typing.NamedTuple):
         """Sample counts at deterministic input."""
         return self.conditional(values).sample(key)
 
-    def log_rate_moments(self, values: Gaussian) -> tuple[jax.Array, jax.Array]:
+    def log_rate_moments(self, values: FullGaussian) -> tuple[jax.Array, jax.Array]:
         """Mean and variance of log rates under Gaussian input."""
         return (values.affine_mean(self.affine), values.affine_variance(self.affine))
 
-    def expected_rates(self, values: Gaussian) -> jax.Array:
+    def expected_rates(self, values: FullGaussian) -> jax.Array:
         r"""Expected rates $\mathbb{E}[\exp(\eta)]$ under Gaussian input."""
         mean, variance = self.log_rate_moments(values)
         return jnp.exp(mean + 0.5 * variance)
 
-    def expected_log_prob_each(self, values: jax.Array, inputs: Gaussian) -> jax.Array:
+    def expected_log_prob_each(
+        self, values: jax.Array, inputs: FullGaussian
+    ) -> jax.Array:
         """Expected log probabilities under Gaussian input marginals, per dimension."""
         mean, variance = self.log_rate_moments(inputs)
         if values.shape != mean.shape:
@@ -222,7 +224,7 @@ class LinearPoisson(typing.NamedTuple):
     def expected_log_prob(
         self,
         values: jax.Array,
-        inputs: Gaussian,
+        inputs: FullGaussian,
         weights: jax.Array | None = None,
     ) -> jax.Array:
         r"""Evaluate weighted $\mathbb{E}_{q(u)}[\log p(v\mid u)]$ under Gaussian inputs."""

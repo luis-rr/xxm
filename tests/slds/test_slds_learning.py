@@ -4,10 +4,10 @@ import numpy as np
 from xxm.core.data import Dataset, DatasetCollection, Sequences
 from xxm.core.dists.discrete import Categorical, DiscreteChainMarginals
 from xxm.core.dists.gaussian import (
-    Gaussian,
+    FullGaussian,
+    FullGaussianNoise,
+    FullLinearGaussian,
     GaussianChainMarginals,
-    GaussianNoise,
-    LinearGaussian,
 )
 from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import GaussianEmissions
@@ -75,7 +75,7 @@ def _posterior() -> Posterior:
 
 def _dynamics() -> GaussianLinearSwitchingDynamics:
     return GaussianLinearSwitchingDynamics(
-        dist=LinearGaussian.from_components(
+        dist=FullLinearGaussian.from_components(
             jnp.zeros((1, 1, 1)), jnp.zeros((1, 1)), jnp.ones((1, 1, 1))
         ),
     )
@@ -94,13 +94,13 @@ def _model() -> Model:
             )
         ),
         latent_initial=StateConditionedGaussian(
-            dist=Gaussian.from_moments(jnp.array([[7.0]]), jnp.array([[[2.0]]]))
+            dist=FullGaussian.from_moments(jnp.array([[7.0]]), jnp.array([[[2.0]]]))
         ),
         dynamics=_dynamics(),
         emissions=ContinuousEmissionsCollection(
             (
                 GaussianEmissions(
-                    dist=LinearGaussian.from_components(
+                    dist=FullLinearGaussian.from_components(
                         jnp.array([[1.0]]), jnp.array([0.0]), jnp.array([[1.0]])
                     )
                 ),
@@ -151,7 +151,7 @@ def test_model_fit_params_updates_latent_initial_from_posterior():
     initial_covariance = posterior.covariances[0:1]
 
     expected_covariance = (
-        GaussianNoise(initial_covariance)
+        FullGaussianNoise(initial_covariance)
         .with_floor(gaussian_fit.DEFAULT_COV_FLOOR)
         .covariance
     )
@@ -188,7 +188,7 @@ def test_variational_em_step_returns_finite_objective():
     initial_covariance = posterior.covariances[0:1]
 
     expected_covariance = (
-        GaussianNoise(initial_covariance)
+        FullGaussianNoise(initial_covariance)
         .with_floor(gaussian_fit.DEFAULT_COV_FLOOR)
         .covariance
     )

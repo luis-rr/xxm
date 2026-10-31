@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from xxm.core.affine import Affine
-from xxm.core.dists.gaussian import Gaussian
+from xxm.core.dists.gaussian import FullGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
 from xxm.core.optim import poisson as poisson_fit
 
@@ -160,7 +160,7 @@ def test_public_routines_are_jittable():
         linear_model = LinearPoisson(
             affine=Affine(coefficients=coefficients, bias=bias)
         ).broadcast((observations.shape[0],))
-        inputs = Gaussian.from_moments(means, covariances)
+        inputs = FullGaussian.from_moments(means, covariances)
 
         log_likelihoods = Poisson(log_rates=log_rates).log_prob_broadcast(observations)
         expected_per_output = linear_model.expected_log_prob_each(
@@ -173,7 +173,7 @@ def test_public_routines_are_jittable():
         )
         fitted = poisson_fit.from_samples_weighted(observations, weights)
         marginal_fit = poisson_fit.linear_from_marginals(
-            inputs=Gaussian.from_moments(means, covariances),
+            inputs=FullGaussian.from_moments(means, covariances),
             outputs=observations,
             initial_affine=Affine(coefficients=coefficients, bias=bias),
             max_iter=2,
@@ -258,7 +258,7 @@ def test_weighted_poisson_fit_supports_multi_axis_batches():
 
 @pytest.mark.parametrize('warm_start', [False, True])
 def test_linear_marginal_fit_preserves_multi_axis_batch(warm_start):
-    inputs = Gaussian.from_moments(
+    inputs = FullGaussian.from_moments(
         jnp.array([[-1.0], [0.0], [1.0]]), jnp.full((3, 1, 1), 0.1)
     )
     outputs = jnp.array([[1.0], [2.0], [4.0]])

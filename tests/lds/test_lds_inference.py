@@ -5,7 +5,7 @@ from jax import numpy as jnp
 
 from xxm.core.affine import Affine
 from xxm.core.data import Dataset, DatasetCollection
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.dists.gaussian import FullGaussian, FullLinearGaussian
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import GaussianEmissions, PoissonEmissions
@@ -22,9 +22,13 @@ from .lds_helpers import make_model, make_observations
 
 def make_scalar_poisson_model() -> Model[PoissonEmissions]:
     return Model(
-        initial=GaussianInitial(dist=Gaussian.from_moments(jnp.zeros(1), jnp.eye(1))),
+        initial=GaussianInitial(
+            dist=FullGaussian.from_moments(jnp.zeros(1), jnp.eye(1))
+        ),
         dynamics=GaussianLinearDynamics(
-            dist=LinearGaussian.from_components(jnp.eye(1), jnp.zeros(1), jnp.eye(1)),
+            dist=FullLinearGaussian.from_components(
+                jnp.eye(1), jnp.zeros(1), jnp.eye(1)
+            ),
         ),
         emissions=ContinuousEmissionsCollection(
             (
@@ -98,7 +102,7 @@ def test_withheld_observations_do_not_change_inference(make, infer):
 
 def test_hidden_timesteps_keep_known_inputs_and_padding_excludes_transitions():
     model = Model(
-        initial=GaussianInitial(Gaussian.from_moments(jnp.zeros(1), jnp.eye(1))),
+        initial=GaussianInitial(FullGaussian.from_moments(jnp.zeros(1), jnp.eye(1))),
         dynamics=GaussianLinearDynamics.from_components(
             latent_coefficients=jnp.eye(1),
             input_coefficients=jnp.array([[2.0]]),
@@ -108,7 +112,9 @@ def test_hidden_timesteps_keep_known_inputs_and_padding_excludes_transitions():
         emissions=ContinuousEmissionsCollection(
             (
                 GaussianEmissions(
-                    LinearGaussian.from_components(jnp.eye(1), jnp.zeros(1), jnp.eye(1))
+                    FullLinearGaussian.from_components(
+                        jnp.eye(1), jnp.zeros(1), jnp.eye(1)
+                    )
                 ),
             ),
         ),

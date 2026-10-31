@@ -8,9 +8,10 @@ import jax.numpy as jnp
 from xxm.core import batch
 from xxm.core.data import Sequences, WeightedObservations
 from xxm.core.dists.discrete import DiscreteMarginals
-from xxm.core.dists.gaussian import Gaussian
+from xxm.core.dists.gaussian import FullGaussian, Gaussian
 from xxm.core.dists.poisson import Poisson
 from xxm.core.optim import gaussian as gaussian_fit
+from xxm.core.optim import gaussian_full as gaussian_full_fit
 from xxm.core.optim import poisson as poisson_fit
 from xxm.core.optim.batch import filter_valid_batches
 from xxm.core.potentials.discrete import DiscretePotential
@@ -227,7 +228,7 @@ class GaussianEmissions(typing.NamedTuple):
 
         def fit_one(observations_i, state_weights_i, current_i):
             weights = jnp.moveaxis(state_weights_i, -1, 0)
-            fitted = gaussian_fit.from_samples_weighted(
+            fitted = gaussian_full_fit.from_samples_weighted(
                 observations_i,
                 weights,
                 covariance_floor=covariance_floor,
@@ -280,7 +281,7 @@ class GaussianEmissions(typing.NamedTuple):
         covariance_floor: float,
     ) -> typing.Self:
         """Fit one Gaussian per assigned state; empty states use the pooled fit."""
-        gaussian = gaussian_fit.from_samples_grouped(
+        gaussian = gaussian_full_fit.from_samples_grouped(
             values=observations,
             assignments=assignments,
             num_groups=num_states,
@@ -288,7 +289,7 @@ class GaussianEmissions(typing.NamedTuple):
             covariance_floor=covariance_floor,
         )
 
-        pooled = gaussian_fit.from_samples_weighted(
+        pooled = gaussian_full_fit.from_samples_weighted(
             observations,
             sample_weights,
             covariance_floor=covariance_floor,
@@ -297,7 +298,7 @@ class GaussianEmissions(typing.NamedTuple):
         empty = _empty_groups(observations, assignments, sample_weights, num_states)
 
         return cls(
-            Gaussian.from_moments(
+            FullGaussian.from_moments(
                 jnp.where(
                     empty[:, None],
                     pooled.mean[None, :],

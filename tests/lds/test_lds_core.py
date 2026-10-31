@@ -4,7 +4,7 @@ import pytest
 from jax import numpy as jnp
 
 from xxm.core.data import Sequences
-from xxm.core.dists.io import LinearGaussianParams, LinearPoissonParams
+from xxm.core.dists.io import FullLinearGaussianParams, LinearPoissonParams
 from xxm.core.latents.gaussian import GaussianLinearDynamics
 from xxm.core.lengths import Lengths
 from xxm.lds.io import LDSParams
@@ -86,7 +86,7 @@ def test_facade_input_properties_and_conditioning(facade, controlled):
         dynamics_bias=jnp.zeros(1),
         dynamics_covariance=jnp.eye(1),
         emissions=(
-            LinearGaussianParams(
+            FullLinearGaussianParams(
                 coefficients=jnp.eye(1), bias=jnp.zeros(1), covariance=jnp.eye(1)
             )
             if facade is GaussianLDS

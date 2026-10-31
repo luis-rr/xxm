@@ -10,12 +10,13 @@ from xxm.core.affine import Affine
 from xxm.core.data import Sequences
 from xxm.core.dists.discrete import DiscreteMarginals
 from xxm.core.dists.gaussian import (
-    Gaussian,
+    FullGaussian,
+    FullLinearGaussian,
     GaussianMarginals,
-    LinearGaussian,
     PairedGaussian,
 )
 from xxm.core.optim import gaussian as gaussian_fit
+from xxm.core.optim import gaussian_full as gaussian_full_fit
 from xxm.core.optim.batch import filter_valid_batches
 from xxm.core.potentials.gaussian import GaussianPairPotential, GaussianPotential
 
@@ -23,7 +24,7 @@ from xxm.core.potentials.gaussian import GaussianPairPotential, GaussianPotentia
 class GaussianInitial(typing.NamedTuple):
     r"""Initial distribution $p(x_0)$ for continuous latent state."""
 
-    dist: Gaussian  # structural batch *B
+    dist: FullGaussian  # structural batch *B
 
     def compute_potential(self) -> GaussianPotential:
         """Return the canonical Gaussian potential for the initial distribution."""
@@ -73,7 +74,7 @@ class GaussianInitial(typing.NamedTuple):
 
         initial_marginals, initial_weights = batch.pool_samples(
             (
-                Gaussian.from_moments(
+                FullGaussian.from_moments(
                     means[..., 0, :],
                     covariances[..., 0, :, :],
                 ),
@@ -82,19 +83,19 @@ class GaussianInitial(typing.NamedTuple):
             self.batch_shape,
             replicate_shape,
         )
-        initial = gaussian_fit.from_moment_match(
+        initial = gaussian_full_fit.from_moment_match(
             initial_marginals, weights=initial_weights
         )
 
         reference_marginals, reference_weights = batch.pool_samples(
             (
-                Gaussian.from_moments(means, covariances),
+                FullGaussian.from_moments(means, covariances),
                 weights,
             ),
             self.batch_shape,
             (*replicate_shape, posterior.max_steps),
         )
-        reference = gaussian_fit.from_moment_match(
+        reference = gaussian_full_fit.from_moment_match(
             reference_marginals, weights=reference_weights
         )
 
@@ -132,14 +133,14 @@ class GaussianInitial(typing.NamedTuple):
 
         batch_shape = latents.shape[:-2]
         reference = batch.vmap_batch(
-            lambda values: gaussian_fit.from_samples(
+            lambda values: gaussian_full_fit.from_samples(
                 values, covariance_floor=covariance_floor
             ),
             latents,
             batch_shape=batch_shape,
         )
 
-        return cls(Gaussian.from_moments(latents[..., 0, :], reference.covariance))
+        return cls(FullGaussian.from_moments(latents[..., 0, :], reference.covariance))
 
 
 class GaussianLinearDynamics(typing.NamedTuple):
@@ -154,7 +155,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
     `[x_{t-1}, u_t]`, with coefficients `[A, B]`.
     """
 
-    dist: LinearGaussian
+    dist: FullLinearGaussian
 
     @classmethod
     def from_components(
@@ -176,7 +177,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
             input_coefficients = jnp.asarray(input_coefficients)
 
         return cls(
-            dist=LinearGaussian.from_components(
+            dist=FullLinearGaussian.from_components(
                 jnp.concatenate([latent_coefficients, input_coefficients], axis=-1),
                 bias,
                 covariance,
@@ -236,7 +237,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
     def conditional(
         self,
         inputs: jax.Array,
-    ) -> LinearGaussian:
+    ) -> FullLinearGaussian:
         r"""
         Condition the dynamics on known inputs.
 
@@ -267,7 +268,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
             self.dist.covariance, self.batch_shape, inputs.shape[:-1]
         )
 
-        return LinearGaussian.from_components(coefficients, bias, covariance)
+        return FullLinearGaussian.from_components(coefficients, bias, covariance)
 
     def fit_params(
         self,
@@ -316,8 +317,8 @@ class GaussianLinearDynamics(typing.NamedTuple):
             paired_i: PairedGaussian,
             inputs_i: jax.Array,
             weights_i: jax.Array,
-        ) -> LinearGaussian:
-            return gaussian_fit.linear_from_paired_covariates(
+        ) -> FullLinearGaussian:
+            return gaussian_full_fit.linear_from_paired_covariates(
                 paired_i,
                 inputs_i,
                 weights=weights_i,
@@ -526,7 +527,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
         )
 
         return type(self)(
-            LinearGaussian(
+            FullLinearGaussian(
                 affine=Affine(
                     coefficients=coefficients,
                     bias=aligned_latent.bias,
@@ -558,7 +559,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
         def fit_one(
             latents_i: jax.Array,
             inputs_i: jax.Array,
-        ) -> LinearGaussian:
+        ) -> FullLinearGaussian:
             predictors = jnp.concatenate(
                 [
                     latents_i[:-1],
@@ -567,7 +568,7 @@ class GaussianLinearDynamics(typing.NamedTuple):
                 axis=-1,
             )
 
-            return gaussian_fit.linear_from_samples(
+            return gaussian_full_fit.linear_from_samples(
                 predictors,
                 latents_i[1:],
                 ridge=ridge,
@@ -591,7 +592,7 @@ class StateConditionedGaussian(typing.NamedTuple):
     $$x \mid z=k \sim \mathcal{N}(\mu_k,\Sigma_k).$$
     """
 
-    dist: Gaussian  # underlying batch (*B, K); K is the intrinsic state axis
+    dist: FullGaussian  # underlying batch (*B, K); K is the intrinsic state axis
 
     @property
     def batch_shape(self) -> tuple[int, ...]:
@@ -622,7 +623,7 @@ class StateConditionedGaussian(typing.NamedTuple):
     def conditional(
         self,
         state: jax.Array,
-    ) -> Gaussian:
+    ) -> FullGaussian:
         """Gaussian distribution conditional on the given state."""
         return batch.take_along_last_batch(self.dist, self.dist.batch_shape, state)
 
@@ -662,7 +663,7 @@ class StateConditionedGaussian(typing.NamedTuple):
 
         starts, weights = batch.pool_samples(
             (
-                Gaussian.from_moments(
+                FullGaussian.from_moments(
                     continuous.lengths.clear(continuous.means)[..., 0, :],
                     continuous.lengths.clear(continuous.covariances)[..., 0, :, :],
                 ),
@@ -676,7 +677,7 @@ class StateConditionedGaussian(typing.NamedTuple):
             replicate_shape,
         )
         weights = jnp.moveaxis(weights, -1, -2)  # (*B_model, K, S)
-        fitted = gaussian_fit.from_moment_match(starts, weights=weights)
+        fitted = gaussian_full_fit.from_moment_match(starts, weights=weights)
         fitted = fitted._replace(noise=fitted.noise.with_floor(covariance_floor))
         return self._replace(
             dist=filter_valid_batches(

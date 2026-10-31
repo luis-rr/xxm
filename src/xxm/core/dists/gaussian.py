@@ -13,7 +13,7 @@ from xxm.core.dists.additive import AffineDist, LocDist
 from xxm.core.lengths import Lengths
 
 
-class GaussianNoise(typing.NamedTuple):
+class FullGaussianNoise(typing.NamedTuple):
     r"""Zero-mean Gaussian noise.
 
     $$\epsilon \sim \mathcal{N}(0, \Sigma).$$
@@ -116,7 +116,7 @@ class GaussianNoise(typing.NamedTuple):
     def with_floor(
         self,
         floor: float,
-        reference: 'GaussianNoise | None' = None,
+        reference: 'FullGaussianNoise | None' = None,
     ) -> typing.Self:
         """Symmetrize and add an isotropic floor relative to a reference scale.
 
@@ -208,13 +208,13 @@ class GaussianNoise(typing.NamedTuple):
             shape=self.batch_shape + sample_shape,
         )
 
-    def congruence(self, matrix: jax.Array) -> 'GaussianNoise':  # (..., M, N)
+    def congruence(self, matrix: jax.Array) -> 'FullGaussianNoise':  # (..., M, N)
         r"""Noise of $M\epsilon$, with covariance $M\Sigma M^\top$."""
-        return GaussianNoise(
+        return FullGaussianNoise(
             jnp.einsum('...oi,...ij,...pj->...op', matrix, self.covariance, matrix)
         )
 
-    def expected_log_prob(self, other: 'Gaussian') -> jax.Array:
+    def expected_log_prob(self, other: 'FullGaussian') -> jax.Array:
         r"""
         Expected log density $\mathbb{E}_{\epsilon\sim\text{other}}[\log p(\epsilon)]$.
 
@@ -237,7 +237,7 @@ class GaussianNoise(typing.NamedTuple):
         )
 
 
-class Gaussian(LocDist[GaussianNoise]):
+class FullGaussian(LocDist[FullGaussianNoise]):
     r"""Multivariate Gaussian distribution in moment form.
 
     $$u \sim \mathcal{N}(\mu, \Sigma).$$
@@ -252,7 +252,7 @@ class Gaussian(LocDist[GaussianNoise]):
     @classmethod
     def from_moments(cls, mean: jax.Array, covariance: jax.Array) -> typing.Self:
         """Construct from a mean `(..., N)` and a covariance `(..., N, N)`."""
-        return cls(mean, GaussianNoise(covariance))
+        return cls(mean, FullGaussianNoise(covariance))
 
     @property
     def mean(self) -> jax.Array:  # (..., N)
@@ -334,9 +334,9 @@ class Gaussian(LocDist[GaussianNoise]):
     def affine(
         self,
         affine: Affine,
-    ) -> 'Gaussian':
+    ) -> 'FullGaussian':
         r"""Distribution of $f(u)$ for $u \sim \text{self}$."""
-        return Gaussian(
+        return FullGaussian(
             self.affine_mean(affine),
             self.noise.congruence(affine.coefficients),
         )
@@ -350,7 +350,7 @@ class Gaussian(LocDist[GaussianNoise]):
 
     def expected_log_prob(
         self,
-        other: 'Gaussian',
+        other: 'FullGaussian',
     ) -> jax.Array:
         r"""
         Expected log density $\mathbb{E}_{u\sim\text{other}}[\log p(u)]$.
@@ -377,7 +377,7 @@ class Gaussian(LocDist[GaussianNoise]):
         return self.noise.expected_log_prob(other._replace(loc=other.mean - self.mean))
 
 
-class LinearGaussian(AffineDist[GaussianNoise]):
+class FullLinearGaussian(AffineDist[FullGaussianNoise]):
     r"""Linear-Gaussian conditional distribution.
 
     $$v \mid u \sim \mathcal{N}(Wu + b, \Sigma).$$
@@ -397,7 +397,7 @@ class LinearGaussian(AffineDist[GaussianNoise]):
         covariance: jax.Array,  # (..., O, O)
     ) -> typing.Self:
         """Construct from affine coefficients, bias, and a noise covariance."""
-        return cls(Affine(coefficients, bias), GaussianNoise(covariance))
+        return cls(Affine(coefficients, bias), FullGaussianNoise(covariance))
 
     @property
     def covariance(self) -> jax.Array:  # (..., O, O)
@@ -407,7 +407,7 @@ class LinearGaussian(AffineDist[GaussianNoise]):
     def conditional(
         self,
         values: jax.Array,  # (..., *input_shape)
-    ) -> Gaussian:
+    ) -> FullGaussian:
         """Conditional distribution at deterministic input."""
         mean = self.conditional_mean(values)  # (..., O)
 
@@ -416,7 +416,7 @@ class LinearGaussian(AffineDist[GaussianNoise]):
             mean.shape[:-1] + (self.output_dim, self.output_dim),
         )  # (..., O, O)
 
-        return Gaussian.from_moments(mean, covariance)
+        return FullGaussian.from_moments(mean, covariance)
 
     def compose_output(
         self,
@@ -438,8 +438,8 @@ class LinearGaussian(AffineDist[GaussianNoise]):
 
     def expected_log_prob(
         self,
-        input: Gaussian,
-        output: Gaussian,
+        input: FullGaussian,
+        output: FullGaussian,
         input_output_covariance: jax.Array,
     ) -> jax.Array:
         r"""Compute $\mathbb{E}_q[\log p(v\mid u)]$ from joint input-output moments.
@@ -519,13 +519,13 @@ class LinearGaussian(AffineDist[GaussianNoise]):
         )
 
         return self.noise.expected_log_prob(
-            Gaussian.from_moments(residual_mean, residual_covariance)
+            FullGaussian.from_moments(residual_mean, residual_covariance)
         )
 
     def expected_log_prob_broadcast(
         self,
-        input: Gaussian,
-        output: Gaussian,
+        input: FullGaussian,
+        output: FullGaussian,
         input_output_covariance: jax.Array,
     ) -> jax.Array:
         """Evaluate joint moments with receiver batch axes first.
@@ -533,7 +533,7 @@ class LinearGaussian(AffineDist[GaussianNoise]):
         Cross covariance stores Cov(input, output), with trailing shape (I, O).
         """
         # Gaussian input means may retain the conditional's tensor input shape.
-        input = Gaussian.from_moments(
+        input = FullGaussian.from_moments(
             self.affine.flatten_input(input.mean), input.covariance
         )
         query_shape = input.batch_shape
@@ -562,6 +562,16 @@ class LinearGaussian(AffineDist[GaussianNoise]):
         )
 
 
+GaussianNoise = FullGaussianNoise
+"""Gaussian noise of any covariance structure."""
+
+Gaussian = FullGaussian
+"""A Gaussian of any covariance structure."""
+
+LinearGaussian = FullLinearGaussian
+"""A linear-Gaussian conditional with noise of any covariance structure."""
+
+
 class PairedGaussian(typing.NamedTuple):
     r"""Joint Gaussian distribution over pair of random variables.
 
@@ -570,8 +580,8 @@ class PairedGaussian(typing.NamedTuple):
     shared across all attributes.
     """
 
-    left: Gaussian
-    right: Gaussian
+    left: FullGaussian
+    right: FullGaussian
     cross_covariance: jax.Array  # (..., R, L)
 
     @property
@@ -678,7 +688,7 @@ class TemporalGaussian(typing.NamedTuple):
     Generic batch operations affect only *B.
     """
 
-    dist: Gaussian
+    dist: FullGaussian
     lengths: Lengths
 
     @property
@@ -1119,11 +1129,11 @@ class GaussianChainMarginals(typing.NamedTuple):
     def paired_marginals(self) -> PairedGaussian:
         """Return adjacent marginals $(x_t, x_{t+1})$."""
         return PairedGaussian(
-            left=Gaussian.from_moments(
+            left=FullGaussian.from_moments(
                 self.means[..., :-1, :],
                 self.covariances[..., :-1, :, :],
             ),
-            right=Gaussian.from_moments(
+            right=FullGaussian.from_moments(
                 self.means[..., 1:, :],
                 self.covariances[..., 1:, :, :],
             ),

@@ -8,8 +8,8 @@ from jax import numpy as jnp
 from xxm.arhmm.emissions import AREmissionsCollection
 from xxm.arhmm.model import GaussianARHMM
 from xxm.core.data import Dataset, DatasetCollection
-from xxm.core.dists.gaussian import LinearGaussian, TemporalGaussian
-from xxm.core.dists.io import LinearGaussianParams
+from xxm.core.dists.gaussian import FullLinearGaussian, TemporalGaussian
+from xxm.core.dists.io import FullLinearGaussianParams
 from xxm.core.emissions.collection import (
     ContinuousEmissionsCollection,
     DiscreteEmissionsCollection,
@@ -22,7 +22,7 @@ from xxm.lds.model import GaussianLDS
 
 
 def test_selected_session_density_preserves_sequence_sum_and_model_batch():
-    emission_params = LinearGaussianParams(
+    emission_params = FullLinearGaussianParams(
         coefficients=jnp.ones((1, 1)),
         bias=jnp.zeros(1),
         covariance=jnp.eye(1),
@@ -45,7 +45,7 @@ def test_selected_session_density_preserves_sequence_sum_and_model_batch():
     # Different observation dimensions and sequence shapes expose mismatched
     # session selection. The second emission mean is 2 at zero latents.
     selected_emission = GaussianEmissions(
-        LinearGaussian.from_components(
+        FullLinearGaussian.from_components(
             jnp.ones((2, 1)), jnp.full((2,), 2.0), jnp.eye(2)
         )
     )

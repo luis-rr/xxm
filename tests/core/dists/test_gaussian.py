@@ -4,11 +4,11 @@ import numpy as np
 import pytest
 
 from xxm.core.dists.gaussian import (
-    Gaussian,
-    LinearGaussian,
+    FullGaussian,
+    FullLinearGaussian,
     PairedGaussian,
 )
-from xxm.core.optim import gaussian as gaussian_fit
+from xxm.core.optim import gaussian_full as gaussian_full_fit
 
 ATOL = 1e-5
 
@@ -22,7 +22,9 @@ def test_log_likelihoods_matches_univariate_gaussians():
     means = jnp.array([[0.0], [1.0]])
     covariances = jnp.array([[[1.0]], [[4.0]]])
 
-    actual = Gaussian.from_moments(means, covariances).log_prob_broadcast(observations)
+    actual = FullGaussian.from_moments(means, covariances).log_prob_broadcast(
+        observations
+    )
 
     expected = np.array(
         [
@@ -49,7 +51,7 @@ def test_linear_gaussian_conditional_broadcasts_covariance():
     input_dim = 2
     output_dim = 4
 
-    model = LinearGaussian.from_components(
+    model = FullLinearGaussian.from_components(
         jnp.zeros((num_models, output_dim, input_dim)),
         jnp.zeros((num_models, output_dim)),
         jnp.broadcast_to(
@@ -92,8 +94,8 @@ def test_linear_gaussian_conditional_broadcasts_covariance():
 
 def test_paired_gaussian_assembles_joint_moments():
     paired = PairedGaussian(
-        left=Gaussian.from_moments(jnp.array([1.0]), jnp.array([[2.0]])),
-        right=Gaussian.from_moments(jnp.array([3.0]), jnp.array([[4.0]])),
+        left=FullGaussian.from_moments(jnp.array([1.0]), jnp.array([[2.0]])),
+        right=FullGaussian.from_moments(jnp.array([3.0]), jnp.array([[4.0]])),
         cross_covariance=jnp.array([[5.0]]),
     )
 
@@ -113,11 +115,11 @@ def test_paired_gaussian_assembles_joint_moments():
 
 
 def test_moment_match_combines_within_and_between_covariance():
-    distributions = Gaussian.from_moments(
+    distributions = FullGaussian.from_moments(
         jnp.array([[0.0], [2.0]]), jnp.array([[[1.0]], [[3.0]]])
     )
 
-    fit = gaussian_fit.from_moment_match(distributions)
+    fit = gaussian_full_fit.from_moment_match(distributions)
 
     np.testing.assert_allclose(fit.mean, [1.0], atol=ATOL)
     np.testing.assert_allclose(fit.covariance, [[3.0]], atol=ATOL)
@@ -125,16 +127,16 @@ def test_moment_match_combines_within_and_between_covariance():
 
 def test_paired_moment_match_combines_cross_covariance():
     distributions = PairedGaussian(
-        left=Gaussian.from_moments(
+        left=FullGaussian.from_moments(
             jnp.array([[0.0], [2.0]]), jnp.array([[[1.0]], [[1.0]]])
         ),
-        right=Gaussian.from_moments(
+        right=FullGaussian.from_moments(
             jnp.array([[1.0], [5.0]]), jnp.array([[[2.0]], [[2.0]]])
         ),
         cross_covariance=jnp.array([[[0.5]], [[0.5]]]),
     )
 
-    fit = gaussian_fit.paired_from_moment_match(distributions)
+    fit = gaussian_full_fit.paired_from_moment_match(distributions)
 
     np.testing.assert_allclose(fit.left.mean, [1.0], atol=ATOL)
     np.testing.assert_allclose(fit.left.covariance, [[2.0]], atol=ATOL)
@@ -150,12 +152,12 @@ def test_paired_moment_match_combines_cross_covariance():
 
 
 def test_linear_from_marginals_accounts_for_input_uncertainty():
-    inputs = Gaussian.from_moments(
+    inputs = FullGaussian.from_moments(
         jnp.array([[0.0], [2.0]]), jnp.array([[[1.0]], [[1.0]]])
     )
     outputs = jnp.array([[1.0], [5.0]])
 
-    fit = gaussian_fit.linear_from_marginals(
+    fit = gaussian_full_fit.linear_from_marginals(
         inputs,
         outputs,
         ridge=0.0,
@@ -204,15 +206,15 @@ def test_paired_moment_match_preserves_positive_definiteness():
     )
 
     distributions = PairedGaussian(
-        left=Gaussian.from_moments(means[:, :2], joint_covariances[:, :2, :2]),
-        right=Gaussian.from_moments(means[:, 2:], joint_covariances[:, 2:, 2:]),
+        left=FullGaussian.from_moments(means[:, :2], joint_covariances[:, :2, :2]),
+        right=FullGaussian.from_moments(means[:, 2:], joint_covariances[:, 2:, 2:]),
         cross_covariance=joint_covariances[:, 2:, :2],
     )
 
     # The input distributions are valid.
     assert jnp.isfinite(jnp.linalg.cholesky(distributions.covariance)).all()
 
-    fit = gaussian_fit.paired_from_moment_match(distributions)
+    fit = gaussian_full_fit.paired_from_moment_match(distributions)
 
     # Moment matching should preserve positive definiteness.
     assert jnp.isfinite(jnp.linalg.cholesky(fit.covariance)).all()
@@ -233,7 +235,7 @@ def test_moment_matching_preserves_structural_and_query_batches(
     shape = batch + (4,)
     means = jnp.arange(np.prod(shape) * 2, dtype=float).reshape(shape + (2,)) / 20
     covariances = jnp.broadcast_to(jnp.array([[2.0, 0.3], [0.3, 1.0]]), shape + (2, 2))
-    distributions = Gaussian.from_moments(means, covariances)
+    distributions = FullGaussian.from_moments(means, covariances)
     weights = None
     if weighted:
         weights = (
@@ -245,13 +247,13 @@ def test_moment_matching_preserves_structural_and_query_batches(
         )
     if paired:
         distributions = PairedGaussian(
-            Gaussian.from_moments(means[..., :1], covariances[..., :1, :1]),
-            Gaussian.from_moments(means[..., 1:], covariances[..., 1:, 1:]),
+            FullGaussian.from_moments(means[..., :1], covariances[..., :1, :1]),
+            FullGaussian.from_moments(means[..., 1:], covariances[..., 1:, 1:]),
             covariances[..., 1:, :1],
         )
-        fit = gaussian_fit.paired_from_moment_match
+        fit = gaussian_full_fit.paired_from_moment_match
     else:
-        fit = gaussian_fit.from_moment_match
+        fit = gaussian_full_fit.from_moment_match
     actual = jax.jit(fit)(distributions, weights)
     normalized = (
         np.ones(shape) / 4

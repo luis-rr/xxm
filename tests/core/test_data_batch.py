@@ -5,13 +5,13 @@ import pytest
 
 from xxm.core import batch
 from xxm.core.data import Dataset, Sequences
-from xxm.core.dists.gaussian import Gaussian, GaussianNoise
+from xxm.core.dists.gaussian import FullGaussian, FullGaussianNoise
 from xxm.core.lengths import Lengths
 
 
 def _gaussian():
-    return Gaussian(
-        jnp.arange(12.0).reshape(2, 3, 2), GaussianNoise.identity(2, (2, 3))
+    return FullGaussian(
+        jnp.arange(12.0).reshape(2, 3, 2), FullGaussianNoise.identity(2, (2, 3))
     )
 
 

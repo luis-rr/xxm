@@ -23,7 +23,7 @@ from tests.core.component_batch_helpers import (
     _gaussian,
 )
 from xxm.core.data import Sequences
-from xxm.core.dists.gaussian import Gaussian, GaussianChainMarginals
+from xxm.core.dists.gaussian import FullGaussian, GaussianChainMarginals
 from xxm.core.inference.chains.discrete import DiscreteChain
 from xxm.core.latents.discrete import (
     CategoricalInitial,
@@ -166,7 +166,7 @@ def test_gaussian_initial_excludes_zero_length_sequences_and_padded_moments():
         cross_covariances=jnp.zeros((2, 1, 1, 1)),
         lengths=Lengths(jnp.array([0, 1])),
     )
-    initial = GaussianInitial(Gaussian.from_moments(jnp.zeros(1), jnp.eye(1)))
+    initial = GaussianInitial(FullGaussian.from_moments(jnp.zeros(1), jnp.eye(1)))
     fitted = jax.jit(lambda p: initial.fit_params(p, covariance_floor=0))(posterior)
     np.testing.assert_allclose(fitted.dist.mean, [2.0], atol=1e-6)
     np.testing.assert_allclose(fitted.dist.covariance, [[3.0]], atol=1e-6)

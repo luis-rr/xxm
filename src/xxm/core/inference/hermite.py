@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 
 from xxm.core import batch
-from xxm.core.dists.gaussian import Gaussian
+from xxm.core.dists.gaussian import FullGaussian
 from xxm.core.latents.hermite import HermiteGaussian
 from xxm.core.lengths import Lengths
 from xxm.core.potentials.gaussian import GaussianPotential
@@ -75,7 +75,7 @@ def infer(
         basis_values,
     )
 
-    coefficients: Gaussian = prior_potential.add(local_coefficients).normalize()
+    coefficients: FullGaussian = prior_potential.add(local_coefficients).normalize()
 
     posterior = prior.with_coefficients(coefficients)
 

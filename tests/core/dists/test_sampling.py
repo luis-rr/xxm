@@ -6,12 +6,12 @@ import numpy as np
 import pytest
 
 from xxm.core.dists.discrete import Categorical
-from xxm.core.dists.gaussian import Gaussian
+from xxm.core.dists.gaussian import FullGaussian
 from xxm.core.dists.poisson import Poisson
 
 
 def gaussian(batch=(2, 3), dim=2):
-    return Gaussian.from_moments(
+    return FullGaussian.from_moments(
         jnp.arange(np.prod(batch) * dim, dtype=float).reshape(batch + (dim,)),
         jnp.broadcast_to(jnp.eye(dim), batch + (dim, dim)),
     )

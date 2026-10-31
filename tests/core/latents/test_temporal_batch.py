@@ -6,16 +6,16 @@ import numpy as np
 import pytest
 
 from xxm.core.data import Sequences
-from xxm.core.dists.gaussian import Gaussian, GaussianNoise
+from xxm.core.dists.gaussian import FullGaussian, FullGaussianNoise
 from xxm.core.latents.hermite import HermiteGaussian
 from xxm.core.latents.random_walk import GatedGaussianRandomWalk, GaussianRandomWalk
 from xxm.core.lengths import Lengths, LengthsSpec
 
 
 def gaussian(batch=(2, 3), dim=2):
-    return Gaussian(
+    return FullGaussian(
         jnp.arange(np.prod(batch) * dim, dtype=float).reshape(batch + (dim,)),
-        GaussianNoise.identity(dim, batch),
+        FullGaussianNoise.identity(dim, batch),
     )
 
 
@@ -23,7 +23,7 @@ def hermite():
     # The common-batch test is about structural operations, so construct a
     # valid Hermite Gaussian directly from its flattened coefficient Gaussian.
     return HermiteGaussian.from_coefficient_gaussian(
-        Gaussian(jnp.zeros((2, 3, 4)), GaussianNoise.identity(4, (2, 3))),
+        FullGaussian(jnp.zeros((2, 3, 4)), FullGaussianNoise.identity(4, (2, 3))),
         variable_dim=2,
     )
 
@@ -136,7 +136,7 @@ def test_gated_random_walk_aligns_gates_and_replicates(steps):
 
         mask = gates[..., None, :] == jnp.arange(2).reshape(1, 2, 1)
 
-        increments = Gaussian.from_moments(
+        increments = FullGaussian.from_moments(
             jnp.where(
                 mask[..., None],
                 active.mean[..., None, :],

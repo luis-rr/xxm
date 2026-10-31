@@ -11,7 +11,12 @@ from jax import numpy as jnp
 from xxm.core import facade as _facade
 from xxm.core.data import DatasetCollection, Sequences
 from xxm.core.dists import io as dists_io
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian, TemporalGaussian
+from xxm.core.dists.gaussian import (
+    FullGaussian,
+    FullLinearGaussian,
+    LinearGaussian,
+    TemporalGaussian,
+)
 from xxm.core.dists.gaussian import GaussianChainMarginals as Posterior
 from xxm.core.dists.poisson import LinearPoisson
 from xxm.core.emissions.collection import ContinuousEmissionsCollection
@@ -83,7 +88,7 @@ def _sampling_inputs(
 def _conditioned_dynamics(
     model: Model,
     inputs: jax.Array | None,
-) -> LinearGaussian:
+) -> FullLinearGaussian:
     input_dim = model.dynamics.input_dim
     batch_shape = model.dynamics.batch_shape
 
@@ -131,7 +136,7 @@ class LDS(_facade.AlignableFacade[Model[EmissionsT]], typing.Generic[EmissionsT]
         """Known-input dynamics coefficients $B$."""
         return self.core.dynamics.input_coefficients
 
-    def dynamics(self, inputs: jax.Array | None = None) -> LinearGaussian:
+    def dynamics(self, inputs: jax.Array | None = None) -> FullLinearGaussian:
         r"""Return $p(x_t\mid x_{t-1},u_t)$ conditioned on a known input."""
         return _conditioned_dynamics(self.core, inputs)
 
@@ -169,7 +174,7 @@ class LDS(_facade.AlignableFacade[Model[EmissionsT]], typing.Generic[EmissionsT]
     def from_params(cls, params: LDSParams) -> typing.Self:
         """Construct an LDS from its stored parameters."""
         initial = GaussianInitial(
-            dist=Gaussian.from_moments(
+            dist=FullGaussian.from_moments(
                 params['initial_mean'], params['initial_covariance']
             )
         )
@@ -466,7 +471,7 @@ class Inferred(
         posterior, _ = self._session(session)
 
         return TemporalGaussian(
-            Gaussian.from_moments(posterior.means, posterior.covariances),
+            FullGaussian.from_moments(posterior.means, posterior.covariances),
             posterior.lengths,
         )
 

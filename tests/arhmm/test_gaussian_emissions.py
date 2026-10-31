@@ -6,7 +6,7 @@ from xxm.arhmm.data import ARDataset, lagged_observations
 from xxm.arhmm.emissions import AREmissions
 from xxm.core.data import Sequences
 from xxm.core.dists.discrete import DiscreteChainMarginals
-from xxm.core.dists.gaussian import LinearGaussian
+from xxm.core.dists.gaussian import FullLinearGaussian
 from xxm.core.lengths import Lengths
 
 ATOL = 1e-6
@@ -32,9 +32,9 @@ def _make_emissions(
     coefficients: jax.Array,  # (K, N_out, L, N_in)
     biases: jax.Array,  # (K, N_out)
     covariances: jax.Array,  # (K, N_out, N_out)
-) -> AREmissions[LinearGaussian]:
+) -> AREmissions[FullLinearGaussian]:
     return AREmissions(
-        dist=LinearGaussian.from_components(coefficients, biases, covariances),
+        dist=FullLinearGaussian.from_components(coefficients, biases, covariances),
     )
 
 

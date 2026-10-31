@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from xxm.core.affine import Affine
-from xxm.core.dists.gaussian import Gaussian
+from xxm.core.dists.gaussian import FullGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
 
 ATOL = 1e-5
@@ -51,7 +51,7 @@ def test_expected_log_likelihood_matches_gaussian_moment_formula():
 
     actual = linear_model.expected_log_prob(
         values=jnp.array([[2.0]]),
-        inputs=Gaussian.from_moments(jnp.array([[1.0]]), jnp.array([[[0.5]]])),
+        inputs=FullGaussian.from_moments(jnp.array([[1.0]]), jnp.array([[[0.5]]])),
     )
 
     expected = 2.0 * 2.0 - np.exp(3.0) - math.lgamma(3.0)
@@ -69,7 +69,7 @@ def test_deterministic_inputs_match_zero_covariance_marginals():
     deterministic = linear_model.conditional(means).log_prob_each(observations)
     zero_covariance = linear_model.expected_log_prob_each(
         values=observations,
-        inputs=Gaussian.from_moments(means, jnp.zeros((2, 1, 1))),
+        inputs=FullGaussian.from_moments(means, jnp.zeros((2, 1, 1))),
     )
 
     np.testing.assert_allclose(deterministic, zero_covariance, atol=ATOL)

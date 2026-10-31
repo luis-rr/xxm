@@ -27,6 +27,7 @@ from xxm.core.dists.gaussian import Gaussian, LinearGaussian
 from xxm.core.dists.poisson import LinearPoisson, Poisson
 from xxm.core.emissions.collection import EmissionsCollection
 from xxm.core.optim import gaussian as gaussian_fit
+from xxm.core.optim import gaussian_full as gaussian_full_fit
 from xxm.core.optim import poisson as poisson_fit
 from xxm.core.optim.batch import filter_valid_batches
 from xxm.core.potentials.discrete import DiscretePotential
@@ -53,7 +54,7 @@ def _fit_ar_model(
         if ridge is None:
             ridge = gaussian_fit.DEFAULT_RIDGE
 
-        return gaussian_fit.linear_from_samples_weighted(
+        return gaussian_full_fit.linear_from_samples_weighted(
             inputs=inputs,
             outputs=outputs,
             weights=weights,

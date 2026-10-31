@@ -8,8 +8,8 @@ import jax.numpy as jnp
 
 from xxm.core import batch
 from xxm.core.affine import Affine
-from xxm.core.dists.gaussian import Gaussian
-from xxm.core.optim import gaussian as _gaussian_fit
+from xxm.core.dists.gaussian import FullGaussian
+from xxm.core.optim import gaussian_full as _gaussian_full_fit
 
 PermutationEval = typing.Callable[[jax.Array], jax.Array]
 
@@ -339,7 +339,7 @@ def match_signed_permutation(
     return permutation, signs
 
 
-def zscore_gaussian(gaussian: Gaussian) -> Affine:
+def zscore_gaussian(gaussian: FullGaussian) -> Affine:
     """Return an affine map that z-scores a Gaussian distribution.
 
     For a batched Gaussian, first moment-match the batch into a single
@@ -352,7 +352,7 @@ def zscore_gaussian(gaussian: Gaussian) -> Affine:
             gaussian,
             gaussian.batch_shape,
         )
-        gaussian = _gaussian_fit.from_moment_match(gaussian)
+        gaussian = _gaussian_full_fit.from_moment_match(gaussian)
 
     scale = jnp.sqrt(gaussian.variance)
 
@@ -368,7 +368,7 @@ def zscore_gaussian(gaussian: Gaussian) -> Affine:
 def zscore_samples(data: jax.Array, covariance_floor: float = 0.0) -> Affine:
     """Return an affine map that z-scores samples along the first axis."""
     return zscore_gaussian(
-        _gaussian_fit.from_samples(
+        _gaussian_full_fit.from_samples(
             data,
             covariance_floor=covariance_floor,
         )

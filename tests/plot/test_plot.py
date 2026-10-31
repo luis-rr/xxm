@@ -17,7 +17,7 @@ from matplotlib.quiver import Quiver
 from matplotlib.streamplot import StreamplotSet
 
 from xxm.core.affine import Affine
-from xxm.core.dists.gaussian import Gaussian
+from xxm.core.dists.gaussian import FullGaussian
 from xxm.plot import core, models
 
 
@@ -56,7 +56,7 @@ def test_sequence_2d(ax, states):
 
 
 def test_gaussian_geometry(ax):
-    gaussian = Gaussian.from_moments(
+    gaussian = FullGaussian.from_moments(
         jnp.array([1.0, 2.0]), jnp.diag(jnp.array([4.0, 1.0]))
     )
     ellipse = core.plot_gaussian_2d(ax, gaussian, scale=2)

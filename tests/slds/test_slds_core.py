@@ -3,7 +3,7 @@ import numpy as np
 
 from xxm.core.affine import Affine
 from xxm.core.dists.discrete import Categorical
-from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.core.dists.gaussian import FullGaussian, FullLinearGaussian
 from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import GaussianEmissions
 from xxm.core.latents.discrete import (
@@ -32,7 +32,7 @@ def _make_model() -> Model:
             )
         ),
         latent_initial=StateConditionedGaussian(
-            dist=Gaussian.from_moments(
+            dist=FullGaussian.from_moments(
                 jnp.array(
                     [
                         [1.0, 2.0],
@@ -48,7 +48,7 @@ def _make_model() -> Model:
             )
         ),
         dynamics=GaussianLinearSwitchingDynamics(
-            dist=LinearGaussian.from_components(
+            dist=FullLinearGaussian.from_components(
                 jnp.array(
                     [
                         [[0.8, 0.1], [0.0, 0.9]],
@@ -72,7 +72,7 @@ def _make_model() -> Model:
         emissions=ContinuousEmissionsCollection(
             (
                 GaussianEmissions(
-                    dist=LinearGaussian.from_components(
+                    dist=FullLinearGaussian.from_components(
                         jnp.array(
                             [
                                 [1.0, 0.2],
