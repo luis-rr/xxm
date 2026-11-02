@@ -7,7 +7,7 @@ import typing
 import jax
 import jax.numpy as jnp
 
-from xxm.core import batch
+from xxm.core import batch, display
 from xxm.core.io import hdf5
 from xxm.core.lengths import FillT, Lengths, LengthsSpec
 from xxm.core.mask import ArbitraryMask
@@ -269,6 +269,24 @@ class Sequences:
     @property
     def event_shape(self) -> tuple[int, ...]:
         return self.values.shape[self.time_axis + 1 :]
+
+    def __repr__(self) -> str:
+        return display.text(self._summary())
+
+    def _repr_markdown_(self) -> str:
+        return display.markdown(self._summary())
+
+    def _summary(self) -> display.Record:
+        return display.Record(
+            'Sequences',
+            (
+                display.Field('batch_shape', self.batch_shape),
+                display.Field('max_steps', self.max_steps, 'T'),
+                display.Field('event_shape', self.event_shape),
+                display.Field('dtype', self.values.dtype),
+                display.Field('lengths', display.lengths_str(self.lengths.values)),
+            ),
+        )
 
     def select_time(self, *, start: int, stop: int | None = None) -> typing.Self:
         """Slice stored time, retaining batch/event axes and valid-prefix lengths.
@@ -780,6 +798,33 @@ class Dataset:
             lengths=self.lengths,
         )
 
+    def __repr__(self) -> str:
+        return display.text(self._summary())
+
+    def _repr_markdown_(self) -> str:
+        return display.markdown(self._summary())
+
+    def _summary(self) -> display.Record:
+        """Layout, valid lengths, and the visible fraction of valid timesteps."""
+        visible = '?'
+        if display.concrete(self.visible.values, self.lengths.values):
+            visible = display.percent_str(
+                int(jnp.sum(self.observation_weights())),
+                int(jnp.sum(self.lengths.values)),
+            )
+        return display.Record(
+            'Dataset',
+            (
+                display.Field('batch_shape', self.batch_shape),
+                display.Field('max_steps', self.max_steps, 'T'),
+                display.Field('observation_dim', self.observation_dim, 'D_y'),
+                display.Field('input_dim', self.input_dim, 'D_u'),
+                display.Field('dtype', self.dtype),
+                display.Field('lengths', display.lengths_str(self.lengths.values)),
+                display.Field('visible', visible),
+            ),
+        )
+
 
 class DatasetCollection(typing.NamedTuple):
     """
@@ -799,6 +844,19 @@ class DatasetCollection(typing.NamedTuple):
     """
 
     datasets: tuple[Dataset, ...]
+
+    def __repr__(self) -> str:
+        return display.text(self._summary())
+
+    def _repr_markdown_(self) -> str:
+        return display.markdown(self._summary())
+
+    def _summary(self) -> display.Table:
+        """One row per session."""
+        return display.Table(
+            'DatasetCollection',
+            tuple(dataset._summary().fields for dataset in self.datasets),
+        )
 
     def _to_storage(self) -> tuple[dict[str, object], ...]:
         return tuple(

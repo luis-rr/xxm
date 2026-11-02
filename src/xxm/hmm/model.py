@@ -169,7 +169,7 @@ class HMM(_facade.PermutableFacade[Model[EmissionT]], typing.Generic[EmissionT])
 
 
 @jax.tree_util.register_dataclass
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class GaussianHMM(HMM[GaussianEmissions]):
     r"""Hidden Markov model with Gaussian state-conditional emissions.
 
@@ -220,7 +220,7 @@ class GaussianHMM(HMM[GaussianEmissions]):
 
 
 @jax.tree_util.register_dataclass
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class PoissonHMM(HMM[PoissonEmissions]):
     r"""Hidden Markov model with Poisson emissions.
 
@@ -271,7 +271,7 @@ class PoissonHMM(HMM[PoissonEmissions]):
 HMMFacadeT = typing.TypeVar('HMMFacadeT', bound='HMM[typing.Any]')
 
 
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class Inferred(
     _facade.PermutableInferred[HMMFacadeT, Posterior],
     typing.Generic[HMMFacadeT],
@@ -354,7 +354,7 @@ class Inferred(
         )
 
 
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class HMMInferredCollection(
     _facade.PermutableInferredCollection[
         'HMMCollection[HMMFacadeT]',
@@ -405,7 +405,7 @@ class HMMInferredCollection(
         ).compose()
 
 
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class HMMCollection(
     _facade.FacadeCollection[
         HMMFacadeT,

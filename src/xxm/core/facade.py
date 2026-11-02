@@ -10,7 +10,7 @@ from collections.abc import Mapping
 import jax
 import jax.numpy as jnp
 
-from xxm.core import batch
+from xxm.core import batch, display
 from xxm.core.affine import Affine
 from xxm.core.batch import Batchable
 from xxm.core.data import Dataset, DatasetCollection
@@ -33,6 +33,14 @@ ResultT = typing.TypeVar('ResultT')
 # ---------------------------------------------------------------------
 
 
+_SUMMARY_DIMS = (
+    ('num_states', 'K'),
+    ('num_motifs', 'P'),
+    ('latent_dim', 'D_x'),
+    ('input_dim', 'D_u'),
+)
+
+
 @dataclasses.dataclass(frozen=True, eq=False)
 class Facade(typing.Generic[CoreT]):
     """An unbatched numerical core and typed facade reconstruction."""
@@ -42,6 +50,30 @@ class Facade(typing.Generic[CoreT]):
     def __post_init__(self) -> None:
         if self.core.batch_shape != ():
             raise ValueError('Facade requires an unbatched core model')
+
+    def __repr__(self) -> str:
+        return display.text(self._summary())
+
+    def _repr_markdown_(self) -> str:
+        return display.markdown(self._summary())
+
+    def _summary(self) -> display.Record:
+        """Dimensions the family defines, with one `D_y` per emission session."""
+        fields = [
+            display.Field(name, getattr(self, name), symbol)
+            for name, symbol in _SUMMARY_DIMS
+            if hasattr(self, name)
+        ]
+        emissions = typing.cast(typing.Any, self.core).emissions.emissions
+        observation_dims = tuple(emission.observation_dim for emission in emissions)
+        fields.append(
+            display.Field(
+                'observation_dim',
+                observation_dims[0] if len(observation_dims) == 1 else observation_dims,
+                'D_y',
+            )
+        )
+        return display.Record(type(self).__name__, tuple(fields))
 
     def _with_core(self, core: CoreT) -> typing.Self:
         return dataclasses.replace(self, core=core)
@@ -59,6 +91,29 @@ class Facade(typing.Generic[CoreT]):
             model_type=f'{family}.{type(self).__name__}',
             overwrite=overwrite,
         )
+
+
+def _model_summary(model: object) -> display.Record:
+    """Summary of a facade held under an unbound type variable."""
+    return typing.cast(Facade[typing.Any], model)._summary()
+
+
+def _collection_title(collection: object, models: typing.Sequence[object]) -> str:
+    return f'{type(collection).__name__} of {len(models)} {type(models[0]).__name__}'
+
+
+def _inferred_fields(
+    model: object,
+    data: Dataset | DatasetCollection,
+) -> tuple[display.Field, ...]:
+    """Model fields followed by the data layout the model does not report."""
+    fields = _model_summary(model).fields
+    names = {field.name for field in fields}
+    layout = (
+        display.Field('max_steps', data.max_steps, 'T'),
+        display.Field('input_dim', data.input_dim, 'D_u'),
+    )
+    return (*fields, *(field for field in layout if field.name not in names))
 
 
 class Permutable(Batchable, typing.Protocol):
@@ -102,6 +157,18 @@ class Inferred(typing.Generic[Facade_co, Posterior_co]):
             raise ValueError(
                 f'Expected posterior batch {expected}, got {self.posterior.batch_shape}'
             )
+
+    def __repr__(self) -> str:
+        return display.text(self._summary())
+
+    def _repr_markdown_(self) -> str:
+        return display.markdown(self._summary())
+
+    def _summary(self) -> display.Record:
+        return display.Record(
+            f'{type(self).__name__} {type(self.model).__name__}',
+            _inferred_fields(self.model, self.data),
+        )
 
     def _session(self, session: int | None = None) -> tuple[Posterior_co, Dataset]:
         dataset = self.data.get(session)
@@ -167,6 +234,18 @@ class Fit(typing.NamedTuple, typing.Generic[Inferred_co]):
     inferred: Inferred_co
     objective_trace: jax.Array
 
+    def __repr__(self) -> str:
+        return display.text(self._summary())
+
+    def _repr_markdown_(self) -> str:
+        return display.markdown(self._summary())
+
+    def _summary(self) -> display.Record:
+        return display.Record(
+            f'Fit of {type(self.inferred.model).__name__}',
+            display.trace_fields(self.objective_trace),
+        )
+
 
 # ---------------------------------------------------------------------
 # Typed collections of inferred and fitted results
@@ -199,6 +278,23 @@ class InferredCollection(typing.Generic[FacadeCollectionT, PosteriorT]):
             raise ValueError(
                 'Models, posteriors, and datasets must have the same number of sessions'
             )
+
+    def __repr__(self) -> str:
+        return display.text(self._summary())
+
+    def _repr_markdown_(self) -> str:
+        return display.markdown(self._summary())
+
+    def _summary(self) -> display.Table:
+        """One row per model with the layout of its session data."""
+        models = self.models.models
+        return display.Table(
+            _collection_title(self, models),
+            tuple(
+                _inferred_fields(model, dataset)
+                for model, dataset in zip(models, self.data.datasets, strict=True)
+            ),
+        )
 
     def get(self, session: int | None = None) -> Inferred[typing.Any, PosteriorT]:
         """Return one session as the family's single-session result.
@@ -355,6 +451,19 @@ class FitCollection(typing.Generic[InferredCollectionT]):
     inferred: InferredCollectionT
     objective_traces: jax.Array
 
+    def __repr__(self) -> str:
+        return display.text(self._summary())
+
+    def _repr_markdown_(self) -> str:
+        return display.markdown(self._summary())
+
+    def _summary(self) -> display.Table:
+        """One row per objective trace."""
+        return display.Table(
+            _collection_title(self, self.inferred.models.models),
+            tuple(display.trace_fields(trace) for trace in self.objective_traces),
+        )
+
     def get(self, session: int | None = None) -> Fit[typing.Any]:
         """Return one session's fit; omit `session` for a singleton collection."""
         inferred = self.inferred.get(session)
@@ -400,6 +509,19 @@ class FacadeCollection(typing.Generic[FacadeT, InferredT, InferredCollectionT]):
             raise ValueError('FacadeCollection requires at least one model')
         if any(type(model) is not type(self.models[0]) for model in self.models):
             raise TypeError('FacadeCollection requires one concrete facade type')
+
+    def __repr__(self) -> str:
+        return display.text(self._summary())
+
+    def _repr_markdown_(self) -> str:
+        return display.markdown(self._summary())
+
+    def _summary(self) -> display.Table:
+        """One row per model."""
+        return display.Table(
+            _collection_title(self, self.models),
+            tuple(_model_summary(model).fields for model in self.models),
+        )
 
     @classmethod
     def from_datasets(

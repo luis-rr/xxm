@@ -315,7 +315,7 @@ class LaplaceLDS(LDS[LaplaceEmissionsT], typing.Generic[LaplaceEmissionsT]):
 
 
 @jax.tree_util.register_dataclass
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class GaussianLDS(ExactLDS[GaussianEmissions]):
     r"""Linear dynamical system with Gaussian emissions.
 
@@ -367,7 +367,7 @@ class GaussianLDS(ExactLDS[GaussianEmissions]):
 
 
 @jax.tree_util.register_dataclass
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class PoissonLDS(LaplaceLDS[PoissonEmissions]):
     r"""Linear dynamical system with Poisson emissions.
 
@@ -422,7 +422,7 @@ ExactLDSFacadeT = typing.TypeVar('ExactLDSFacadeT', bound='ExactLDS[typing.Any]'
 LaplaceLDSFacadeT = typing.TypeVar('LaplaceLDSFacadeT', bound='LaplaceLDS[typing.Any]')
 
 
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class Inferred(
     _facade.AlignableInferred[LDSFacadeT, Posterior],
     typing.Generic[LDSFacadeT],
@@ -513,7 +513,7 @@ class Inferred(
         )
 
 
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class LDSInferredCollection(
     _facade.AlignableInferredCollection[
         'LDSCollection[LDSFacadeT]',
@@ -524,7 +524,7 @@ class LDSInferredCollection(
     """Independent LDS posteriors with coordinated latent alignments."""
 
 
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class LDSCollection(
     _facade.FacadeCollection[
         LDSFacadeT,
@@ -546,7 +546,7 @@ class LDSCollection(
         return Inferred
 
 
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class ExactLDSCollection(
     LDSCollection[ExactLDSFacadeT], typing.Generic[ExactLDSFacadeT]
 ):
@@ -583,7 +583,7 @@ class ExactLDSCollection(
         )
 
 
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class LaplaceLDSCollection(
     LDSCollection[LaplaceLDSFacadeT], typing.Generic[LaplaceLDSFacadeT]
 ):

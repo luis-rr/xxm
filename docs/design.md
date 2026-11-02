@@ -363,6 +363,8 @@ Temporal object store temporal values `(*B, T, *D)`, exposes the dense horizon a
 
 Temporal accessors return `Sequences`, whose `get(index)` retrieves one cropped array on the host. A normalized single trajectory requires `get()`. `unpack()` is a convenience for unbatched or flat sequences, and `stack()` constructs rectangular batch hierarchies.
 
+Data, facades, and their results are inspectable: `repr` gives a compact text summary labelled with property names, and notebooks render the same summary as a markdown table labelled with math symbols. Summaries report structure and dimensions, never array values, and remain valid under tracing. Family dataclasses inheriting a summary pass `repr=False`.
+
 
 ## JAX and model representation
 

@@ -284,7 +284,7 @@ class ARHMM(
 
 
 @jax.tree_util.register_dataclass
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class GaussianARHMM(ARHMM[LinearGaussian]):
     r"""
     Autoregressive HMM with Gaussian conditional emissions.
@@ -366,7 +366,7 @@ class GaussianARHMM(ARHMM[LinearGaussian]):
 
 
 @jax.tree_util.register_dataclass
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class PoissonARHMM(ARHMM[LinearPoisson]):
     r"""
     Autoregressive HMM with Poisson conditional emissions.
@@ -447,7 +447,7 @@ class PoissonARHMM(ARHMM[LinearPoisson]):
 ARHMMFacadeT = typing.TypeVar('ARHMMFacadeT', bound='ARHMM[typing.Any]')
 
 
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class Inferred(
     _facade.PermutableInferred[ARHMMFacadeT, Posterior],
     typing.Generic[ARHMMFacadeT],
@@ -544,7 +544,7 @@ class Inferred(
         )
 
 
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class ARHMMInferredCollection(
     _facade.PermutableInferredCollection[
         'ARHMMCollection[ARHMMFacadeT]',
@@ -555,7 +555,7 @@ class ARHMMInferredCollection(
     """Independent AR-HMM posteriors with coordinated state permutations."""
 
 
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class ARHMMCollection(
     _facade.FacadeCollection[
         ARHMMFacadeT,

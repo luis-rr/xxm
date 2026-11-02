@@ -416,7 +416,7 @@ class LaplaceSLDS(SLDS[LaplaceEmissionsT], typing.Generic[LaplaceEmissionsT]):
 
 
 @jax.tree_util.register_dataclass
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class GaussianSLDS(VariationalSLDS[GaussianEmissions]):
     r"""Switching linear dynamical system with Gaussian emissions.
 
@@ -506,7 +506,7 @@ class GaussianSLDS(VariationalSLDS[GaussianEmissions]):
 
 
 @jax.tree_util.register_dataclass
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class PoissonSLDS(LaplaceSLDS[PoissonEmissions]):
     r"""Switching linear dynamical system with Poisson emissions.
 
@@ -603,7 +603,7 @@ LaplaceSLDSFacadeT = typing.TypeVar(
 )
 
 
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class Inferred(
     _facade.PermutableInferred[SLDSFacadeT, Posterior],
     _facade.AlignableInferred[SLDSFacadeT, Posterior],
@@ -703,7 +703,7 @@ class Inferred(
         )
 
 
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class SLDSInferredCollection(
     _facade.PermutableInferredCollection[
         'SLDSCollection[SLDSFacadeT]',
@@ -718,7 +718,7 @@ class SLDSInferredCollection(
     """Independent SLDS posteriors with coordinated latent transformations."""
 
 
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class SLDSCollection(
     _facade.FacadeCollection[
         SLDSFacadeT,
@@ -740,7 +740,7 @@ class SLDSCollection(
         return Inferred
 
 
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class VariationalSLDSCollection(
     SLDSCollection[VariationalSLDSFacadeT], typing.Generic[VariationalSLDSFacadeT]
 ):
@@ -793,7 +793,7 @@ class VariationalSLDSCollection(
         )
 
 
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class LaplaceSLDSCollection(
     SLDSCollection[LaplaceSLDSFacadeT], typing.Generic[LaplaceSLDSFacadeT]
 ):
