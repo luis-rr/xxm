@@ -525,7 +525,7 @@ class GaussianSLDS(VariationalSLDS[GaussianEmissions]):
         arhmms = GaussianARHMM.via_kmeans(
             key,
             pseudo_latents,
-            num_states,
+            num_states=num_states,
             num_lags=1,
             self_transition_prob=self_transition_prob,
             covariance_floor=covariance_floor,
@@ -564,7 +564,7 @@ class GaussianSLDS(VariationalSLDS[GaussianEmissions]):
         arhmms = GaussianARHMM.via_kmeans(
             key,
             pseudo_latents,
-            num_states,
+            num_states=num_states,
             num_lags=1,
             self_transition_prob=self_transition_prob,
             covariance_floor=covariance_floor,
@@ -680,7 +680,7 @@ class PoissonSLDS(LaplaceSLDS[PoissonEmissions]):
         arhmms = GaussianARHMM.via_kmeans(
             key,
             pseudo_latents,
-            num_states,
+            num_states=num_states,
             num_lags=1,
             self_transition_prob=self_transition_prob,
             covariance_floor=covariance_floor,
@@ -720,7 +720,7 @@ class PoissonSLDS(LaplaceSLDS[PoissonEmissions]):
         arhmms = GaussianARHMM.via_kmeans(
             key,
             pseudo_latents,
-            num_states,
+            num_states=num_states,
             num_lags=1,
             self_transition_prob=self_transition_prob,
             covariance_floor=covariance_floor,

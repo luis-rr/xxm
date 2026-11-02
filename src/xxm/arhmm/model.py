@@ -343,9 +343,9 @@ class GaussianARHMM(ARHMM[LinearGaussian]):
         cls,
         key: jax.Array,
         data: DatasetCollection,
-        num_states: int,
-        num_lags: int,
         *,
+        num_states: int,
+        num_lags: int = 1,
         self_transition_prob: float = DEFAULT_SELF_TRANSITION_PROB,
         covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
         noise: CovarianceType = 'diagonal',
@@ -426,9 +426,9 @@ class PoissonARHMM(ARHMM[LinearPoisson]):
         cls,
         key: jax.Array,
         data: DatasetCollection,
-        num_states: int,
-        num_lags: int,
         *,
+        num_states: int,
+        num_lags: int = 1,
         self_transition_prob: float = DEFAULT_SELF_TRANSITION_PROB,
     ) -> PoissonARHMMCollection:
         """Initialize an independent model for every session with K-means."""
