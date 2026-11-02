@@ -157,6 +157,38 @@ def plot_fit_progress(
     return axs[:, 0]
 
 
+def plot_fit_progress_many(
+    objectives,
+    *,
+    name='Log Likelihood',
+    title='',
+    figsize=(6, 6),
+    linthresh=1e-3,
+    **kwargs,
+):
+    """Plot many objective traces (shape (N, T)) and their changes."""
+    values = np.asarray(objectives)
+    if values.ndim != 2 or not values.size:
+        raise ValueError(
+            f'expected nonempty objectives with shape (N, T), got {values.shape}'
+        )
+
+    _, axs = plt.subplots(2, 1, figsize=figsize, sharex=True, squeeze=False)
+
+    for ax, traces in zip(axs[:, 0], (values.T, np.diff(values, axis=1).T)):
+        if traces.shape[0]:
+            plot.plot_traces_1d(
+                ax, traces, **(dict[str, Any](linewidth=0.7, alpha=0.6) | kwargs)
+            )
+
+        ax.set_xlabel('iteration')
+    axs[0, 0].set(ylabel=name, title=title)
+    axs[1, 0].set_ylabel('change in ' + name)
+    axs[1, 0].set_yscale('symlog', linthresh=linthresh)
+    axs[1, 0].axhline(0, color='k', linewidth=0.5)
+    return axs[:, 0]
+
+
 def plot_dyn_linear_gaussian_comparison(
     ax,
     dynamics0: LinearGaussian,
