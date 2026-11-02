@@ -5,7 +5,6 @@ Switching Linear Dynamical System: discrete and continuous latent states.
 import typing
 
 import jax
-import jax.numpy as jnp
 
 from xxm.core import batch
 from xxm.core.affine import Affine
@@ -82,12 +81,8 @@ class Posterior(typing.NamedTuple):
         )
 
     def entropy(self) -> jax.Array:
-        terms = (
-            self.discrete.entropy(),
-            self.continuous.entropy(),
-        )
-
-        return jnp.sum(sum(terms), axis=-1)
+        r"""Entropy $\mathbb{H}[q(z)] + \mathbb{H}[q(x)]$ per chain, shape `batch_shape`."""
+        return self.discrete.entropy() + self.continuous.entropy()
 
 
 class Model(typing.NamedTuple, typing.Generic[EmissionsT]):

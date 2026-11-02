@@ -53,6 +53,18 @@ def test_exact_elbo_is_log_likelihood(facade, noise):
     np.testing.assert_allclose(elbo, objective, rtol=1e-4)
 
 
+@pytest.mark.parametrize(('facade', 'noise'), FACADE_NOISE)
+def test_elbo_sums_sequences(facade, noise):
+    """Every ELBO term is per sequence: duplicating a sequence doubles the ELBO."""
+    model = make_model(facade, sessions=1, noise=noise)
+    sequence = data_for(facade).datasets[0].select(0)
+    single = DatasetCollection.from_datasets((sequence,))
+    duplicated = DatasetCollection.from_datasets((sequence.broadcast((2,)),))
+    np.testing.assert_allclose(
+        infer(model, duplicated).elbo(), 2 * infer(model, single).elbo(), rtol=1e-5
+    )
+
+
 def test_collection_elbo_sums_sessions():
     model = make_model(xxm.GaussianHMM, sessions=1)
     assert isinstance(model, xxm.GaussianHMM)
