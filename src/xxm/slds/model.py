@@ -8,6 +8,9 @@ import typing
 import jax
 import jax.numpy as jnp
 
+from xxm.arhmm.init import DEFAULT_SELF_TRANSITION_PROB
+from xxm.arhmm.model import ARHMMInferredCollection, GaussianARHMM
+from xxm.arhmm.model import Inferred as ARHMMInferred
 from xxm.core import facade as _facade
 from xxm.core.data import DatasetCollection, Sequences
 from xxm.core.dists import io as dists_io
@@ -38,6 +41,7 @@ from xxm.core.latents.discrete import (
 from xxm.core.latents.gaussian import StateConditionedGaussian
 from xxm.core.latents.switching import GaussianLinearSwitchingDynamics
 from xxm.core.lengths import LengthsLike, LengthsSpec
+from xxm.core.optim import categorical as categorical_fit
 from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim import poisson as poisson_fit
 from xxm.core.optim.gaussian import CovarianceType
@@ -51,12 +55,12 @@ from .core import (
 )
 from .inference import elbo, infer_laplace, infer_variational
 from .init import (
-    DEFAULT_SELF_TRANSITION_PROB,
-    init_gaussian_via_arhmm,
-    init_gaussian_via_pca,
-    init_poisson_via_arhmm,
-    init_poisson_via_pca,
+    gaussian_emissions_from_pseudo_latents,
+    init_from_arhmm,
+    poisson_emissions_from_pseudo_latents,
 )
+from .init import pseudo_latents_via_log_pca as _pseudo_latents_via_log_pca
+from .init import pseudo_latents_via_pca as _pseudo_latents_via_pca
 from .io import SLDSParams
 from .learning import (
     fit_laplace_em,
@@ -440,6 +444,69 @@ class GaussianSLDS(VariationalSLDS[GaussianEmissions]):
     ) -> GaussianEmissions:
         return GaussianEmissions(dists_io.linear_gaussian_from_params(params))
 
+    @staticmethod
+    def pseudo_latents_via_pca(
+        data: DatasetCollection,
+        latent_dim: int,
+    ) -> DatasetCollection:
+        """PCA pseudo-latents per session, the AR-HMM data for `from_arhmm`."""
+        return _pseudo_latents_via_pca(data, latent_dim)
+
+    @classmethod
+    def from_single_arhmm(
+        cls,
+        source: ARHMMInferred[GaussianARHMM],
+        data: DatasetCollection,
+        *,
+        covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
+        pseudocount: float = categorical_fit.DEFAULT_PSEUDOCOUNT,
+        noise: CovarianceType = 'diagonal',
+    ) -> typing.Self:
+        """
+        Transfer a lag-1 AR-HMM inferred on pseudo-latents of `data`.
+
+        The AR-HMM supplies switching dynamics; emissions regress `data` on the
+        pseudo-latents.
+        """
+        return cls(
+            init_from_arhmm(
+                source.model.core,
+                source.data,
+                source.posterior,
+                gaussian_emissions_from_pseudo_latents(
+                    source.data,
+                    data,
+                    covariance_floor=covariance_floor,
+                    noise=noise,
+                ),
+                covariance_floor=covariance_floor,
+                pseudocount=pseudocount,
+            )
+        )
+
+    @classmethod
+    def from_arhmm(
+        cls,
+        source: ARHMMInferredCollection[GaussianARHMM],
+        data: DatasetCollection,
+        *,
+        covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
+        pseudocount: float = categorical_fit.DEFAULT_PSEUDOCOUNT,
+        noise: CovarianceType = 'diagonal',
+    ) -> GaussianSLDSCollection:
+        """Transfer inferred AR-HMMs one-to-one with the sessions of `data`."""
+        sessions = _session_data(source, data)
+        return GaussianSLDSCollection.from_inferred(
+            source,
+            lambda session, inferred: cls.from_single_arhmm(
+                inferred,
+                sessions[session],
+                covariance_floor=covariance_floor,
+                pseudocount=pseudocount,
+                noise=noise,
+            ),
+        )
+
     @classmethod
     def via_pca(
         cls,
@@ -452,22 +519,23 @@ class GaussianSLDS(VariationalSLDS[GaussianEmissions]):
         covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
         noise: CovarianceType = 'diagonal',
     ) -> GaussianSLDSCollection:
-        """Initialize an independent model for every session from PCA latents."""
+        """Transfer K-means AR-HMMs over per-session PCA pseudo-latents."""
 
-        return GaussianSLDSCollection.from_datasets(
-            key=key,
-            data=data,
-            init_fn=lambda session_key, dataset: cls(
-                init_gaussian_via_pca(
-                    session_key,
-                    dataset,
-                    num_states,
-                    latent_dim,
-                    self_transition_prob=self_transition_prob,
-                    covariance_floor=covariance_floor,
-                    noise=noise,
-                )
-            ),
+        pseudo_latents = cls.pseudo_latents_via_pca(data, latent_dim)
+        arhmms = GaussianARHMM.via_kmeans(
+            key,
+            pseudo_latents,
+            num_states,
+            num_lags=1,
+            self_transition_prob=self_transition_prob,
+            covariance_floor=covariance_floor,
+            noise='full',
+        )
+        return cls.from_arhmm(
+            arhmms.infer(pseudo_latents),
+            data,
+            covariance_floor=covariance_floor,
+            noise=noise,
         )
 
     @classmethod
@@ -484,24 +552,30 @@ class GaussianSLDS(VariationalSLDS[GaussianEmissions]):
         progress: Progress = 'AR-HMM',
         noise: CovarianceType = 'diagonal',
     ) -> GaussianSLDSCollection:
-        """Initialize an independent model for every session from a fitted AR-HMM."""
+        """
+        Transfer AR-HMMs fitted to per-session PCA pseudo-latents.
 
-        return GaussianSLDSCollection.from_datasets(
-            key=key,
-            data=data,
-            init_fn=lambda session_key, dataset: cls(
-                init_gaussian_via_arhmm(
-                    session_key,
-                    dataset,
-                    num_states,
-                    latent_dim,
-                    num_arhmm_iters=num_arhmm_iters,
-                    self_transition_prob=self_transition_prob,
-                    covariance_floor=covariance_floor,
-                    progress=progress,
-                    noise=noise,
-                )
-            ),
+        Equivalent to `pseudo_latents_via_pca`, `GaussianARHMM.via_kmeans` with
+        full noise, `fit`, and `from_arhmm`; run those steps to inspect the
+        AR-HMM fit.
+        """
+
+        pseudo_latents = cls.pseudo_latents_via_pca(data, latent_dim)
+        arhmms = GaussianARHMM.via_kmeans(
+            key,
+            pseudo_latents,
+            num_states,
+            num_lags=1,
+            self_transition_prob=self_transition_prob,
+            covariance_floor=covariance_floor,
+            noise='full',
+        )
+        fit = arhmms.fit(pseudo_latents, num_iters=num_arhmm_iters, progress=progress)
+        return cls.from_arhmm(
+            fit.inferred,
+            data,
+            covariance_floor=covariance_floor,
+            noise=noise,
         )
 
 
@@ -529,6 +603,63 @@ class PoissonSLDS(LaplaceSLDS[PoissonEmissions]):
     ) -> PoissonEmissions:
         return PoissonEmissions(dists_io.linear_poisson_from_params(params))
 
+    @staticmethod
+    def pseudo_latents_via_pca(
+        data: DatasetCollection,
+        latent_dim: int,
+        *,
+        count_floor: float = poisson_fit.DEFAULT_COUNT_FLOOR,
+    ) -> DatasetCollection:
+        """Log-count PCA pseudo-latents per session, the AR-HMM data for `from_arhmm`."""
+        return _pseudo_latents_via_log_pca(data, latent_dim, count_floor=count_floor)
+
+    @classmethod
+    def from_single_arhmm(
+        cls,
+        source: ARHMMInferred[GaussianARHMM],
+        data: DatasetCollection,
+        *,
+        covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
+        pseudocount: float = categorical_fit.DEFAULT_PSEUDOCOUNT,
+    ) -> typing.Self:
+        """
+        Transfer a lag-1 AR-HMM inferred on pseudo-latents of `data`.
+
+        The AR-HMM supplies switching dynamics; Poisson emissions regress the
+        counts in `data` on the pseudo-latents.
+        """
+        return cls(
+            init_from_arhmm(
+                source.model.core,
+                source.data,
+                source.posterior,
+                poisson_emissions_from_pseudo_latents(source.data, data),
+                covariance_floor=covariance_floor,
+                pseudocount=pseudocount,
+            )
+        )
+
+    @classmethod
+    def from_arhmm(
+        cls,
+        source: ARHMMInferredCollection[GaussianARHMM],
+        data: DatasetCollection,
+        *,
+        covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
+        pseudocount: float = categorical_fit.DEFAULT_PSEUDOCOUNT,
+    ) -> PoissonSLDSCollection:
+        """Transfer inferred AR-HMMs one-to-one with the sessions of `data`."""
+        sessions = _session_data(source, data)
+        return PoissonSLDSCollection.from_inferred(
+            source,
+            lambda session, inferred: cls.from_single_arhmm(
+                inferred,
+                sessions[session],
+                covariance_floor=covariance_floor,
+                pseudocount=pseudocount,
+            ),
+        )
+
     @classmethod
     def via_pca(
         cls,
@@ -541,22 +672,24 @@ class PoissonSLDS(LaplaceSLDS[PoissonEmissions]):
         covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
         count_floor: float = poisson_fit.DEFAULT_COUNT_FLOOR,
     ) -> PoissonSLDSCollection:
-        """Initialize an independent model for every session from log-count PCA."""
+        """Transfer K-means AR-HMMs over per-session log-count PCA pseudo-latents."""
 
-        return PoissonSLDSCollection.from_datasets(
-            key=key,
-            data=data,
-            init_fn=lambda session_key, dataset: cls(
-                init_poisson_via_pca(
-                    session_key,
-                    dataset,
-                    num_states,
-                    latent_dim,
-                    self_transition_prob=self_transition_prob,
-                    covariance_floor=covariance_floor,
-                    count_floor=count_floor,
-                )
-            ),
+        pseudo_latents = cls.pseudo_latents_via_pca(
+            data, latent_dim, count_floor=count_floor
+        )
+        arhmms = GaussianARHMM.via_kmeans(
+            key,
+            pseudo_latents,
+            num_states,
+            num_lags=1,
+            self_transition_prob=self_transition_prob,
+            covariance_floor=covariance_floor,
+            noise='full',
+        )
+        return cls.from_arhmm(
+            arhmms.infer(pseudo_latents),
+            data,
+            covariance_floor=covariance_floor,
         )
 
     @classmethod
@@ -573,25 +706,41 @@ class PoissonSLDS(LaplaceSLDS[PoissonEmissions]):
         count_floor: float = poisson_fit.DEFAULT_COUNT_FLOOR,
         progress: Progress = 'AR-HMM',
     ) -> PoissonSLDSCollection:
-        """Initialize an independent model for every session from a fitted AR-HMM."""
+        """
+        Transfer AR-HMMs fitted to per-session log-count PCA pseudo-latents.
 
-        return PoissonSLDSCollection.from_datasets(
-            key=key,
-            data=data,
-            init_fn=lambda session_key, dataset: cls(
-                init_poisson_via_arhmm(
-                    session_key,
-                    dataset,
-                    num_states,
-                    latent_dim,
-                    num_arhmm_iters=num_arhmm_iters,
-                    self_transition_prob=self_transition_prob,
-                    covariance_floor=covariance_floor,
-                    count_floor=count_floor,
-                    progress=progress,
-                )
-            ),
+        Equivalent to `pseudo_latents_via_pca`, `GaussianARHMM.via_kmeans`
+        with full noise, `fit`, and `from_arhmm`; run those steps to inspect the
+        AR-HMM fit.
+        """
+
+        pseudo_latents = cls.pseudo_latents_via_pca(
+            data, latent_dim, count_floor=count_floor
         )
+        arhmms = GaussianARHMM.via_kmeans(
+            key,
+            pseudo_latents,
+            num_states,
+            num_lags=1,
+            self_transition_prob=self_transition_prob,
+            covariance_floor=covariance_floor,
+            noise='full',
+        )
+        fit = arhmms.fit(pseudo_latents, num_iters=num_arhmm_iters, progress=progress)
+        return cls.from_arhmm(fit.inferred, data, covariance_floor=covariance_floor)
+
+
+def _session_data(
+    source: ARHMMInferredCollection[GaussianARHMM],
+    data: DatasetCollection,
+) -> tuple[DatasetCollection, ...]:
+    """Split `data` into single-session collections matching `source`."""
+    if len(data.datasets) != len(source.posteriors):
+        raise ValueError(
+            'expected one AR-HMM session per data session; got '
+            f'{len(source.posteriors)} and {len(data.datasets)}'
+        )
+    return tuple(DatasetCollection((dataset,)) for dataset in data.datasets)
 
 
 SLDSFacadeT = typing.TypeVar('SLDSFacadeT', bound='SLDS[typing.Any]')

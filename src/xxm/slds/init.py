@@ -1,4 +1,4 @@
-"""Initialize switching dynamics from PCA latents and autoregressive HMMs."""
+"""Initialize switching dynamics from PCA pseudo-latents and autoregressive HMMs."""
 
 import typing
 
@@ -6,15 +6,13 @@ import jax
 import jax.numpy as jnp
 
 from xxm.arhmm.core import Model as ARHMMModel
-from xxm.arhmm.data import ARDataset, ARDatasetCollection
-from xxm.arhmm.inference import infer_exact as infer_arhmm
-from xxm.arhmm.init import (
-    DEFAULT_SELF_TRANSITION_PROB,
-    init_gaussian_via_kmeans,
+from xxm.arhmm.core import Posterior as ARHMMPosterior
+from xxm.arhmm.data import ARDatasetCollection
+from xxm.core.data import Dataset, DatasetCollection
+from xxm.core.dists.gaussian import (
+    FullLinearGaussian,
+    LinearGaussian,
 )
-from xxm.arhmm.learning import fit_em as fit_arhmm
-from xxm.core.data import Dataset
-from xxm.core.dists.gaussian import FullLinearGaussian
 from xxm.core.emissions.collection import ContinuousEmissionsCollection
 from xxm.core.emissions.continuous import (
     EmissionsT,
@@ -30,7 +28,6 @@ from xxm.core.optim import gaussian_full as gaussian_full_fit
 from xxm.core.optim import poisson as poisson_fit
 from xxm.core.optim.batch import filter_valid_batches
 from xxm.core.optim.gaussian import CovarianceType
-from xxm.core.optim.loop import Progress
 from xxm.lds.init import (
     _masked_pca_latents,
     observed_rows,
@@ -44,13 +41,9 @@ from .core import Model
 
 def _validate_initialization(
     data: Dataset,
-    num_states: int,
     latent_dim: int,
 ) -> None:
-    """Validate requirements specific to AR-HMM-based SLDS initialization."""
-    if num_states < 1:
-        raise ValueError('num_states must be at least 1')
-
+    """Validate requirements specific to PCA pseudo-latent SLDS initialization."""
     _validate_pca_initialization(
         data,
         latent_dim,
@@ -68,26 +61,23 @@ def _validate_initialization(
         )
 
 
-def _latent_dataset(
-    latents: jax.Array,
+def _pca_pseudo_latents(
+    values: jax.Array,  # (*B, T, D_y)
     data: Dataset,
-) -> ARDataset:
+    latent_dim: int,
+) -> Dataset:
     """
-    Wrap PCA latents as autonomous pseudo-observations for the auxiliary AR-HMM.
+    Project `values` onto PCA pseudo-latents, wrapped as pseudo-observations.
 
-    Source lengths and visibility are preserved. Source external inputs are not
-    forwarded: the auxiliary lag-1 AR-HMM is used only to discover switching
-    structure in latent dynamics.
+    One PCA space is fit from all visible valid rows. Source lengths and
+    visibility are preserved; inputs are not forwarded, since the auxiliary
+    AR-HMM only discovers switching structure in latent dynamics.
     """
-    data = Dataset.from_padded(
-        observations=latents,
+    _validate_initialization(data, latent_dim)
+    return Dataset.from_padded(
+        observations=_masked_pca_latents(values, data, latent_dim),
         lengths=data.lengths,
         visible=data.visible,
-    )
-
-    return ARDataset.from_dataset(
-        data,
-        num_lags=1,
     )
 
 
@@ -95,30 +85,30 @@ def _latent_dataset(
 # only targets whose full AR history is also visible. Revisit whether
 # ARDataset should retain target-only visibility separately, allowing this
 # marginal latent-initial fit to use visible x_t even when x_{t-1:t-L} is hidden.
-def _init_state_conditioned_initial_from_latents(
-    latents: jax.Array,  # (*B, R, D)
+def _init_state_conditioned_initial_from_pseudo_latents(
+    pseudo_latents: jax.Array,  # (*B, R, D)
     state_probs: jax.Array,  # (*B, R, K)
     weights: jax.Array,  # (*B, R)
     covariance_floor: float,
 ) -> StateConditionedGaussian:
     """
-    Estimate state-conditioned latent Gaussians from accessible latent samples.
+    Estimate state-conditioned latent Gaussians from accessible pseudo-latents.
 
     Batch and time axes are pooled. States with insufficient effective weight
-    fall back to the global latent Gaussian.
+    fall back to the global pseudo-latent Gaussian.
     """
-    latent_dim = latents.shape[-1]
+    latent_dim = pseudo_latents.shape[-1]
     num_states = state_probs.shape[-1]
 
-    if latents.shape[:-1] != state_probs.shape[:-1]:
+    if pseudo_latents.shape[:-1] != state_probs.shape[:-1]:
         raise ValueError(
-            'latents and state probabilities must share batch and time dimensions'
+            'pseudo-latents and state probabilities must share batch and time dimensions'
         )
 
-    if weights.shape != latents.shape[:-1]:
-        raise ValueError('weights must match latent batch and time dimensions')
+    if weights.shape != pseudo_latents.shape[:-1]:
+        raise ValueError('weights must match pseudo-latent batch and time dimensions')
 
-    values = latents.reshape((-1, latent_dim))
+    values = pseudo_latents.reshape((-1, latent_dim))
 
     flat_weights = weights.reshape(-1)
 
@@ -156,39 +146,75 @@ def _init_state_conditioned_initial_from_latents(
     )
 
 
-def _init_from_arhmm(
-    latent_data: ARDataset,
+def _full_dynamics(dist: LinearGaussian) -> FullLinearGaussian:
+    """Promote diagonal AR-HMM noise to the full noise of SLDS dynamics."""
+    if isinstance(dist, FullLinearGaussian):
+        return dist
+
+    return FullLinearGaussian.from_components(
+        dist.affine.coefficients,
+        dist.affine.bias,
+        dist.variances[..., None] * jnp.eye(dist.output_dim, dtype=dist.dtype),
+    )
+
+
+def init_from_arhmm(
+    arhmm: ARHMMModel[LinearGaussian],
+    pseudo_latents: DatasetCollection,
+    posterior: ARHMMPosterior,
     emissions: ContinuousEmissionsCollection[EmissionsT],
-    arhmm: ARHMMModel[FullLinearGaussian],
-    covariance_floor: float,
-    pseudocount: float,
+    *,
+    covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
+    pseudocount: float = categorical_fit.DEFAULT_PSEUDOCOUNT,
 ) -> Model[EmissionsT]:
     """
-    Construct an SLDS from a lag-1 Gaussian AR-HMM over latent values.
+    Construct an SLDS from a lag-1 Gaussian AR-HMM over pseudo-latents.
 
-    ``latent_data`` is already the prepared lag-1 AR representation.
-    Its compact observation row ``r`` is latent ``x[..., r + 1, :]``,
-    and AR-HMM posterior state ``r`` therefore corresponds to SLDS
-    switching state ``z[..., r + 1]`` under the incoming-state convention.
+    `posterior` is the AR-HMM posterior over `pseudo_latents`, and `emissions`
+    map each session's pseudo-latents to its observations. AR-HMM transitions
+    and regression become the SLDS transitions and dynamics; diagonal AR-HMM
+    noise is promoted to full.
+
+    In the lag-1 AR representation, compact row ``r`` is pseudo-latent
+    ``x[..., r + 1, :]``, and AR-HMM posterior state ``r`` therefore
+    corresponds to SLDS switching state ``z[..., r + 1]`` under the
+    incoming-state convention.
 
     Valid AR-state occupancies initialize the proxy boundary distribution
-    over ``z[0]``. Accessible prepared latent targets initialize the proxy
-    state-conditioned boundary distribution ``p(x[0] | z[0])``.
+    over ``z[0]``. Accessible pseudo-latent targets initialize the proxy
+    state-conditioned boundary distribution ``p(x[0] | z[0])``. Both pool all
+    sessions; SLDS dynamics are shared, so the AR-HMM must have one regression.
     """
     if arhmm.num_lags != 1:
         raise ValueError('SLDS initialization requires a lag-1 Gaussian AR-HMM')
 
-    inferred = infer_arhmm(
-        arhmm,
-        ARDatasetCollection((latent_data,)),
-    )
+    dist = arhmm.emissions.single().dist
 
-    state_probs = inferred.posterior.state_probs
-    # (*B, R, K)
+    if len(emissions.emissions) != len(pseudo_latents.datasets):
+        raise ValueError(
+            'expected emissions for every pseudo-latent session; got '
+            f'{len(emissions.emissions)} for {len(pseudo_latents.datasets)}'
+        )
+
+    if any(dim != dist.output_dim for dim in pseudo_latents.observation_dims):
+        raise ValueError(
+            f'AR-HMM observation dimension {dist.output_dim} must match '
+            f'pseudo-latent dimensions {pseudo_latents.observation_dims}'
+        )
+
+    ar_data = ARDatasetCollection.from_datasets(pseudo_latents, num_lags=1)
+
+    state_probs = posterior.state_probs
+    # (N, R, K), sequences pooled across sessions
 
     # One validity value per AR state / target row.
-    valid = latent_data.lengths.to_mask(latent_data.max_steps).values
-    # (*B, R)
+    valid = jnp.concatenate(
+        [
+            dataset.lengths.to_mask(dataset.max_steps).values
+            for dataset in ar_data.datasets
+        ]
+    )
+    # (N, R)
 
     if state_probs.shape[:-1] != valid.shape:
         raise ValueError(
@@ -213,25 +239,21 @@ def _init_from_arhmm(
     )
 
     # ARDataset observations are ALREADY the lag-1 targets x[..., 1:, :].
-    latent_targets = latent_data.observations.values
-    # (*B, R, D_x)
-
     # Conservative initialization: use rows whose complete AR window is
     # available. No additional [..., 1:] shift belongs here.
-    target_weights = latent_data.observation_weights()
-    # (*B, R)
-
-    latent_initial = _init_state_conditioned_initial_from_latents(
-        latents=latent_targets,
+    latent_initial = _init_state_conditioned_initial_from_pseudo_latents(
+        pseudo_latents=jnp.concatenate(
+            [dataset.observations.values for dataset in ar_data.datasets]
+        ),  # (N, R, D_x)
         state_probs=state_probs,
-        weights=target_weights,
+        weights=jnp.concatenate(
+            [dataset.observation_weights() for dataset in ar_data.datasets]
+        ),  # (N, R)
         covariance_floor=covariance_floor,
     )
 
     dynamics = GaussianLinearSwitchingDynamics(
-        dist=arhmm.emissions.single().dist.reshape_input(
-            (latent_data.observation_dim,),
-        )
+        dist=_full_dynamics(dist).reshape_input((dist.output_dim,))
     )
 
     return Model(
@@ -243,250 +265,128 @@ def _init_from_arhmm(
     )
 
 
-def masked_pca_latents(
-    values: jax.Array,  # (*B, T, D_y)
-    data: Dataset,
-    num_states: int,
+def _pseudo_latents_via_pca(
+    data: DatasetCollection,
     latent_dim: int,
-) -> jax.Array:  # (*B, T, D_x)
-    """Validate switching initialization, then project `values` onto PCA latents.
+    transform: typing.Callable[[Dataset], jax.Array],
+) -> DatasetCollection:
+    """Project each session's transformed observations onto its own PCA space."""
+    return DatasetCollection(
+        tuple(
+            _pca_pseudo_latents(transform(dataset), dataset, latent_dim)
+            for dataset in data.datasets
+        )
+    )
 
-    `values` are the observations in the space PCA should operate on, e.g. the
-    raw observations or a link-transformed version of them.
+
+def pseudo_latents_via_pca(
+    data: DatasetCollection,
+    latent_dim: int,
+) -> DatasetCollection:
     """
-    _validate_initialization(data, num_states, latent_dim)
-    return _masked_pca_latents(values, data, latent_dim)
+    PCA pseudo-latents of the observations, estimated independently per session.
+
+    Sessions do not share a PCA space, so their pseudo-latent coordinates are
+    unrelated.
+    """
+    return _pseudo_latents_via_pca(
+        data,
+        latent_dim,
+        lambda dataset: dataset.observations.values,
+    )
 
 
-def init_via_pca(
-    key: jax.Array,
-    latents: jax.Array,  # (*B, T, D_x)
-    data: Dataset,
-    emissions: ContinuousEmissionsCollection[EmissionsT],
-    num_states: int,
+def pseudo_latents_via_log_pca(
+    data: DatasetCollection,
+    latent_dim: int,
     *,
-    self_transition_prob: float = DEFAULT_SELF_TRANSITION_PROB,
-    covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
-    pseudocount: float = categorical_fit.DEFAULT_PSEUDOCOUNT,
-) -> Model[EmissionsT]:
-    """Initialize switching structure from a K-means lag-1 AR-HMM over latents.
-
-    One PCA space is fit from all visible valid observation rows. The auxiliary
-    AR-HMM clusters complete visible latent transition windows across all
-    independent sequences.
+    count_floor: float = poisson_fit.DEFAULT_COUNT_FLOOR,
+) -> DatasetCollection:
     """
-    latent_data = _latent_dataset(latents, data)
+    PCA pseudo-latents of stabilized log counts, estimated independently per session.
 
-    # The AR-HMM noise becomes the SLDS dynamics noise, which stays full.
-    arhmm = typing.cast(
-        ARHMMModel[FullLinearGaussian],
-        init_gaussian_via_kmeans(
-            key,
-            latent_data,
-            num_states,
-            self_transition_prob=self_transition_prob,
-            covariance_floor=covariance_floor,
-            noise='full',
+    Sessions do not share a PCA space, so their pseudo-latent coordinates are
+    unrelated.
+    """
+    return _pseudo_latents_via_pca(
+        data,
+        latent_dim,
+        lambda dataset: poisson_fit.inverse_exp_link(
+            dataset.weighted_observations().safe_values(),
+            count_floor=count_floor,
         ),
     )
 
-    return _init_from_arhmm(
-        latent_data=latent_data,
-        emissions=emissions,
-        arhmm=arhmm,
-        covariance_floor=covariance_floor,
-        pseudocount=pseudocount,
+
+def _observed_session_rows(
+    pseudo_latents: DatasetCollection,
+    data: DatasetCollection,
+) -> tuple[tuple[jax.Array, jax.Array], ...]:
+    """Pair each session's observed pseudo-latent and observation rows."""
+    if len(pseudo_latents.datasets) != len(data.datasets):
+        raise ValueError(
+            'pseudo-latents and data must have the same number of sessions; got '
+            f'{len(pseudo_latents.datasets)} and {len(data.datasets)}'
+        )
+
+    if data.input_dim != 0:
+        raise NotImplementedError(
+            'SLDS initialization with known dynamics inputs is not yet supported'
+        )
+
+    for session, (latents, dataset) in enumerate(
+        zip(pseudo_latents.datasets, data.datasets, strict=True)
+    ):
+        if not (
+            latents.batch_shape == dataset.batch_shape
+            and latents.max_steps == dataset.max_steps
+            and bool(jnp.array_equal(latents.lengths.values, dataset.lengths.values))
+            and bool(jnp.array_equal(latents.visible.values, dataset.visible.values))
+        ):
+            raise ValueError(
+                f'session {session}: pseudo-latents and data must share '
+                'batch shape, lengths, and visibility'
+            )
+
+    return tuple(
+        observed_rows(latents.observations.values, dataset)
+        for latents, dataset in zip(pseudo_latents.datasets, data.datasets, strict=True)
     )
 
 
-def init_via_arhmm(
-    key: jax.Array,
-    latents: jax.Array,  # (*B, T, D_x)
-    data: Dataset,
-    emissions: ContinuousEmissionsCollection[EmissionsT],
-    num_states: int,
+def gaussian_emissions_from_pseudo_latents(
+    pseudo_latents: DatasetCollection,
+    data: DatasetCollection,
     *,
-    num_arhmm_iters: int = 10,
-    self_transition_prob: float = DEFAULT_SELF_TRANSITION_PROB,
     covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
-    pseudocount: float = categorical_fit.DEFAULT_PSEUDOCOUNT,
-    progress: Progress = 'AR-HMM',
-) -> Model[EmissionsT]:
-    """Initialize switching structure by fitting a lag-1 AR-HMM to latents."""
-    latent_data = _latent_dataset(latents, data)
-
-    # The AR-HMM noise becomes the SLDS dynamics noise, which stays full.
-    arhmm = typing.cast(
-        ARHMMModel[FullLinearGaussian],
-        init_gaussian_via_kmeans(
-            key,
-            latent_data,
-            num_states,
-            self_transition_prob=self_transition_prob,
-            covariance_floor=covariance_floor,
-            noise='full',
-        ),
-    )
-
-    arhmm = fit_arhmm(
-        arhmm,
-        ARDatasetCollection((latent_data,)),
-        num_iters=num_arhmm_iters,
-        progress=progress,
-    ).state.model
-
-    return _init_from_arhmm(
-        latent_data=latent_data,
-        emissions=emissions,
-        arhmm=arhmm,
-        covariance_floor=covariance_floor,
-        pseudocount=pseudocount,
-    )
-
-
-def _gaussian_latents(
-    data: Dataset,
-    num_states: int,
-    latent_dim: int,
-    covariance_floor: float,
     noise: CovarianceType,
-) -> tuple[jax.Array, ContinuousEmissionsCollection[GaussianEmissions]]:
-    """PCA latents of the observations and Gaussian emissions fitted to them."""
-    latents = masked_pca_latents(data.observations.values, data, num_states, latent_dim)
-    latent_rows, observation_rows = observed_rows(latents, data)
-    emissions = GaussianEmissions.from_latents(
-        latent_rows,
-        observation_rows,
-        covariance_floor=covariance_floor,
-        noise=noise,
-    )
-    return latents, ContinuousEmissionsCollection.from_single(emissions)
-
-
-def _poisson_latents(
-    data: Dataset,
-    num_states: int,
-    latent_dim: int,
-    count_floor: float,
-) -> tuple[jax.Array, ContinuousEmissionsCollection[PoissonEmissions]]:
-    """PCA latents of stabilized log counts and Poisson emissions fitted to them."""
-    log_counts = poisson_fit.inverse_exp_link(
-        data.weighted_observations().safe_values(),
-        count_floor=count_floor,
-    )
-    latents = masked_pca_latents(log_counts, data, num_states, latent_dim)
-    latent_rows, observation_rows = observed_rows(latents, data)
-    emissions = PoissonEmissions.from_latents(latent_rows, observation_rows)
-    return latents, ContinuousEmissionsCollection.from_single(emissions)
-
-
-def init_gaussian_via_pca(
-    key: jax.Array,
-    data: Dataset,
-    num_states: int,
-    latent_dim: int,
-    *,
-    self_transition_prob: float = DEFAULT_SELF_TRANSITION_PROB,
-    covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
-    pseudocount: float = categorical_fit.DEFAULT_PSEUDOCOUNT,
-    noise: CovarianceType,
-) -> Model[GaussianEmissions]:
-    """Initialize a Gaussian SLDS from PCA latents and a K-means AR-HMM."""
-    latents, emissions = _gaussian_latents(
-        data, num_states, latent_dim, covariance_floor, noise
-    )
-    return init_via_pca(
-        key,
-        latents,
-        data,
-        emissions,
-        num_states,
-        self_transition_prob=self_transition_prob,
-        covariance_floor=covariance_floor,
-        pseudocount=pseudocount,
+) -> ContinuousEmissionsCollection[GaussianEmissions]:
+    """Regress each session's observations on its pseudo-latents."""
+    return ContinuousEmissionsCollection(
+        tuple(
+            GaussianEmissions.from_latents(
+                latent_rows,
+                observation_rows,
+                covariance_floor=covariance_floor,
+                noise=noise,
+            )
+            for latent_rows, observation_rows in _observed_session_rows(
+                pseudo_latents, data
+            )
+        )
     )
 
 
-def init_gaussian_via_arhmm(
-    key: jax.Array,
-    data: Dataset,
-    num_states: int,
-    latent_dim: int,
-    *,
-    num_arhmm_iters: int = 10,
-    self_transition_prob: float = DEFAULT_SELF_TRANSITION_PROB,
-    covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
-    pseudocount: float = categorical_fit.DEFAULT_PSEUDOCOUNT,
-    progress: Progress = 'AR-HMM',
-    noise: CovarianceType,
-) -> Model[GaussianEmissions]:
-    """Initialize a Gaussian SLDS by fitting a lag-1 AR-HMM to PCA latents."""
-    latents, emissions = _gaussian_latents(
-        data, num_states, latent_dim, covariance_floor, noise
-    )
-    return init_via_arhmm(
-        key,
-        latents,
-        data,
-        emissions,
-        num_states,
-        num_arhmm_iters=num_arhmm_iters,
-        self_transition_prob=self_transition_prob,
-        covariance_floor=covariance_floor,
-        pseudocount=pseudocount,
-        progress=progress,
-    )
-
-
-def init_poisson_via_pca(
-    key: jax.Array,
-    data: Dataset,
-    num_states: int,
-    latent_dim: int,
-    *,
-    self_transition_prob: float = DEFAULT_SELF_TRANSITION_PROB,
-    covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
-    pseudocount: float = categorical_fit.DEFAULT_PSEUDOCOUNT,
-    count_floor: float = poisson_fit.DEFAULT_COUNT_FLOOR,
-) -> Model[PoissonEmissions]:
-    """Initialize a Poisson SLDS from inverse-link PCA latents and a K-means AR-HMM."""
-    latents, emissions = _poisson_latents(data, num_states, latent_dim, count_floor)
-    return init_via_pca(
-        key,
-        latents,
-        data,
-        emissions,
-        num_states,
-        self_transition_prob=self_transition_prob,
-        covariance_floor=covariance_floor,
-        pseudocount=pseudocount,
-    )
-
-
-def init_poisson_via_arhmm(
-    key: jax.Array,
-    data: Dataset,
-    num_states: int,
-    latent_dim: int,
-    *,
-    num_arhmm_iters: int = 10,
-    self_transition_prob: float = DEFAULT_SELF_TRANSITION_PROB,
-    covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
-    pseudocount: float = categorical_fit.DEFAULT_PSEUDOCOUNT,
-    count_floor: float = poisson_fit.DEFAULT_COUNT_FLOOR,
-    progress: Progress = 'AR-HMM',
-) -> Model[PoissonEmissions]:
-    """Initialize a Poisson SLDS by fitting an AR-HMM to inverse-link PCA latents."""
-    latents, emissions = _poisson_latents(data, num_states, latent_dim, count_floor)
-    return init_via_arhmm(
-        key,
-        latents,
-        data,
-        emissions,
-        num_states,
-        num_arhmm_iters=num_arhmm_iters,
-        self_transition_prob=self_transition_prob,
-        covariance_floor=covariance_floor,
-        pseudocount=pseudocount,
-        progress=progress,
+def poisson_emissions_from_pseudo_latents(
+    pseudo_latents: DatasetCollection,
+    data: DatasetCollection,
+) -> ContinuousEmissionsCollection[PoissonEmissions]:
+    """Poisson-regress each session's counts on its pseudo-latents."""
+    return ContinuousEmissionsCollection(
+        tuple(
+            PoissonEmissions.from_latents(latent_rows, observation_rows)
+            for latent_rows, observation_rows in _observed_session_rows(
+                pseudo_latents, data
+            )
+        )
     )

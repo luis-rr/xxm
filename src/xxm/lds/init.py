@@ -71,23 +71,6 @@ def pca_latents(
     return _pca_projection(observations, latent_dim).apply(observations)
 
 
-def pca_latents_poisson(
-    observations: jax.Array,
-    latent_dim: int,
-    count_floor: float,
-) -> jax.Array:
-    """Project stabilized log-count observations onto PCA latents."""
-    transformed = poisson_fit.inverse_exp_link(
-        observations,
-        count_floor=count_floor,
-    )
-
-    return pca_latents(
-        transformed,
-        latent_dim,
-    )
-
-
 def _masked_pca_latents(
     values: jax.Array,
     data: Dataset,

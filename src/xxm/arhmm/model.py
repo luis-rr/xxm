@@ -22,6 +22,7 @@ from xxm.core.io import chains, hdf5
 from xxm.core.io.hdf5 import PathLike, load_model_params
 from xxm.core.latents.discrete import categorical_from_params
 from xxm.core.lengths import Lengths, LengthsLike, LengthsSpec
+from xxm.core.optim import gaussian as gaussian_fit
 from xxm.core.optim.gaussian import CovarianceType
 from xxm.core.optim.loop import Progress
 from xxm.hmm.io import HMMParams
@@ -346,6 +347,7 @@ class GaussianARHMM(ARHMM[LinearGaussian]):
         num_lags: int,
         *,
         self_transition_prob: float = DEFAULT_SELF_TRANSITION_PROB,
+        covariance_floor: float = gaussian_fit.DEFAULT_COV_FLOOR_INIT,
         noise: CovarianceType = 'diagonal',
     ) -> GaussianARHMMCollection:
         """Initialize an independent model for every session with K-means."""
@@ -359,6 +361,7 @@ class GaussianARHMM(ARHMM[LinearGaussian]):
                     ARDataset.from_dataset(dataset, num_lags),
                     num_states,
                     self_transition_prob=self_transition_prob,
+                    covariance_floor=covariance_floor,
                     noise=noise,
                 )
             ),

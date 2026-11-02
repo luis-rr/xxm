@@ -9,10 +9,11 @@ from .inference import (
     infer_variational,
 )
 from .init import (
-    init_gaussian_via_arhmm,
-    init_gaussian_via_pca,
-    init_poisson_via_arhmm,
-    init_poisson_via_pca,
+    gaussian_emissions_from_pseudo_latents,
+    init_from_arhmm,
+    poisson_emissions_from_pseudo_latents,
+    pseudo_latents_via_log_pca,
+    pseudo_latents_via_pca,
 )
 from .io import SLDSParams
 from .learning import (
@@ -34,10 +35,11 @@ __all__ = [
     'SLDSParams',
     'fit_laplace_em',
     'fit_variational_em',
+    'gaussian_emissions_from_pseudo_latents',
     'infer_laplace',
     'infer_variational',
-    'init_gaussian_via_arhmm',
-    'init_gaussian_via_pca',
-    'init_poisson_via_arhmm',
-    'init_poisson_via_pca',
+    'init_from_arhmm',
+    'poisson_emissions_from_pseudo_latents',
+    'pseudo_latents_via_log_pca',
+    'pseudo_latents_via_pca',
 ]

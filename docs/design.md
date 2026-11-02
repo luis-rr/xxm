@@ -325,9 +325,7 @@ In addition, each supported concrete model has a lightweight facade class, such 
 Facade classes provide a compact model-oriented API:
 
 * `from_params` constructor hides unnecessary nesting in the core representation;
-* `via_kmeans`, `via_pca`, and other `via_*` constructors initialize from observations;
-* `from_lds` transfers an existing source facade without fitting it.
-  Transfer and warmstart orchestration live in the target family’s `init.py`.
+* `via_*`, `from_*`, and `from_single_*` constructors build starting models (see [Initialization](#initialization));
 * `sample` generates data from the model
 * `infer` invokes the inference algorithm appropriate for that concrete model
 * `fit` invokes its corresponding learning procedure
@@ -364,6 +362,15 @@ Temporal object store temporal values `(*B, T, *D)`, exposes the dense horizon a
 Temporal accessors return `Sequences`, whose `get(index)` retrieves one cropped array on the host. A normalized single trajectory requires `get()`. `unpack()` is a convenience for unbatched or flat sequences, and `stack()` constructs rectangular batch hierarchies.
 
 Data, facades, and their results are inspectable: `repr` gives a compact text summary labelled with property names, and notebooks render the same summary as a markdown table labelled with math symbols. Summaries report structure and dimensions, never array values, and remain valid under tracing. Family dataclasses inheriting a summary pass `repr=False`.
+
+### Initialization
+
+Starting models are constructed in each family's `init.py` and exposed on facades:
+
+* `via_*` constructors, such as `via_kmeans` and `via_pca`, initialize one independent model per session from observations. When initialization passes through another model, `via_*` is only a thin composition of public steps (source construction, fitting, and `from_*`), so each step can also be run and inspected on its own.
+* `from_*` constructors, such as `from_lds` and `from_slds`, transfer an inferred source collection, such as `fit.inferred`, one-to-one by session without fitting, and may reuse its posterior. `from_single_*` transfers one inferred source. Both stay thin; transfer logic lives in the target family's `init.py`.
+* `init_<subtype>_via_*` and `init_<subtype>_from_*` are the corresponding model-construction functions in `init.py`; generic transfers may omit the subtype. Private constructors retain a leading underscore.
+* Intermediate estimates that are not model latents, such as the PCA pseudo-latents an AR-HMM is fitted to before transfer to an SLDS, are plain `DatasetCollection`s.
 
 
 ## JAX and model representation
@@ -452,9 +459,7 @@ Names should follow standard statistical terminology while remaining readable to
 
 Use consistent verbs:
 
-* Facade `from_*` — transfer an existing simpler model without fitting its parameters;
-* Facade `via_*` — initialize from observations, optionally fitting an intermediate model;
-* `init_<subtype>_via_*` and `init_<subtype>_from_*` — model-construction functions in `init.py`; generic transfers may omit the subtype. Private constructors retain a leading underscore.
+* `via_*`, `from_*`, `from_single_*`, `init_*` — construct starting models (see [Initialization](#initialization));
 * `from_params` — construct directly from explicit parameters;
 * `infer_*` — compute posterior quantities for fixed model parameters;
 * `fit_*` — run an iterative learning procedure;

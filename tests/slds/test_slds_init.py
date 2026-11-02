@@ -78,3 +78,39 @@ def test_slds_arhmm_warm_start(facade):
     assert model.latent_dim == 1
     for leaf in jax.tree.leaves(model):
         assert np.isfinite(leaf).all()
+
+
+@pytest.mark.parametrize('facade', [xxm.GaussianSLDS, xxm.PoissonSLDS])
+def test_slds_via_arhmm_matches_explicit_steps(facade):
+    observations = jnp.array(
+        [
+            [0.0, 1.0],
+            [1.0, 0.0],
+            [2.0, 1.0],
+            [1.0, -1.0],
+            [0.0, 0.0],
+        ]
+    )
+    data = DatasetCollection.from_datasets((Dataset.from_array(observations),))
+    key = jax.random.key(3)
+
+    pseudo_latents = facade.pseudo_latents_via_pca(data, latent_dim=1)
+    fit = xxm.GaussianARHMM.via_kmeans(
+        key, pseudo_latents, num_states=2, num_lags=1, noise='full'
+    ).fit(pseudo_latents, num_iters=2)
+    assert fit.objective_traces.shape[-1] == 3
+    explicit = facade.from_arhmm(fit.inferred, data).get()
+
+    integrated = facade.via_arhmm(
+        key,
+        data,
+        num_states=2,
+        latent_dim=1,
+        num_arhmm_iters=2,
+        progress=False,
+    ).get()
+
+    for left, right in zip(
+        jax.tree.leaves(explicit), jax.tree.leaves(integrated), strict=True
+    ):
+        np.testing.assert_allclose(left, right)

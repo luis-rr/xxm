@@ -539,6 +539,25 @@ class FacadeCollection(typing.Generic[FacadeT, InferredT, InferredCollectionT]):
         return cls(models=models)
 
     @classmethod
+    def from_inferred(
+        cls,
+        source: InferredCollection[typing.Any, typing.Any],
+        transfer_fn: typing.Callable[[int, typing.Any], FacadeT],
+    ) -> typing.Self:
+        """
+        Transfer independent inferred source sessions one-to-one.
+
+        `transfer_fn` receives each session index and its family-specific
+        single-session `Inferred`.
+        """
+        return cls(
+            models=tuple(
+                transfer_fn(session, source.get(session))
+                for session in range(len(source.posteriors))
+            )
+        )
+
+    @classmethod
     def _inferred_collection_cls(cls) -> type[InferredCollectionT]:
         """Select the family's inferred collection; override once per family."""
         raise NotImplementedError(
