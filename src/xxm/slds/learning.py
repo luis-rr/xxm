@@ -12,7 +12,12 @@ from xxm.core.optim.loop import fit_one as _fit_one
 from xxm.core.optim.newton import DEFAULT_OPTIM_PARAMS, OptimParams
 
 from .core import Model, Posterior
-from .inference import infer_laplace, infer_variational
+from .inference import (
+    infer_laplace,
+    infer_variational,
+    update_laplace,
+    update_variational,
+)
 
 # ----------------------------------------------------------------------------------------------------
 # Variational structured mean-field EM (for Gaussian emissions)
@@ -28,11 +33,11 @@ def variational_em_step(
 
     model = inferred.model.fit_params(inferred.posterior, data)
 
-    return infer_variational(
+    return update_variational(
         model,
         data,
+        inferred.posterior.discrete,
         num_iters=num_inference_iters,
-        initial_latents=inferred.posterior.continuous.means,
     )
 
 
@@ -85,11 +90,11 @@ def laplace_em_step(
         data,
     )
 
-    return infer_laplace(
+    return update_laplace(
         model,
         data,
+        inferred.posterior,
         num_iters=num_inference_iters,
-        initial_latents=inferred.posterior.continuous.means,
         params=params,
     )
 
@@ -105,6 +110,10 @@ def fit_laplace_em(
     progress: Progress = 'Laplace EM',
 ) -> Fit[InferenceState[Model[LaplaceEmissionsT], Posterior]]:
     """Fit an SLDS with structured Laplace EM."""
+
+    if num_inference_iters < 1:
+        # E-steps continue from the previous posterior; without a sweep, q never moves.
+        raise ValueError('Laplace EM requires num_inference_iters >= 1')
 
     inferred = infer_laplace(
         model,

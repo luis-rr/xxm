@@ -149,14 +149,34 @@ def infer_variational(
     num_iters: int,
     initial_latents: jax.Array,
 ) -> InferenceState[Model[QuadraticEmissionsT], Posterior]:
+    """Structured mean-field inference, seeding q(z) from a latent trajectory."""
 
     potentials = LatentPotentials.from_data(model, data)
-
-    observation = model.emissions.compute_potential(data.weighted_observations())
 
     initial_latents = potentials.lengths.clear(initial_latents)
 
     discrete = potentials.discrete_posterior_at(initial_latents)
+
+    return update_variational(model, data, discrete, num_iters)
+
+
+def update_variational(
+    model: Model[QuadraticEmissionsT],
+    data: DatasetCollection,
+    discrete: DiscreteChainMarginals,
+    num_iters: int,
+) -> InferenceState[Model[QuadraticEmissionsT], Posterior]:
+    """
+    Structured mean-field inference continuing from the discrete posterior.
+
+    Alternates q(x) and q(z) updates, starting with q(x). Starting from a
+    previous q(z), the ELBO under `model` does not decrease. EM uses this
+    after each M-step.
+    """
+
+    potentials = LatentPotentials.from_data(model, data)
+
+    observation = model.emissions.compute_potential(data.weighted_observations())
 
     def step(_, discrete: DiscreteChainMarginals) -> DiscreteChainMarginals:
         continuous = potentials.continuous_posterior_quadratic(observation, discrete)
@@ -194,10 +214,12 @@ def infer_laplace(
     initial_latents: jax.Array,
     params: OptimParams = DEFAULT_OPTIM_PARAMS,
 ) -> InferenceState[Model[LaplaceEmissionsT], Posterior]:
-    """Structured mean-field inference with Laplace continuous updates."""
+    """
+    Structured mean-field inference with Laplace continuous updates, seeding
+    q(z) and q(x) from a latent trajectory.
+    """
 
     potentials = LatentPotentials.from_data(model, data)
-    observations = data.weighted_observations()
 
     initial_latents = potentials.lengths.clear(initial_latents)
 
@@ -206,9 +228,35 @@ def infer_laplace(
     continuous = potentials.continuous_posterior_local(
         discrete,
         model.emissions,
-        observations,
+        data.weighted_observations(),
         initial_latents,
     )
+
+    return update_laplace(
+        model,
+        data,
+        Posterior(discrete, continuous),
+        num_iters,
+        params,
+    )
+
+
+def update_laplace(
+    model: Model[LaplaceEmissionsT],
+    data: DatasetCollection,
+    posterior: Posterior,
+    num_iters: int,
+    params: OptimParams = DEFAULT_OPTIM_PARAMS,
+) -> InferenceState[Model[LaplaceEmissionsT], Posterior]:
+    """
+    Structured Laplace inference continuing from `posterior`.
+
+    Alternates q(z) and Laplace q(x) updates. EM uses this after each M-step.
+    Laplace updates are approximate, so the ELBO may decrease.
+    """
+
+    potentials = LatentPotentials.from_data(model, data)
+    observations = data.weighted_observations()
 
     def step(_, posterior: Posterior) -> Posterior:
         discrete = potentials.discrete_posterior(posterior.continuous)
@@ -227,7 +275,7 @@ def infer_laplace(
         0,
         num_iters,
         step,
-        Posterior(discrete, continuous),
+        posterior,
     )
 
     expected_observations = model.emissions.expected_log_likelihood(

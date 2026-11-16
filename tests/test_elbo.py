@@ -65,6 +65,25 @@ def test_elbo_sums_sequences(facade, noise):
     )
 
 
+@pytest.mark.parametrize('noise', ['full', 'diagonal'])
+def test_variational_em_does_not_decrease_elbo(noise):
+    """E-steps continue from the previous posterior, so EM ascends the ELBO.
+
+    One inference sweep per M-step suffices for the guarantee. The tolerance
+    covers float32 and the M-step ridge and floors.
+    """
+    model = make_model(xxm.GaussianSLDS, noise=noise)
+    assert isinstance(model, xxm.GaussianSLDS)
+    fit = model.fit(
+        data_for(xxm.GaussianSLDS),
+        num_iters=10,
+        num_inference_iters=1,
+        progress=False,
+    )
+    trace = np.asarray(fit.objective_trace)
+    assert np.all(np.diff(trace) >= -1e-5 * np.abs(trace).max())
+
+
 def test_collection_elbo_sums_sessions():
     model = make_model(xxm.GaussianHMM, sessions=1)
     assert isinstance(model, xxm.GaussianHMM)
