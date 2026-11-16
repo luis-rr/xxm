@@ -1,7 +1,7 @@
 """Figure constructors composed from :mod:`xxm.plot.core` primitives."""
 
 from copy import copy
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -252,7 +252,19 @@ def plot_dyn_conditional_linear_comparison(
     return axs[0]
 
 
-def _grid(batch_shape, row_names, col_names, figsize, suptitle):
+ShareAxes = bool | Literal['none', 'all', 'row', 'col']
+
+
+def _grid(
+    batch_shape,
+    row_names,
+    col_names,
+    figsize,
+    suptitle,
+    *,
+    sharex: ShareAxes = True,
+    sharey: ShareAxes = True,
+):
     if len(batch_shape) != 2 or not all(batch_shape):
         raise ValueError(
             f'expected nonempty batch shape (rows, columns), got {batch_shape}'
@@ -268,8 +280,8 @@ def _grid(batch_shape, row_names, col_names, figsize, suptitle):
         rows,
         cols,
         squeeze=False,
-        sharex=True,
-        sharey=True,
+        sharex=sharex,
+        sharey=sharey,
         figsize=figsize or (1 + 2 * cols, 1 + 2 * rows),
         constrained_layout=True,
     )
@@ -295,16 +307,46 @@ def plot_dyn_grid(
     col_names=None,
     suptitle='',
     figsize=None,
+    sharex: ShareAxes = True,
+    sharey: ShareAxes = True,
+    panel_kwargs=None,
     **kwargs,
 ):
-    """Draw an Affine batch (rows, columns); return a 2D axes array."""
-    _, axs = _grid(affine_batch.batch_shape, row_names, col_names, figsize, suptitle)
-    for index, ax in np.ndenumerate(axs):
-        plot.plot_dyn_linear(
-            ax, affine_batch.select(index), xlim=xlim, ylim=ylim, **kwargs
+    """Draw an Affine batch (rows, columns); return a 2D axes array.
+
+    `panel_kwargs`, nested as (rows, columns) dictionaries, override the shared
+    keyword arguments for single panels (e.g. `xlim`, `ylim`, `color`,
+    `scale`). Panels whose map has non-finite entries are left without a field.
+    """
+    shape = affine_batch.batch_shape
+    _, axs = _grid(
+        shape, row_names, col_names, figsize, suptitle, sharex=sharex, sharey=sharey
+    )
+    if panel_kwargs is not None and (
+        len(panel_kwargs) != shape[0]
+        or any(len(row) != shape[1] for row in panel_kwargs)
+    ):
+        raise ValueError(f'expected panel_kwargs nested as {shape}')
+
+    for (i, j), ax in np.ndenumerate(axs):
+        affine = affine_batch.select((i, j))
+        options = (
+            dict[str, Any](xlim=xlim, ylim=ylim)
+            | kwargs
+            | ({} if panel_kwargs is None else panel_kwargs[i][j])
         )
+        if not _is_finite(affine):
+            ax.set(xlim=options['xlim'], ylim=options['ylim'], aspect='equal')
+            continue
+        plot.plot_dyn_linear(ax, affine, **options)
     _label_grid(axs, row_names, col_names)
     return axs
+
+
+def _is_finite(affine: Affine) -> bool:
+    return bool(np.all(np.isfinite(affine.coefficients))) and bool(
+        np.all(np.isfinite(affine.bias))
+    )
 
 
 def plot_dyn_mismatch_grid(

@@ -248,6 +248,36 @@ def plot_state_trace_2d(
     ax.autoscale_view()
 
 
+def has_label(label) -> bool:
+    """Whether a label is present, i.e. neither None nor NaN."""
+    return label is not None and not (isinstance(label, float) and np.isnan(label))
+
+
+def plot_points_by_label_2d(ax: Axes, points, labels, *, label_colors=None, **kwargs):
+    """Scatter (T, 2) points colored by their (T,) labels; return {label: artist}.
+
+    Missing labels (None or NaN) are not drawn. Labels absent from
+    `label_colors` cycle through `TRACE_COLORS`.
+    """
+    values = _traces(points, 2)
+    labels = np.asarray(labels)
+    if labels.shape != (len(values),):
+        raise ValueError(
+            f'expected labels with shape {(len(values),)}, got {labels.shape}'
+        )
+
+    present = np.array([has_label(label) for label in labels], dtype=bool)
+    colors = dict(label_colors or {})
+    fallback = itertools.cycle(TRACE_COLORS)
+
+    artists = {}
+    for label in np.unique(labels[present]):
+        color = colors[label] if label in colors else next(fallback)
+        options = dict[str, Any](s=2, alpha=0.75, edgecolor='none', zorder=3) | kwargs
+        artists[label] = ax.scatter(*values[labels == label].T, color=color, **options)
+    return artists
+
+
 def plot_time_markers_2d(
     ax: Axes,
     traces,
