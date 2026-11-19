@@ -10,6 +10,7 @@ from matplotlib.colors import Normalize
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import LinearGaussian
 from xxm.plot import core as plot
+from xxm.plot import trail
 
 
 def plot_traces_image_comparison(
@@ -46,7 +47,6 @@ def plot_traces_image_comparison(
         figsize=figsize,
         sharex=True,
         sharey=True,
-        constrained_layout=True,
         squeeze=False,
     )
     for ax, value, name in zip(axs[:, 0], values, (name0, name1)):
@@ -73,7 +73,6 @@ def plot_seq_1d_comparison(
         figsize=figsize,
         sharex=True,
         sharey=True,
-        constrained_layout=True,
         squeeze=False,
     )
     count = max(plot._num_states(states0), plot._num_states(states1))
@@ -106,7 +105,6 @@ def plot_seq_2d_comparison(
         figsize=figsize,
         sharex=True,
         sharey=True,
-        constrained_layout=True,
         squeeze=False,
     )
     count = max(
@@ -242,7 +240,6 @@ def plot_dyn_conditional_linear_comparison(
         squeeze=False,
         sharex=True,
         sharey=True,
-        constrained_layout=True,
     )
     for state, ax in enumerate(axs[0]):
         plot_dyn_linear_gaussian_comparison(
@@ -283,7 +280,6 @@ def _grid(
         sharex=sharex,
         sharey=sharey,
         figsize=figsize or (1 + 2 * cols, 1 + 2 * rows),
-        constrained_layout=True,
     )
     fig.suptitle(suptitle)
     return fig, axs
@@ -317,6 +313,9 @@ def plot_dyn_grid(
     `panel_kwargs`, nested as (rows, columns) dictionaries, override the shared
     keyword arguments for single panels (e.g. `xlim`, `ylim`, `color`,
     `scale`). Panels whose map has non-finite entries are left without a field.
+    With `mode='trails'` (the default), panels without a `duration` share one,
+    `trail.shared_duration` of all finite panels, so trail lengths compare
+    across the grid.
     """
     shape = affine_batch.batch_shape
     _, axs = _grid(
@@ -328,19 +327,49 @@ def plot_dyn_grid(
     ):
         raise ValueError(f'expected panel_kwargs nested as {shape}')
 
-    for (i, j), ax in np.ndenumerate(axs):
-        affine = affine_batch.select((i, j))
-        options = (
-            dict[str, Any](xlim=xlim, ylim=ylim)
-            | kwargs
-            | ({} if panel_kwargs is None else panel_kwargs[i][j])
-        )
-        if not _is_finite(affine):
-            ax.set(xlim=options['xlim'], ylim=options['ylim'], aspect='equal')
+    options = {
+        index: dict[str, Any](xlim=xlim, ylim=ylim)
+        | kwargs
+        | ({} if panel_kwargs is None else panel_kwargs[index[0]][index[1]])
+        for index in np.ndindex(shape)
+    }
+    finite = {index for index in options if _is_finite(affine_batch.select(index))}
+    if (
+        options
+        and next(iter(options.values())).get('mode', plot.DEFAULT_DYN_MODE) == 'trails'
+    ):
+        _share_trail_duration(affine_batch, options, finite)
+
+    for index, ax in np.ndenumerate(axs):
+        if index not in finite:
+            ax.set(
+                xlim=options[index]['xlim'], ylim=options[index]['ylim'], aspect='equal'
+            )
             continue
-        plot.plot_dyn_linear(ax, affine, **options)
+        plot.plot_dyn_linear(ax, affine_batch.select(index), **options[index])
     _label_grid(axs, row_names, col_names)
     return axs
+
+
+def _share_trail_duration(affine_batch: Affine, options: dict, finite: set) -> None:
+    """Give panels without a `duration` the `trail.shared_duration_affine` of all of them."""
+    pending = [index for index in finite if 'duration' not in options[index]]
+    if not pending:
+        return
+    sample = options[pending[0]]
+    duration = trail.shared_duration_affine(
+        [
+            (
+                plot._affine_2d(affine_batch.select(index)),
+                options[index]['xlim'],
+                options[index]['ylim'],
+            )
+            for index in pending
+        ],
+        **{key: sample[key] for key in ('length', 'quantile') if key in sample},
+    )
+    for index in pending:
+        options[index] = options[index] | {'duration': duration}
 
 
 def _is_finite(affine: Affine) -> bool:
@@ -456,9 +485,7 @@ def plot_latent_recovery(
 
 def plot_latent_obs(true_states, true_latents, observations):
     """Compose latent traces, observations and a trajectory in one figure."""
-    fig, axs = plt.subplots(
-        3, 1, figsize=(8, 7), squeeze=False, constrained_layout=True
-    )
+    fig, axs = plt.subplots(3, 1, figsize=(8, 7), squeeze=False)
     plot.plot_seq_1d(axs[0, 0], true_states, true_latents, desc='latent')
     image = plot.plot_traces_image(axs[1, 0], observations, ylabel='observations')
     fig.colorbar(image, ax=axs[1, 0])

@@ -6,6 +6,8 @@ from typing import Any, Literal
 import jax.numpy as jnp
 import matplotlib
 import numpy as np
+from cycler import cycler
+from matplotlib import pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib.collections import LineCollection
 from matplotlib.colors import (
@@ -18,6 +20,8 @@ from matplotlib.patches import Ellipse
 
 from xxm.core.affine import Affine
 from xxm.core.dists.gaussian import Gaussian, LinearGaussian
+from xxm.plot import trail
+from xxm.plot.lines import plot_chunked_line
 
 TRACE_COLORS = ('k', 'xkcd:magenta', *matplotlib.colormaps['Dark2'](np.arange(8)))
 STATE_COLORS = tuple(matplotlib.colormaps['tab10'](np.arange(10)))
@@ -27,12 +31,152 @@ INACTIVE_COLOR = 'k'
 DYNAMICS_CMAP = LinearSegmentedColormap.from_list(
     'dynamics', [TRUE_COLOR, INFERRED_COLOR]
 )
+DYN_MODES = ('trails', 'stream', 'quiver')
+DEFAULT_DYN_MODE = 'trails'
+
+# print widths and the tallest figure that leaves room for a caption (Nature), in inches
+SINGLE_COLUMN = 89 / 25.4
+DOUBLE_COLUMN = 183 / 25.4
+MAX_HEIGHT = 170 / 25.4
+
+STYLE: dict[str, Any] = {
+    # fonts: Arial if present, metric-compatible fallbacks otherwise
+    'font.family': 'sans-serif',
+    'font.sans-serif': ['Arial', 'Helvetica', 'Liberation Sans', 'DejaVu Sans'],
+    # sizes in points: small 5, medium 6, large 7 (Nature: 5-7 pt)
+    'font.size': 6,
+    'axes.titlesize': 6,
+    'axes.labelsize': 6,
+    'xtick.labelsize': 5,
+    'ytick.labelsize': 5,
+    'legend.fontsize': 5,
+    'legend.title_fontsize': 6,
+    'figure.titlesize': 7,
+    'figure.labelsize': 6,
+    # math in the same sans-serif font as the text
+    'mathtext.fontset': 'custom',
+    'mathtext.rm': 'sans',
+    'mathtext.it': 'sans:italic',
+    'mathtext.bf': 'sans:bold',
+    'mathtext.sf': 'sans',
+    'mathtext.fallback': 'stixsans',
+    # pure black
+    'text.color': 'black',
+    'axes.labelcolor': 'black',
+    'axes.edgecolor': 'black',
+    'xtick.color': 'black',
+    'ytick.color': 'black',
+    # colour-blind-safe cycle (Okabe-Ito, Wong 2011), without yellow
+    'axes.prop_cycle': cycler(
+        color=[
+            '#000000',
+            '#e69f00',
+            '#56b4e9',
+            '#009e73',
+            '#0072b2',
+            '#d55e00',
+            '#cc79a7',
+        ]
+    ),
+    # spines: left and bottom only; full frames with set_spines
+    'axes.spines.left': True,
+    'axes.spines.bottom': True,
+    'axes.spines.right': False,
+    'axes.spines.top': False,
+    # weights (Nature: 0.25-1 pt) and tick sizes, in points
+    'axes.linewidth': 0.3,
+    'xtick.major.width': 0.3,
+    'ytick.major.width': 0.3,
+    'xtick.minor.width': 0.3,
+    'ytick.minor.width': 0.3,
+    'xtick.major.size': 2,
+    'ytick.major.size': 2,
+    'xtick.minor.size': 1.5,
+    'ytick.minor.size': 1.5,
+    'xtick.direction': 'out',
+    'ytick.direction': 'out',
+    'lines.linewidth': 0.75,
+    'lines.markersize': 3,
+    'patch.linewidth': 0.5,
+    'grid.linewidth': 0.3,
+    'hatch.linewidth': 0.3,
+    'errorbar.capsize': 1.5,
+    # padding, in points
+    'axes.labelpad': 1,
+    'axes.titlepad': 3,
+    'xtick.major.pad': 1,
+    'ytick.major.pad': 1,
+    'xtick.minor.pad': 1,
+    'ytick.minor.pad': 1,
+    # legend
+    'legend.frameon': False,
+    'legend.handlelength': 1.5,
+    # 3D: default panes for depth, no grid lines
+    'axes3d.grid': False,
+    # figure: single-column print size, laid out automatically
+    'figure.figsize': (SINGLE_COLUMN, SINGLE_COLUMN / 2),
+    'figure.dpi': 200,
+    'figure.constrained_layout.use': True,
+    # export: editable text in vector formats, rasters at >= 450 dpi
+    'savefig.dpi': 600,
+    'pdf.fonttype': 42,
+    'ps.fonttype': 42,
+    'svg.fonttype': 'none',
+}
+
+
+def set_style(**overrides) -> None:
+    """Apply `STYLE`, updated with `overrides`, to Matplotlib's rcParams (`plt.style.use`).
+
+    Keys are rcParams names, which contain dots: pass them as
+    `set_style(**{'font.size': 7})`. For one figure only, use
+    `plt.rc_context(STYLE | overrides)` instead.
+    """
+    plt.style.use(STYLE | overrides)
+
+
+def set_spines(ax: Axes, on: bool = True) -> None:
+    """Show (`on`) or hide all four spines of `ax`.
+
+    `STYLE` shows only the left and bottom spines; images, heatmaps and
+    panels that need a closed frame call `set_spines(ax)`.
+    """
+    for spine in ax.spines.values():
+        spine.set_visible(on)
 
 
 def square_axes(ax: Axes, aspect='equal') -> None:
     """Give both coordinates the same symmetric range."""
     extent = max(abs(v) for v in (*ax.get_xlim(), *ax.get_ylim()))
     ax.set(xlim=(-extent, extent), ylim=(-extent, extent), aspect=aspect)
+
+
+def symmetric_limits(
+    values, *, margin: float = 0.1, quantile: float = 1.0
+) -> tuple[float, float]:
+    r"""Limits $\pm(1 + \text{margin})\, q$, with $q$ the `quantile` of $|v|$ over `values`.
+
+    The default `quantile` covers all values; a lower one ignores outliers.
+    Non-finite values are ignored.
+    """
+    magnitudes = np.abs(np.asarray(values, dtype=float)).ravel()
+    magnitudes = magnitudes[np.isfinite(magnitudes)]
+    if not magnitudes.size:
+        raise ValueError('symmetric_limits needs at least one finite value')
+    extent = (1 + margin) * float(np.quantile(magnitudes, quantile))
+    return -extent, extent
+
+
+def panel_note(ax: Axes, text: str):
+    """Write a small note in the lower-left corner of a panel; return the `Text`."""
+    return ax.text(
+        0.03,
+        0.03,
+        text,
+        transform=ax.transAxes,
+        fontsize='small',
+        bbox={'facecolor': 'white', 'alpha': 0.7, 'edgecolor': 'none', 'pad': 1},
+    )
 
 
 def state_cmap(num_states: int) -> ListedColormap:
@@ -76,6 +220,19 @@ def _traces(values, dimension=None):
     ):
         raise ValueError(
             f'expected nonempty traces with shape (T, {dimension or "D"}), got {values.shape}'
+        )
+    return values
+
+
+def _trace_batch(traces, dimension: int) -> np.ndarray:
+    """A `(T, D)` trajectory or `(B, T, D)` batch as a `(B, T, D)` array."""
+    values = np.asarray(traces)
+    if values.ndim == 2:
+        values = values[None]
+    if values.ndim != 3 or values.shape[-1] != dimension or not all(values.shape):
+        raise ValueError(
+            f'expected traces with shape (T, {dimension}) or (B, T, {dimension}), '
+            f'got {values.shape}'
         )
     return values
 
@@ -125,16 +282,15 @@ def plot_traces_1d(ax: Axes, traces, **kwargs):
 
 
 def plot_traces_2d(ax: Axes, traces, *, mark_endpoints=True, **kwargs):
-    """Draw a (T, 2) trajectory or a (B, T, 2) batch."""
-    values = np.asarray(traces)
-    if values.ndim == 2:
-        values = values[None]
-    if values.ndim != 3 or values.shape[-1] != 2 or not all(values.shape):
-        raise ValueError(
-            f'expected traces with shape (T, 2) or (B, T, 2), got {values.shape}'
-        )
+    """Draw a (T, 2) trajectory or a (B, T, 2) batch.
+
+    Each trace is drawn as chunks (`xxm.plot.lines.plot_chunked_line`), so that with
+    alpha its overlapping parts stack; `kwargs` go to the `LineCollection`
+    (e.g. `color`, `linewidth`, `alpha`, `label`, `num_chunks`).
+    """
+    values = _trace_batch(traces, 2)
     for trace, color in zip(values, itertools.cycle(TRACE_COLORS)):
-        ax.plot(trace[:, 0], trace[:, 1], **(dict[str, Any](color=color) | kwargs))
+        plot_chunked_line(ax, trace, **(dict[str, Any](color=color) | kwargs))
         if mark_endpoints:
             ax.scatter(*trace[0], color='g', zorder=10)
             ax.scatter(*trace[-1], color='r', zorder=10)
@@ -218,7 +374,7 @@ def plot_state_trace_2d(
     *,
     state_colors=None,
     state_zorders=None,
-    linewidth=1.25,
+    linewidth=None,
     **kwargs,
 ):
     """Color each adjacent segment by its label; states has shape (T - 1,)."""
@@ -352,7 +508,7 @@ def plot_gaussian_2d(
         raise ValueError(
             f'expected unbatched 2D Gaussian, got batch {gaussian.batch_shape}, dimension {gaussian.variable_dim}'
         )
-    options = dict[str, Any](fill=False, linewidth=2, color=TRUE_COLOR) | kwargs
+    options = dict[str, Any](fill=False, color=TRUE_COLOR) | kwargs
     ellipse = _ellipse(ax, gaussian.mean, gaussian.covariance, scale, **options)
     if mark_mean:
         ax.scatter(*np.asarray(gaussian.mean), color=options['color'], s=40)
@@ -366,7 +522,7 @@ def plot_trace_2d(
     covariance=None,
     *,
     color=INFERRED_COLOR,
-    linewidth=1.25,
+    linewidth=None,
     zorder=3.0,
     covariance_stride=None,
     covariance_scale=2.0,
@@ -497,6 +653,79 @@ def plot_dyn_linear_quiver(
     return artist
 
 
+def binned_displacement(
+    traces, *, xlim=(-3, 3), ylim=(-3, 3), num_bins: int = 11
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    r"""Mean one-step displacement of 2D traces, binned by the starting point.
+
+    For a `(T, 2)` trajectory or `(B, T, 2)` batch $z_t$, each bin of the
+    `num_bins × num_bins` grid over `xlim × ylim` averages $z_{t+1} - z_t$
+    over the steps starting in it: an estimate of
+    $\mathbb{E}[z_{t+1} - z_t \mid z_t]$. Returns bin `centers` and `means`,
+    both `(num_bins, num_bins, 2)` and indexed `[x bin, y bin]`, and `counts`
+    `(num_bins, num_bins)`. Means are NaN in empty bins.
+    """
+    values = _trace_batch(traces, 2)
+    starts = values[:, :-1].reshape(-1, 2)
+    steps = np.diff(values, axis=1).reshape(-1, 2)
+
+    def histogram(weights=None) -> np.ndarray:
+        counts, _, _ = np.histogram2d(
+            starts[:, 0],
+            starts[:, 1],
+            bins=num_bins,
+            range=(xlim, ylim),
+            weights=weights,
+        )
+        return counts
+
+    counts = histogram()
+    sums = np.stack([histogram(steps[:, k]) for k in range(2)], axis=-1)
+    with np.errstate(invalid='ignore', divide='ignore'):
+        means = np.where(counts[..., None] > 0, sums / counts[..., None], np.nan)
+
+    edges = [np.linspace(low, high, num_bins + 1) for low, high in (xlim, ylim)]
+    centers = np.stack(
+        np.meshgrid(*[(e[:-1] + e[1:]) / 2 for e in edges], indexing='ij'), axis=-1
+    )
+    return centers, means, counts
+
+
+def plot_dyn_binned_2d(
+    ax: Axes,
+    traces,
+    *,
+    xlim=(-3, 3),
+    ylim=(-3, 3),
+    num_bins: int = 11,
+    min_count: int = 10,
+    color=TRUE_COLOR,
+    width=0.004,
+    **kwargs,
+):
+    """Draw the binned mean displacement of 2D traces as arrows (`binned_displacement`).
+
+    Bins with fewer than `min_count` steps are left empty. `kwargs` go to
+    `ax.quiver`; e.g. `angles='xy', scale_units='xy', scale=1` draws arrows
+    in data units, comparable with a model's displacement at the bin centers.
+    """
+    centers, means, counts = binned_displacement(
+        traces, xlim=xlim, ylim=ylim, num_bins=num_bins
+    )
+    kept = counts >= min_count
+    artist = ax.quiver(
+        centers[kept, 0],
+        centers[kept, 1],
+        means[kept, 0],
+        means[kept, 1],
+        color=color,
+        width=width,
+        **kwargs,
+    )
+    ax.set(xlim=xlim, ylim=ylim, aspect='equal', xlabel='$x_1$', ylabel='$x_2$')
+    return artist
+
+
 def plot_dyn_linear_stream(
     ax: Axes,
     affine: Affine,
@@ -530,13 +759,23 @@ def plot_dyn_linear_stream(
     return artist
 
 
-def plot_dyn_linear(ax: Axes, affine: Affine, *, mode='quiver', **kwargs):
+def plot_dyn_linear_trails(ax: Axes, affine: Affine, *, color=TRUE_COLOR, **kwargs):
+    """Draw trails of affine(x) (`xxm.plot.trail.plot_dyn_trails`)."""
+    artists = trail.plot_dyn_trails(ax, _affine_2d(affine), color=color, **kwargs)
+    ax.set(xlabel='$x_1$', ylabel='$x_2$')
+    return artists
+
+
+def plot_dyn_linear(ax: Axes, affine: Affine, *, mode=DEFAULT_DYN_MODE, **kwargs):
+    """Draw 2D affine dynamics as `'trails'`, `'stream'` lines or `'quiver'` arrows."""
     affine = _affine_2d(affine)
+    if mode == 'trails':
+        return plot_dyn_linear_trails(ax, affine, **kwargs)
     if mode == 'quiver':
         return plot_dyn_linear_quiver(ax, affine, **kwargs)
     if mode == 'stream':
         return plot_dyn_linear_stream(ax, affine, **kwargs)
-    raise ValueError(f'unknown dynamics mode: {mode}')
+    raise ValueError(f'unknown dynamics mode {mode!r}; expected one of {DYN_MODES}')
 
 
 def plot_dyn_linear_gaussian(ax: Axes, dynamics: LinearGaussian, **kwargs):

@@ -125,7 +125,6 @@ def plot_posterior_over_time(
         figsize=figsize or (4 * columns, 1.25 * rows),
         sharex='all',
         squeeze=False,
-        constrained_layout=True,
     )
 
     for (d, k), ax in np.ndenumerate(axs):
@@ -143,7 +142,7 @@ def plot_posterior_over_time(
         for title, ax in zip(titles, axs[0], strict=True):
             ax.set(title=title)
 
-    axs[0, 0].legend(fontsize='small')
+    axs[0, 0].legend(fontsize='small', loc='upper left')
     for ax in axs[-1]:
         ax.set(xlabel='time')
 
@@ -196,7 +195,7 @@ def plot_occupancy(
     created unless `ax` is given.
     """
     if ax is None:
-        _, ax = plt.subplots(figsize=figsize, constrained_layout=True)
+        _, ax = plt.subplots(figsize=figsize)
 
     plot_occupancy_density(
         ax,

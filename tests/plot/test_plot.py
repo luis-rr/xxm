@@ -10,6 +10,7 @@ pytest.importorskip('matplotlib')
 
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.collections import LineCollection
 from matplotlib.colors import Normalize
 from matplotlib.figure import Figure
 from matplotlib.image import AxesImage
@@ -52,7 +53,7 @@ def test_sequences_and_image_return(ax):
 @pytest.mark.parametrize('states', [None, [0, 1, 0]])
 def test_sequence_2d(ax, states):
     core.plot_seq_2d(ax, states, np.array([[0.0, 0.0], [1.0, 2.0], [2.0, 1.0]]))
-    assert len(ax.lines) == 1
+    assert sum(isinstance(c, LineCollection) for c in ax.collections) == 1
 
 
 def test_gaussian_geometry(ax):
