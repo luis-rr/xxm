@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -16,6 +17,12 @@ AR_FACADES = (xxm.GaussianARHMM, xxm.PoissonARHMM)
 def data_for(facade):
     """AR-HMMs take no known inputs; the other test models take one."""
     return make_data(input_dim=0 if facade in AR_FACADES else 1)
+
+
+def as_float32(model):
+    """The model with all its parameters converted to float32."""
+    params = jax.tree.map(lambda value: value.astype(jnp.float32), model.to_params())
+    return type(model).from_params(params)
 
 
 def infer(model, data):
@@ -72,7 +79,8 @@ def test_variational_em_does_not_decrease_elbo(noise):
     One inference sweep per M-step suffices for the guarantee. The tolerance
     covers float32 and the M-step ridge and floors.
     """
-    model = make_model(xxm.GaussianSLDS, noise=noise)
+    # the test models mix in float16 parameters; fitting needs one dtype
+    model = as_float32(make_model(xxm.GaussianSLDS, noise=noise))
     assert isinstance(model, xxm.GaussianSLDS)
     fit = model.fit(
         data_for(xxm.GaussianSLDS),
