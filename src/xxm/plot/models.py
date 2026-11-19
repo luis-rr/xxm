@@ -398,11 +398,14 @@ def plot_dyn_mismatch_grid(
 ):
     """Compare matching (rows, columns) batches with one normalization and colorbar."""
     shape = affine0_batch.batch_shape
+
     if len(shape) != 2 or not all(shape) or shape != affine1_batch.batch_shape:
         raise ValueError(
             f'expected matching nonempty 2D batches, got {shape} and {affine1_batch.batch_shape}'
         )
+
     options = dict[str, Any](mesh_kwargs or {})
+
     if options.get('norm') is None:
         options.pop('norm', None)
         if vmax is None:
@@ -423,6 +426,7 @@ def plot_dyn_mismatch_grid(
         options['norm'] = Normalize(
             options.pop('vmin', vmin), options.pop('vmax', vmax)
         )
+
     elif isinstance(options['norm'], Normalize):
         options['norm'] = copy(options['norm'])
         magnitudes = [
@@ -438,8 +442,10 @@ def plot_dyn_mismatch_grid(
             for index in np.ndindex(shape)
         ]
         options['norm'].autoscale_None(np.concatenate(magnitudes))
+
     if 'vmin' in options or 'vmax' in options:
         raise ValueError('pass either norm or mesh vmin/vmax, not both')
+
     fig, axs = _grid(shape, row_names, col_names, figsize, suptitle)
     for index, ax in np.ndenumerate(axs):
         plot.plot_dyn_mismatch(
@@ -455,11 +461,13 @@ def plot_dyn_mismatch_grid(
             **kwargs,
         )
     _label_grid(axs, row_names, col_names)
+
     fig.colorbar(
         axs.flat[0].collections[0],
         ax=list(axs.flat),
         label='relative displacement mismatch' if relative else 'displacement mismatch',
     )
+
     return axs
 
 

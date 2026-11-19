@@ -837,22 +837,27 @@ def plot_dyn_mismatch(
         relative_eps=relative_eps,
     )
     options = dict[str, Any](cmap=DYNAMICS_CMAP, shading='auto') | (mesh_kwargs or {})
+
     if 'norm' not in options:
         options = dict[str, Any](vmin=vmin, vmax=vmax) | options
+
     mesh = ax.pcolormesh(xx, yy, magnitude, **options)
+
     xx, yy, dx, dy, _ = _dyn_mismatch(
         affine0, affine1, xlim=xlim, ylim=ylim, num_points=quiver_points
     )
+
     if normalize_quiver:
         speed = np.maximum(np.hypot(dx, dy), np.finfo(float).tiny)
         dx, dy = dx / speed, dy / speed
+
     ax.quiver(
         xx,
         yy,
         dx,
         dy,
         **(
-            dict[str, Any](color='k', angles='xy', scale_units='xy')
+            dict[str, Any](color='w', angles='xy', scale_units='xy')
             | (quiver_kwargs or {})
         ),
     )
