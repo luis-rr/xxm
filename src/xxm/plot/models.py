@@ -22,7 +22,7 @@ def plot_traces_image_comparison(
     name0='observations',
     name1='reconstruction',
     desc='',
-    figsize=(8, 6),
+    figsize=(plot.DOUBLE_COLUMN, 0.75 * plot.SINGLE_COLUMN),
     **kwargs,
 ):
     """Compare sequences with one shared value scale and colorbar."""
@@ -52,6 +52,7 @@ def plot_traces_image_comparison(
     for ax, value, name in zip(axs[:, 0], values, (name0, name1)):
         plot.plot_traces_image(ax, value, xlabel=xlabel, ylabel=ylabel, **options)
         ax.set_title(name)
+    plot.share_time_axis(axs)
     fig.colorbar(axs.flat[0].images[0], ax=list(axs[:, 0]), label=desc)
     return axs[:, 0]
 
@@ -64,9 +65,14 @@ def plot_seq_1d_comparison(
     *,
     name0='True states',
     name1='Inferred states',
-    figsize=(8, 6),
+    ticks=True,
+    figsize=(plot.DOUBLE_COLUMN, 0.5 * plot.SINGLE_COLUMN),
     **kwargs,
 ):
+    """Compare two state-shaded sequences, one above the other.
+
+    Without `ticks`, the value axes have no ticks (e.g. for latents).
+    """
     _, axs = plt.subplots(
         2,
         1,
@@ -85,6 +91,9 @@ def plot_seq_1d_comparison(
     ):
         plot.plot_seq_1d(ax, states, traces, **options)
         ax.set_title(name)
+        if not ticks:
+            plot.hide_ticks(ax, axis='y')
+    plot.share_time_axis(axs)
     return axs[:, 0]
 
 
@@ -96,9 +105,14 @@ def plot_seq_2d_comparison(
     *,
     name0='True states',
     name1='Inferred states',
-    figsize=(8, 4),
+    ticks=True,
+    figsize=None,
     **kwargs,
 ):
+    """Compare two state-colored 2D trajectories side by side.
+
+    Without `ticks`, the axes have no ticks (e.g. for latents).
+    """
     _, axs = plt.subplots(
         1,
         2,
@@ -111,12 +125,20 @@ def plot_seq_2d_comparison(
         (plot._num_states(s) for s in (states0, states1) if s is not None), default=1
     )
     for ax, states, traces, name in zip(
-        axs[0], (states0, states1), (traces0, traces1), (name0, name1)
+        axs[0],
+        (states0, states1),
+        (traces0, traces1),
+        (name0, name1),
     ):
         plot.plot_seq_2d(
-            ax, states, traces, **(dict[str, Any](num_states=count) | kwargs)
+            ax,
+            states,
+            traces,
+            **(dict[str, Any](num_states=count) | kwargs),
         )
         ax.set_title(name)
+        if not ticks:
+            plot.hide_ticks(ax)
     return axs[0]
 
 
@@ -125,7 +147,7 @@ def plot_fit_progress(
     *,
     name='Log Likelihood',
     title='',
-    figsize=(6, 6),
+    figsize=(plot.SINGLE_COLUMN, plot.SINGLE_COLUMN * 0.5),
     linthresh=1e-3,
     **kwargs,
 ):
@@ -144,14 +166,21 @@ def plot_fit_progress(
     for ax, traces in zip(axs[:, 0], (values.T, np.diff(values, axis=1).T)):
         if traces.shape[0]:
             plot.plot_traces_1d(
-                ax, traces, **(dict[str, Any](linewidth=0.7, alpha=0.6) | kwargs)
+                ax,
+                traces,
+                **kwargs,
             )
 
-        ax.set_xlabel('iteration')
+    axs[0, 0].tick_params(bottom=False, labelbottom=False, which='both')
+    axs[0, 0].spines['bottom'].set_visible(False)
+
     axs[0, 0].set(ylabel=name, title=title)
-    axs[1, 0].set_ylabel('change in ' + name)
+    axs[1, 0].set_ylabel('change in\n' + name)
     axs[1, 0].set_yscale('symlog', linthresh=linthresh)
     axs[1, 0].axhline(0, color='k', linewidth=0.5)
+    axs[1, 0].set_xlabel('iteration')
+
+    plot.set_spines_grid(axs)
     return axs[:, 0]
 
 
@@ -160,7 +189,7 @@ def plot_fit_progress_many(
     *,
     name='Log Likelihood',
     title='',
-    figsize=(6, 6),
+    figsize=(plot.SINGLE_COLUMN, plot.SINGLE_COLUMN * 0.5),
     linthresh=1e-3,
     **kwargs,
 ):
@@ -184,6 +213,7 @@ def plot_fit_progress_many(
     axs[1, 0].set_ylabel('change in ' + name)
     axs[1, 0].set_yscale('symlog', linthresh=linthresh)
     axs[1, 0].axhline(0, color='k', linewidth=0.5)
+    plot.set_spines_grid(axs)
     return axs[:, 0]
 
 
@@ -240,12 +270,14 @@ def plot_dyn_conditional_linear_comparison(
         squeeze=False,
         sharex=True,
         sharey=True,
+        figsize=_grid_size(1, d0.batch_shape[0]),
     )
     for state, ax in enumerate(axs[0]):
         plot_dyn_linear_gaussian_comparison(
             ax, d0.select(state), d1.select(state), **kwargs
         )
         ax.set_title(f'State {state}')
+        plot.hide_ticks(ax)  # as the panels of plot_dyn_grid
     return axs[0]
 
 
@@ -279,10 +311,18 @@ def _grid(
         squeeze=False,
         sharex=sharex,
         sharey=sharey,
-        figsize=figsize or (1 + 2 * cols, 1 + 2 * rows),
+        figsize=figsize or _grid_size(rows, cols),
     )
     fig.suptitle(suptitle)
     return fig, axs
+
+
+def _grid_size(
+    rows: int, cols: int, panel: float = plot.SINGLE_COLUMN / 3
+) -> tuple[float, float]:
+    """Figure size for `rows × cols` square panels, at most double-column wide."""
+    panel = min(panel, plot.DOUBLE_COLUMN / cols)
+    return panel * cols, panel * rows
 
 
 def _label_grid(axs, row_names, col_names):
@@ -475,7 +515,7 @@ def plot_latent_recovery(
     true_latents,
     inferred_latents,
     *,
-    figsize=(8, 4),
+    figsize=None,
     name_left='True',
     name_right='Inferred',
 ):
@@ -493,7 +533,12 @@ def plot_latent_recovery(
 
 def plot_latent_obs(true_states, true_latents, observations):
     """Compose latent traces, observations and a trajectory in one figure."""
-    fig, axs = plt.subplots(3, 1, figsize=(8, 7), squeeze=False)
+    fig, axs = plt.subplots(
+        3,
+        1,
+        figsize=(plot.DOUBLE_COLUMN, plot.SINGLE_COLUMN),
+        squeeze=False,
+    )
     plot.plot_seq_1d(axs[0, 0], true_states, true_latents, desc='latent')
     image = plot.plot_traces_image(axs[1, 0], observations, ylabel='observations')
     fig.colorbar(image, ax=axs[1, 0])

@@ -122,7 +122,7 @@ def plot_posterior_over_time(
     _, axs = plt.subplots(
         nrows=rows,
         ncols=columns,
-        figsize=figsize or (4 * columns, 1.25 * rows),
+        figsize=figsize or (plot.DOUBLE_COLUMN, plot.SINGLE_COLUMN / 4 * rows),
         sharex='all',
         squeeze=False,
     )
@@ -145,6 +145,11 @@ def plot_posterior_over_time(
     axs[0, 0].legend(fontsize='small', loc='upper left')
     for ax in axs[-1]:
         ax.set(xlabel='time')
+
+    for ax in axs.ravel():
+        plot.hide_ticks(ax, axis='y')
+
+    plot.set_spines_grid(axs)
 
     return axs
 
@@ -187,7 +192,10 @@ def plot_occupancy(
     symbol: str = 'x',
     cells_per_std: float = 5,
     ax=None,
-    figsize=(2.5, 2.5),
+    figsize=(
+        plot.SINGLE_COLUMN * 0.5,
+        plot.SINGLE_COLUMN * 0.5,
+    ),
 ):
     """Plot the time-averaged density with posterior mean and truth.
 
@@ -224,5 +232,7 @@ def plot_occupancy(
     )
     ax.set(xlabel=rf'${symbol}_1$', ylabel=rf'${symbol}_2$')
     plot.square_axes(ax)
+
+    plot.hide_ticks(ax)
 
     return ax

@@ -95,7 +95,7 @@ STYLE: dict[str, Any] = {
     'ytick.minor.size': 1.5,
     'xtick.direction': 'out',
     'ytick.direction': 'out',
-    'lines.linewidth': 0.75,
+    'lines.linewidth': 0.5,
     'lines.markersize': 3,
     'patch.linewidth': 0.5,
     'grid.linewidth': 0.3,
@@ -143,6 +143,55 @@ def set_spines(ax: Axes, on: bool = True) -> None:
     """
     for spine in ax.spines.values():
         spine.set_visible(on)
+
+
+def set_spines_grid(
+    axs: np.ndarray,
+    edge: bool = True,
+    inner: bool = False,
+    side: Literal['default', 'other', 'both'] = 'default',
+) -> None:
+    """Show the spines on the outer edge of a grid of axes and between its panels.
+
+    `side` picks the spines to set: 'default' the left and bottom ones,
+    'other' the top and right ones, 'both' all four; the others are left as
+    they are. A spine on the outer edge of the grid (e.g. the left spine of
+    the first column) follows `edge`, any other follows `inner`. Hidden spines
+    also hide their tick marks. A 1D `axs` is treated as several rows.
+
+    By default only the first column keeps its left spine and only the last
+    row its bottom spine.
+    """
+    axs = np.asarray(axs)
+    if axs.ndim == 1:
+        axs = axs[:, None]
+    rows, cols = axs.shape
+
+    if side == 'default':
+        sides = ['left', 'bottom']
+    elif side == 'other':
+        sides = ['top', 'right']
+    else:
+        assert side == 'both'
+        sides = ['left', 'bottom', 'top', 'right']
+
+    for i in range(rows):
+        for j in range(cols):
+            ax = axs[i, j]
+            for name in sides:
+                if name == 'left':
+                    outer = j == 0
+                elif name == 'right':
+                    outer = j == cols - 1
+                elif name == 'top':
+                    outer = i == 0
+                else:  # bottom
+                    outer = i == rows - 1
+
+                visible = edge if outer else inner
+                ax.spines[name].set_visible(visible)
+                if not visible:
+                    ax.tick_params(**{name: False})
 
 
 def square_axes(ax: Axes, aspect='equal') -> None:
@@ -272,6 +321,25 @@ def plot_state_1d(
     return image
 
 
+def plot_states(ax: Axes, states, **kwargs):
+    """Draw states as a panel of their own: framed, without ticks, labelled 'state'.
+
+    `kwargs` go to `plot_state_1d`.
+    """
+    image = plot_state_1d(ax, states, **kwargs)
+    set_spines(ax)
+    hide_ticks(ax)
+    ax.set(xlabel='', ylabel='state')
+    return image
+
+
+def share_time_axis(axs) -> None:
+    """In a stack of panels, keep the x label and ticks on the bottom one only."""
+    for ax in np.ravel(axs)[:-1]:
+        ax.set(xlabel='')
+        hide_ticks(ax, axis='x')
+
+
 def plot_traces_1d(ax: Axes, traces, **kwargs):
     """Draw one line per column of a (T, D) array."""
     values = _traces(traces)
@@ -294,6 +362,7 @@ def plot_traces_2d(ax: Axes, traces, *, mark_endpoints=True, **kwargs):
         if mark_endpoints:
             ax.scatter(*trace[0], color='g', zorder=10)
             ax.scatter(*trace[-1], color='r', zorder=10)
+
     ax.set(xlabel='$x_1$', ylabel='$x_2$', aspect='equal')
 
 
@@ -304,6 +373,7 @@ def plot_traces_image(ax: Axes, values, *, xlabel='time', ylabel='variable', **k
         values.T, **(dict[str, Any](aspect='auto', interpolation='none') | kwargs)
     )
     ax.set(xlabel=xlabel, ylabel=ylabel)
+    set_spines(ax)  # flow fields and heatmaps are framed
     return image
 
 
@@ -324,6 +394,7 @@ def plot_seq_1d(
     plot_traces_1d(ax, values, **(trace_kwargs or {}))
     plot_state_1d(ax, states, **(state_kwargs or {}))
     ax.set(xlabel='time', ylabel=desc)
+    set_spines(ax)  # the state shading is a background
 
 
 def plot_seq_2d(
@@ -348,9 +419,20 @@ def plot_seq_2d(
                 f'expected states with shape {(len(values),)}, got {np.shape(states)}'
             )
         options = dict[str, Any](
-            c=np.asarray(states), s=size, cmap=state_cmap(count), norm=state_norm(count)
-        ) | (scatter_kwargs or {})
+            c=np.asarray(states),
+            s=size,
+            cmap=state_cmap(count),
+            norm=state_norm(count),
+            alpha=0.5,
+            edgecolor='none',
+            linewidth=0.5,
+            zorder=10,
+        )
+
+        options = options | (scatter_kwargs or {})
+
         ax.scatter(values[:, 0], values[:, 1], **options)
+
     plot_traces_2d(
         ax,
         values,
@@ -616,6 +698,7 @@ def plot_dyn_2d(ax: Axes, mean, *, xlim=(-3, 3), ylim=(-3, 3), num_points=15, **
     field = _evaluate_dyn_2d(mean, xlim=xlim, ylim=ylim, num_points=num_points)
     artist = ax.quiver(*field, **kwargs)
     ax.set(xlim=xlim, ylim=ylim, aspect='equal', xlabel='$x_1$', ylabel='$x_2$')
+    set_spines(ax)  # flow fields and heatmaps are framed
     return artist
 
 
@@ -650,6 +733,7 @@ def plot_dyn_linear_quiver(
             **kwargs,
         )
     ax.set(xlim=xlim, ylim=ylim, aspect='equal', xlabel='$x_1$', ylabel='$x_2$')
+    set_spines(ax)  # flow fields and heatmaps are framed
     return artist
 
 
@@ -723,6 +807,7 @@ def plot_dyn_binned_2d(
         **kwargs,
     )
     ax.set(xlim=xlim, ylim=ylim, aspect='equal', xlabel='$x_1$', ylabel='$x_2$')
+    set_spines(ax)  # flow fields and heatmaps are framed
     return artist
 
 
@@ -756,6 +841,7 @@ def plot_dyn_linear_stream(
         **kwargs,
     )
     ax.set(xlim=xlim, ylim=ylim, aspect='equal', xlabel='$x_1$', ylabel='$x_2$')
+    set_spines(ax)  # flow fields and heatmaps are framed
     return artist
 
 
@@ -763,6 +849,7 @@ def plot_dyn_linear_trails(ax: Axes, affine: Affine, *, color=TRUE_COLOR, **kwar
     """Draw trails of affine(x) (`xxm.plot.trail.plot_dyn_trails`)."""
     artists = trail.plot_dyn_trails(ax, _affine_2d(affine), color=color, **kwargs)
     ax.set(xlabel='$x_1$', ylabel='$x_2$')
+    set_spines(ax)  # flow fields and heatmaps are framed
     return artists
 
 
@@ -862,4 +949,22 @@ def plot_dyn_mismatch(
         ),
     )
     ax.set(xlim=xlim, ylim=ylim, aspect='equal', xlabel='$x_1$', ylabel='$x_2$')
+    set_spines(ax)  # flow fields and heatmaps are framed
     return mesh
+
+
+def hide_ticks(ax: Axes, *, axis: Literal['x', 'y', 'both'] = 'both') -> None:
+    """Remove the ticks and tick labels of `ax` along `axis` ('x', 'y' or both)."""
+
+    ax.tick_params(
+        axis=axis,
+        which='both',
+        left=False,
+        right=False,
+        labelleft=False,
+        labelright=False,
+        bottom=False,
+        top=False,
+        labelbottom=False,
+        labeltop=False,
+    )
