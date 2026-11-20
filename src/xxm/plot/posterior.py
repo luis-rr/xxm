@@ -13,9 +13,8 @@ from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 
 from xxm.core.dists.gaussian import TemporalGaussian
-from xxm.core.dists.gridded import GriddedDistribution, TemporalGriddedDistribution
 from xxm.plot import core as plot
-from xxm.plot.gridded import plot_gridded_2d, plot_temporal_gridded_1d
+from xxm.plot import gridded
 
 POSTERIOR_DENSITY_CMAP = LinearSegmentedColormap.from_list(
     'posterior_density',
@@ -44,7 +43,9 @@ def _grid_edges(
     if truth is not None:
         bounds.append(np.asarray(truth))
 
-    low, high = np.min(bounds), np.max(bounds)
+    # the arrays may differ in length, e.g. an upsampled posterior and its truth
+    low = min(float(np.min(values)) for values in bounds)
+    high = max(float(np.max(values)) for values in bounds)
     width = np.median(std) / cells_per_std
     num_cells = int(np.clip(np.ceil((high - low) / width), 1, max_cells))
     return jnp.linspace(low, high, num_cells + 1)
@@ -57,25 +58,31 @@ def plot_density_over_time(
     *,
     truth: jax.Array | None = None,
     cells_per_std: float = 6.0,
+    substeps: int = 4,
 ):
     """Plot one variable's gridded posterior density over time.
 
-    `posterior` is unbatched; `truth` has shape (T,).
+    `posterior` is unbatched; `truth` has shape (T,). The density is drawn on
+    `substeps` interpolated steps per step (`TemporalGaussian.upsample`), so
+    that it moves smoothly between steps, like the mean.
     """
+    fine = posterior.upsample(substeps)
     edges = _grid_edges(
-        posterior,
+        fine,
         variable,
         cells_per_std=cells_per_std,
         truth=truth,
     )
-    grid = TemporalGriddedDistribution.from_gaussian(
-        posterior,
+    grid = gridded.TemporalGriddedDistribution.from_gaussian(
+        fine,
         (edges,),
         variables=(variable,),
     )
-    mesh = plot_temporal_gridded_1d(
+    num_steps = int(fine.lengths.values)
+    mesh = gridded.plot_temporal_gridded_1d_smooth(
         ax,
         grid,
+        time_edges=(np.arange(num_steps + 1) - 0.5) / substeps,
         cmap=POSTERIOR_DENSITY_CMAP,
         rasterized=True,
     )
@@ -99,7 +106,8 @@ def plot_posterior_over_time(
     *,
     symbol: str = 'x',
     titles: list[str] | None = None,
-    cells_per_std: float = 6.0,
+    cells_per_std: float = 5.0,
+    substeps: int = 2,
     figsize=None,
 ):
     """Plot gridded posterior densities over time, one row per variable.
@@ -134,6 +142,7 @@ def plot_posterior_over_time(
             d,
             truth=None if truths is None else truths[k, :, d],
             cells_per_std=cells_per_std,
+            substeps=substeps,
         )
         ax.figure.colorbar(mesh, ax=ax, label='density')
         ax.set(ylabel=rf'${symbol}_{d + 1}$')
@@ -160,29 +169,32 @@ def plot_occupancy_density(
     *,
     truth: jax.Array | None = None,
     cells_per_std: float = 5,
+    substeps: int = 2,
     **kwargs,
 ):
     """Draw the time-averaged posterior density of the first two variables.
 
     `posterior` is unbatched; `truth` has shape (T, 2) and only widens the
-    grid to cover it.
+    grid to cover it. The average includes `substeps` interpolated steps per
+    step (`TemporalGaussian.upsample`), which joins the per-step blobs.
     """
+    fine = posterior.upsample(substeps)
     edges = tuple(
         _grid_edges(
-            posterior,
+            fine,
             d,
             cells_per_std=cells_per_std,
             truth=None if truth is None else truth[:, d],
         )
         for d in range(2)
     )
-    grid = GriddedDistribution.from_gaussian_occupancy(
-        posterior,
+    grid = gridded.GriddedDistribution.from_gaussian_occupancy(
+        fine,
         edges,
         variables=(0, 1),
     )
     kwargs = {'cmap': POSTERIOR_DENSITY_CMAP, 'rasterized': True} | kwargs
-    return plot_gridded_2d(ax, grid, **kwargs)
+    return gridded.plot_gridded_2d_smooth(ax, grid, **kwargs)
 
 
 def plot_occupancy(
@@ -191,6 +203,7 @@ def plot_occupancy(
     *,
     symbol: str = 'x',
     cells_per_std: float = 5,
+    substeps: int = 2,
     ax=None,
     figsize=(
         plot.SINGLE_COLUMN * 0.5,
@@ -210,6 +223,7 @@ def plot_occupancy(
         posterior,
         truth=truth,
         cells_per_std=cells_per_std,
+        substeps=substeps,
     )
 
     if truth is not None:

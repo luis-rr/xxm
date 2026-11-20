@@ -938,6 +938,40 @@ class TemporalGaussian(Temporal[Gaussian]):
         """Gaussian covariance matrices, with padded timesteps cleared."""
         return self.sequences(self.dist.covariance)
 
+    def upsample(self, factor: int) -> typing.Self:
+        r"""Insert `factor - 1` linearly interpolated steps between consecutive steps.
+
+        At time $t + a$, $a = j / \text{factor}$, the means and covariances
+        (or variances) are $(1 - a)$ times those at $t$ plus $a$ times those
+        at $t + 1$; a weighted average of covariances is a covariance. A
+        sequence of $L$ valid steps gets $(L - 1)\,\text{factor} + 1$, and
+        step $i$ sits at time $i / \text{factor}$. This interpolates the
+        marginals, e.g. for display; it is not a posterior between steps.
+        """
+        if factor < 1:
+            raise ValueError(f'factor must be at least 1; got {factor}')
+        axis = self.time_axis
+        weights = jnp.arange(factor) / factor  # (factor,)
+
+        def interpolate(values: jax.Array) -> jax.Array:
+            values = jnp.moveaxis(values, axis, 0)  # (T, ...)
+            a = weights.astype(values.dtype).reshape(
+                (1, factor) + (1,) * (values.ndim - 1)
+            )
+            between = (1 - a) * values[:-1, None] + a * values[1:, None]
+            between = between.reshape((-1, *values.shape[1:]))  # ((T-1) factor, ...)
+            upsampled = jnp.concatenate(
+                [between, values[-1:]]
+            )  # ((T-1) factor + 1, ...)
+            return jnp.moveaxis(upsampled, 0, axis)
+
+        lengths = self.lengths.values
+        upsampled_lengths = jnp.where(lengths > 0, (lengths - 1) * factor + 1, 0)
+        return type(self)(
+            dist=jax.tree.map(interpolate, self.dist),
+            lengths=Lengths(upsampled_lengths),
+        )
+
 
 def _log_det(covariance: jax.Array) -> jax.Array:
     """Compute a positive-definite covariance's log determinant via Cholesky."""

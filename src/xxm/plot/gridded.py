@@ -1,7 +1,9 @@
 """Matplotlib plots for finite gridded probability distributions.
 
 All functions accept unbatched distributions and an explicit Matplotlib Axes.
-Colors represent cell-averaged *probability density*, not cell mass.
+Colors represent cell-averaged *probability density*, not cell mass; the
+`*_smooth` functions place those averages at the cell centers and interpolate
+between them (Gouraud shading).
 The plotting layer does not renormalize or alter the gridded distribution.
 """
 
@@ -27,10 +29,12 @@ __all__ = (
     'plot_gridded_2d_contour',
     'plot_gridded_2d_contourf',
     'plot_gridded_2d_mesh',
+    'plot_gridded_2d_smooth',
     'plot_temporal_gridded_1d',
     'plot_temporal_gridded_1d_contour',
     'plot_temporal_gridded_1d_contourf',
     'plot_temporal_gridded_1d_mesh',
+    'plot_temporal_gridded_1d_smooth',
 )
 
 
@@ -141,6 +145,25 @@ def plot_gridded_2d_mesh(
     )
 
 
+def plot_gridded_2d_smooth(
+    ax: Axes,
+    dist: GriddedDistribution,
+    *args: Any,
+    **kwargs: Any,
+) -> QuadMesh:
+    """Plot 2D cell-average density at cell centers, interpolated between them."""
+    xedges, yedges = _edges_2d(dist)
+    density = np.asarray(dist.density(), dtype=float)
+    return ax.pcolormesh(
+        _centers(xedges),
+        _centers(yedges),
+        density.T,
+        *args,
+        shading='gouraud',
+        **kwargs,
+    )
+
+
 def plot_gridded_2d_contour(
     ax: Axes,
     dist: GriddedDistribution,
@@ -242,6 +265,20 @@ def plot_temporal_gridded_1d_mesh(
     """Plot a 1D marginal density over discrete time as a heatmap."""
     xedges, yedges, density = _temporal_1d_data(dist, time_edges)
     return ax.pcolormesh(xedges, yedges, density, *args, **kwargs)
+
+
+def plot_temporal_gridded_1d_smooth(
+    ax: Axes,
+    dist: TemporalGriddedDistribution,
+    *args: Any,
+    time_edges: ArrayLike | None = None,
+    **kwargs: Any,
+) -> QuadMesh:
+    """Plot a 1D marginal density over time, interpolated between steps and cells."""
+    xedges, yedges, density = _temporal_1d_data(dist, time_edges)
+    return ax.pcolormesh(
+        _centers(xedges), _centers(yedges), density, *args, shading='gouraud', **kwargs
+    )
 
 
 def plot_temporal_gridded_1d_contour(
