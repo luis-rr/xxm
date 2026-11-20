@@ -404,7 +404,6 @@ def plot_seq_2d(
     *,
     desc='observations',
     num_states=None,
-    linewidth=0.75,
     alpha=0.35,
     size=12,
     mark_endpoints=True,
@@ -425,7 +424,6 @@ def plot_seq_2d(
             norm=state_norm(count),
             alpha=0.5,
             edgecolor='none',
-            linewidth=0.5,
             zorder=10,
         )
 
@@ -437,7 +435,7 @@ def plot_seq_2d(
         ax,
         values,
         mark_endpoints=mark_endpoints,
-        **(dict[str, Any](linewidth=linewidth, alpha=alpha) | (line_kwargs or {})),
+        **(dict[str, Any](alpha=alpha) | (line_kwargs or {})),
     )
     ax.set(xlabel=f'{desc} 1', ylabel=f'{desc} 2')
 
@@ -456,7 +454,6 @@ def plot_state_trace_2d(
     *,
     state_colors=None,
     state_zorders=None,
-    linewidth=None,
     **kwargs,
 ):
     """Color each adjacent segment by its label; states has shape (T - 1,)."""
@@ -474,7 +471,6 @@ def plot_state_trace_2d(
             options = (
                 dict[str, Any](
                     colors=[state_colors[label]],
-                    linewidths=linewidth,
                     zorder=(state_zorders or {}).get(label, 1),
                     capstyle='butt',
                 )
@@ -604,7 +600,6 @@ def plot_trace_2d(
     covariance=None,
     *,
     color=INFERRED_COLOR,
-    linewidth=None,
     zorder=3.0,
     covariance_stride=None,
     covariance_scale=2.0,
@@ -646,10 +641,7 @@ def plot_trace_2d(
         ax,
         values,
         mark_endpoints=False,
-        **(
-            dict[str, Any](color=color, linewidth=linewidth, zorder=zorder)
-            | (line_kwargs or {})
-        ),
+        **(dict[str, Any](color=color, zorder=zorder) | (line_kwargs or {})),
     )
 
 
@@ -822,7 +814,6 @@ def plot_dyn_linear_stream(
     cmap=None,
     norm=None,
     density=1.5,
-    linewidth=0.5,
     arrowsize=0.75,
     **kwargs,
 ):
@@ -836,7 +827,6 @@ def plot_dyn_linear_stream(
         cmap=DYNAMICS_CMAP if cmap is None else cmap,
         norm=norm,
         density=density,
-        linewidth=linewidth,
         arrowsize=arrowsize,
         **kwargs,
     )
